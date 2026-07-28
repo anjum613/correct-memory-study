@@ -4,6 +4,7 @@ import subprocess
 from pathlib import Path
 
 from scripts.prepare_smoke_repo import prepare_working_copy
+from cmpilot.repository_manager import run_tests
 
 
 def test_prepare_working_copy_creates_committed_copy_without_changing_template(
@@ -37,3 +38,13 @@ def test_prepare_working_copy_creates_committed_copy_without_changing_template(
         for path in template.rglob("*")
         if path.is_file()
     } == original_contents
+
+
+def test_clean_working_copy_tests_initially_fail_from_not_implemented(tmp_path: Path) -> None:
+    template = Path(__file__).parents[1] / "tasks" / "smoke_test" / "repository"
+    working_copy, _ = prepare_working_copy(template, temporary_root=tmp_path)
+
+    result = run_tests(working_copy)
+
+    assert result.returncode != 0
+    assert "NotImplementedError" in result.stdout + result.stderr

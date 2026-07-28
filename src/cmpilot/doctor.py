@@ -9,9 +9,7 @@ import subprocess
 import sys
 from collections.abc import Mapping
 from typing import TypedDict
-from urllib.error import URLError
-from urllib.parse import urljoin
-from urllib.request import Request, urlopen
+from .vllm_client import probe_models
 
 
 class DoctorReport(TypedDict):
@@ -22,6 +20,7 @@ class DoctorReport(TypedDict):
     nvidia_gpu_available: bool
     vllm_base_url_configured: bool
     vllm_endpoint_responds: bool | None
+    vllm_diagnostic: str | None
 
 
 def command_is_available(command: str) -> bool:
@@ -48,14 +47,8 @@ def gpu_is_available() -> bool:
 
 
 def vllm_endpoint_responds(base_url: str) -> bool:
-    """Probe the vLLM health endpoint with a short timeout."""
-    health_url = urljoin(base_url.rstrip("/") + "/", "health")
-    request = Request(health_url, method="GET")
-    try:
-        with urlopen(request, timeout=2) as response:  # noqa: S310 - explicit user configuration
-            return 200 <= response.status < 300
-    except (OSError, URLError):
-        return False
+    """Compatibility wrapper for the detailed models-endpoint probe."""
+    return probe_models(base_url, timeout=2).ok
 
 
 def collect_report(environment: Mapping[str, str] | None = None) -> DoctorReport:
@@ -64,6 +57,7 @@ def collect_report(environment: Mapping[str, str] | None = None) -> DoctorReport
     base_url = active_environment.get("VLLM_BASE_URL", "").strip()
     configured = bool(base_url)
 
+    probe = probe_models(base_url, timeout=2) if configured else None
     return {
         "python": ".".join(str(part) for part in sys.version_info[:3]),
         "operating_system": platform.system(),
@@ -71,7 +65,8 @@ def collect_report(environment: Mapping[str, str] | None = None) -> DoctorReport
         "singularity_available": command_is_available("singularity"),
         "nvidia_gpu_available": gpu_is_available(),
         "vllm_base_url_configured": configured,
-        "vllm_endpoint_responds": vllm_endpoint_responds(base_url) if configured else None,
+        "vllm_endpoint_responds": probe.ok if probe else None,
+        "vllm_diagnostic": probe.diagnostic if probe else None,
     }
 
 
@@ -89,5 +84,6 @@ def render_report(report: DoctorReport) -> str:
             f"NVIDIA GPU available: {str(report['nvidia_gpu_available']).lower()}",
             f"VLLM_BASE_URL configured: {str(report['vllm_base_url_configured']).lower()}",
             f"Configured vLLM endpoint responds: {endpoint_status}",
+            f"vLLM diagnostic: {report['vllm_diagnostic'] or 'not checked'}",
         ]
     )
