@@ -9,11 +9,8 @@ This repository contains controlled experiments involving coding agents.
 3. Prefer small, reviewable changes.
 4. Run relevant tests after every implementation change.
 5. Show git status and git diff before finishing.
-6. Do not use sudo.
-7. Do not access ~/.ssh or other credential directories.
-8. Do not store passwords, API keys, private hostnames or tokens.
-9. Do not download large model files.
-10. Do not change system software or GPU drivers.
+6. Do not download large model files.
+7. Do not change system software or GPU drivers.
 
 ## Experimental-integrity rules
 
