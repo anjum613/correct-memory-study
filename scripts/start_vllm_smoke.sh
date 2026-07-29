@@ -14,6 +14,8 @@ show_help() {
     '  VLLM_MODEL              Model ID (default: Qwen/Qwen2.5-Coder-1.5B-Instruct).' \
     '  VLLM_HOST               Listen host (default: 127.0.0.1).' \
     '  VLLM_PORT               Listen port (default: 8000).' \
+    '  VLLM_DTYPE              vLLM dtype (default: half).' \
+    '                            Turing-generation Quadro RTX 5000 GPUs do not support bfloat16.' \
     '' \
     'The process remains in the foreground. Press Ctrl-C to stop it cleanly.'
 }
@@ -32,6 +34,7 @@ fi
 VLLM_MODEL="${VLLM_MODEL:-Qwen/Qwen2.5-Coder-1.5B-Instruct}"
 VLLM_HOST="${VLLM_HOST:-127.0.0.1}"
 VLLM_PORT="${VLLM_PORT:-8000}"
+VLLM_DTYPE="${VLLM_DTYPE:-half}"
 
 if [[ ! "$VLLM_PORT" =~ ^[1-9][0-9]{0,4}$ ]] || (( VLLM_PORT > 65535 )); then
   printf 'VLLM_PORT must be a valid TCP port: %s\n' "$VLLM_PORT" >&2
@@ -93,6 +96,7 @@ fi
 mkdir -p "$VLLM_LOG_DIR"
 log_file="$VLLM_LOG_DIR/vllm-smoke-$(date -u +%Y%m%d-%H%M%S).log"
 printf 'Starting vLLM for %s on %s:%s; logs: %s\n' "$VLLM_MODEL" "$VLLM_HOST" "$VLLM_PORT" "$log_file"
+printf 'Selected vLLM dtype: %s\n' "$VLLM_DTYPE"
 printf '%s\n' 'Native tool calling is enabled because mini-SWE-agent DefaultAgent uses a native Bash tool.'
 printf '%s\n' 'Model downloads are disabled; the requested model must already be available in the workstation cache.'
 
@@ -102,5 +106,6 @@ singularity exec --nv "$VLLM_SINGULARITY_IMAGE" \
   vllm serve "$VLLM_MODEL" \
   --host "$VLLM_HOST" \
   --port "$VLLM_PORT" \
+  --dtype "$VLLM_DTYPE" \
   --enable-auto-tool-choice \
   --tool-call-parser hermes 2>&1 | tee "$log_file"

@@ -43,6 +43,7 @@ source .venv/bin/activate
 export VLLM_SINGULARITY_IMAGE=/mnt/data/anjum/cmpilot/images/vllm-v0.6.6.post1.sif
 export VLLM_LOG_DIR=/mnt/data/anjum/vllm-smoke-logs
 export VLLM_MODEL=Qwen/Qwen2.5-Coder-1.5B-Instruct
+export VLLM_DTYPE=half
 scripts/start_vllm_smoke.sh
 ```
 
@@ -52,7 +53,9 @@ prints a reason and does not kill anything. Otherwise it stays in the
 foreground and writes a timestamped log under `VLLM_LOG_DIR`. Stop it cleanly
 with `Ctrl-C` in this terminal. The launcher sets Hugging Face/Transformers
 offline mode, so it will not download a model; the smoke model must already be
-present in the workstation cache.
+present in the workstation cache. The Quadro RTX 5000 requires float16
+(`half`) rather than bfloat16, which its Turing-generation GPU does not
+support.
 
 Terminal 2 — verify and run one smoke test:
 
