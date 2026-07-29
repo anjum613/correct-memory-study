@@ -2,12 +2,21 @@
 
 from __future__ import annotations
 
+import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
 
 EXPECTED_VERSION = "2.4.6"
+SEMANTIC_VERSION = re.compile(r"\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?")
+METADATA_VERSION_QUERY = '''from importlib.metadata import PackageNotFoundError, version
+
+try:
+    print(version("mini-swe-agent"))
+except PackageNotFoundError:
+    raise SystemExit("mini-SWE-agent distribution is not installed")
+'''
 
 
 @dataclass(frozen=True)
@@ -59,7 +68,7 @@ def mini_swe_info(mini_python: str) -> MiniSWEInfo:
         return MiniSWEInfo(False, "", "MINI_SWE_PYTHON or --mini-python is required")
     try:
         result = subprocess.run(
-            [mini_python, "-c", "import minisweagent; print(minisweagent.__version__)"],
+            [mini_python, "-c", METADATA_VERSION_QUERY],
             text=True,
             capture_output=True,
             timeout=10,
@@ -71,9 +80,15 @@ def mini_swe_info(mini_python: str) -> MiniSWEInfo:
     except OSError as error:
         return MiniSWEInfo(False, "", f"could not check mini-SWE-agent: {error}")
 
-    version = result.stdout.strip()
     if result.returncode != 0:
-        return MiniSWEInfo(False, version, result.stderr.strip() or "mini-SWE-agent import failed")
+        return MiniSWEInfo(False, "", result.stderr.strip() or "mini-SWE-agent metadata query failed")
+    version = result.stdout.strip()
+    if not SEMANTIC_VERSION.fullmatch(version):
+        return MiniSWEInfo(
+            False,
+            version,
+            f"mini-SWE-agent metadata query returned invalid semantic version: {version or 'empty output'}",
+        )
     if version != EXPECTED_VERSION:
         return MiniSWEInfo(False, version, f"mini-SWE-agent {EXPECTED_VERSION} required; found {version or 'unknown'}")
     return MiniSWEInfo(True, version, f"mini-SWE-agent {version}")
