@@ -98,7 +98,7 @@ mkdir -p "$HF_HOME"
     printf 'PYTHONNOUSERSITE=%s\n' "$PYTHONNOUSERSITE"
     printf 'python=%s\n' "$(command -v python)"
     python --version
-    vllm --version
+    python -c 'import vllm; print(f"vllm={vllm.__version__}")'
 } > "$ARTIFACT_DIR/environment.txt"
 env | awk -F= '$1 ~ /^SLURM_/ {print}' | sort > "$ARTIFACT_DIR/slurm-environment.txt"
 python -m pip freeze | sort > "$ARTIFACT_DIR/pip-freeze.txt"
