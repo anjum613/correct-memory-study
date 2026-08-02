@@ -135,7 +135,6 @@ python "$PROJECT/scripts/vllm_server_smoke_client.py" \
     2> "$ARTIFACT_DIR/client.stderr.log"
 printf 'client_finished_at=%s\n' "$(date --iso-8601=seconds)" >> "$ARTIFACT_DIR/timestamps.txt"
 
-nvidia-smi > "$ARTIFACT_DIR/nvidia-smi-serving.txt"
 terminate_server
 nvidia-smi > "$ARTIFACT_DIR/nvidia-smi-after.txt"
 printf 'server_cleanup_finished_at=%s\n' "$(date --iso-8601=seconds)" >> "$ARTIFACT_DIR/timestamps.txt"

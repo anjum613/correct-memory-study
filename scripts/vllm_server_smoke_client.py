@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import re
+import subprocess
 import sys
 import time
 import traceback
@@ -41,6 +42,48 @@ def process_alive(pid: int) -> bool:
     except PermissionError:
         return True
     return True
+
+
+def probe_health(health_url: str) -> dict[str, object]:
+    """Accept a vLLM health response without assuming it is JSON."""
+    request = Request(health_url, method="GET")
+    try:
+        with urlopen(request, timeout=5) as response:
+            body = response.read().decode("utf-8", errors="replace")
+            status_code = response.status
+            headers = dict(response.headers.items())
+    except HTTPError as error:
+        body = error.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"Health check failed: {error.code} {body!r}") from error
+
+    health_record: dict[str, object] = {
+        "status_code": status_code,
+        "headers": headers,
+        "content_type": headers.get("content-type") or headers.get("Content-Type"),
+        "body": body,
+        "response_text": body,
+    }
+    if not 200 <= status_code < 300:
+        raise RuntimeError(f"Health check failed: {status_code} {body!r}")
+    return health_record
+
+
+def capture_nvidia_smi(path: Path) -> None:
+    """Write an immutable diagnostic snapshot while the model is serving."""
+    completed = subprocess.run(
+        ["nvidia-smi"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    output = completed.stdout
+    if completed.stderr:
+        output += "\n--- stderr ---\n" + completed.stderr
+    with path.open("x", encoding="utf-8") as handle:
+        handle.write(output)
+    if completed.returncode:
+        raise RuntimeError(f"nvidia-smi failed with exit code {completed.returncode}")
+
 
 
 def request_json(
@@ -100,21 +143,25 @@ def main() -> int:
                 raise RuntimeError("server process exited before becoming healthy")
             health_attempts += 1
             try:
-                health_status, _ = request_json("GET", health_url)
-                if 200 <= health_status < 300:
-                    break
-            except (URLError, TimeoutError, json.JSONDecodeError):
+                health_record = probe_health(health_url)
+                break
+            except (URLError, TimeoutError) as error:
+                result["last_health_request_error"] = str(error)
                 pass
             if time.monotonic() >= deadline:
                 raise RuntimeError("server did not become healthy within startup timeout")
             time.sleep(2)
 
         healthy_at = timestamp()
+        capture_nvidia_smi(artifact_dir / "nvidia-smi-serving.txt")
+        write_json_once(artifact_dir / "health_response.json", health_record)
         result.update(
             server_healthy=True,
             health_attempts=health_attempts,
             server_healthy_at_utc=healthy_at,
             server_startup_seconds=time.time() - args.server_launch_epoch,
+            health=health_record,
+            nvidia_smi_during_serving_captured=True,
         )
 
         models_status, models_body = request_json("GET", args.base_url + "/v1/models")

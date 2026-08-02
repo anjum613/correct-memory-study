@@ -39,6 +39,21 @@ It binds only to 127.0.0.1:8000, waits up to 180 seconds for health, checks
 /v1/models, sends one /v1/chat/completions request, and validates safe_divide,
 ValueError, and a zero-divisor check.
 
+The health probe accepts every HTTP 2xx response, including vLLM's plain-text
+response. It records the status, response headers, and body without attempting
+JSON decoding, then captures the during-serving NVIDIA-SMI snapshot before
+requesting /v1/models.
+
+## Harness history
+
+- Job 24570 failed before server launch because its logging harness invoked the
+  vLLM CLI with an invalid version command. It was not a GPU, model, or vLLM
+  serving failure.
+- Job 24578 started and loaded the server successfully, but its client harness
+  incorrectly attempted to JSON-decode vLLM's plain-text HTTP 200 health
+  response. It was not a GPU, model, or vLLM serving failure.
+
+
 ## Artifacts
 
 Each job writes an immutable directory:
