@@ -29,6 +29,7 @@ def test_adapter_preflight_batch_uses_absolute_interpreters_without_activation()
     assert "conda activate" not in contents
     assert "conda run" not in contents
     assert "conda info" not in contents
+    assert '"$MINI_PY" -m pip' not in contents
     assert "command -v conda" not in contents
 
 
