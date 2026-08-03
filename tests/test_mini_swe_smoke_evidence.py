@@ -8,15 +8,15 @@ from scripts.mini_swe_smoke_evidence import gpu_evidence
 ROOT = Path(__file__).parents[1]
 
 
-def test_agent_config_has_exact_limits_and_loopback_model() -> None:
+def test_agent_config_has_exact_limits_without_endpoint_metadata() -> None:
     config_path = ROOT / "configs" / "agent" / "mini_swe_agent_smoke.yaml"
     contents = config_path.read_text(encoding="utf-8")
 
     assert "step_limit: 15" in contents
     assert "wall_time_limit_seconds: 450" in contents
     assert "timeout: 60" in contents
-    assert "model_name: openai/Qwen/Qwen2.5-Coder-1.5B-Instruct" in contents
-    assert "api_base: http://127.0.0.1:8000/v1" in contents
+    assert "model_name:" not in contents
+    assert "api_base:" not in contents
     assert "temperature: 0" in contents
     lowered = contents.lower()
     assert "memory" not in lowered

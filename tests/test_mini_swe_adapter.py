@@ -2,10 +2,18 @@ from __future__ import annotations
 
 import subprocess
 from unittest.mock import patch
+from pathlib import Path
 
 import pytest
 
-from cmpilot.mini_swe_adapter import ADAPTER_SOURCE, EXPECTED_VERSION, METADATA_VERSION_QUERY, mini_swe_info
+from cmpilot.mini_swe_adapter import (
+    ADAPTER_SOURCE,
+    EXPECTED_VERSION,
+    METADATA_VERSION_QUERY,
+    RUNTIME_CONFIG_MODULE,
+    mini_swe_info,
+    write_adapter,
+)
 
 
 def completed_process(returncode: int = 0, stdout: str = "", stderr: str = "") -> subprocess.CompletedProcess[str]:
@@ -78,3 +86,23 @@ def test_adapter_matches_the_shipped_text_action_config_and_smoke_limits() -> No
     assert 'CMPILOT_AGENT_CONFIG_SOURCE' in ADAPTER_SOURCE
     assert '"api_key"' not in ADAPTER_SOURCE
     assert "local-smoke-placeholder" not in ADAPTER_SOURCE
+
+
+def test_adapter_uses_strict_config_boundary_before_agent_initialization() -> None:
+    assert "build_mini_swe_config" in ADAPTER_SOURCE
+    assert "deterministic_json(raw_mini_config)" in ADAPTER_SOURCE
+    assert "yaml.safe_dump" in ADAPTER_SOURCE
+    assert "yaml.safe_load" in ADAPTER_SOURCE
+    assert "AgentConfig(**mini_config" in ADAPTER_SOURCE
+    assert "LocalEnvironmentConfig(**mini_config" in ADAPTER_SOURCE
+    assert "LitellmTextbasedModelConfig(**mini_config" in ADAPTER_SOURCE
+    assert 'emit_event("agent_initialized")' in ADAPTER_SOURCE
+    assert 'emit_event("model_request_attempted")' in ADAPTER_SOURCE
+    assert "recursive_merge" not in ADAPTER_SOURCE
+
+
+def test_write_adapter_preserves_the_canonical_runtime_helper(tmp_path: Path) -> None:
+    adapter = tmp_path / "mini_swe_adapter.py"
+    write_adapter(adapter)
+    helper = tmp_path / RUNTIME_CONFIG_MODULE
+    assert adapter.read_text(encoding="utf-8") == ADAPTER_SOURCE

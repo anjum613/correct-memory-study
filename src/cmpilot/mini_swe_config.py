@@ -1,0 +1,259 @@
+"""Strict, deterministic configuration handling for mini-SWE-agent 2.4.6."""
+
+from __future__ import annotations
+
+import json
+import math
+import re
+from dataclasses import dataclass, fields, is_dataclass
+from enum import Enum
+from pathlib import Path, PurePath
+from typing import Any
+
+
+class PlainDataError(ValueError):
+    """Raised when a value cannot safely cross the configuration boundary."""
+
+
+class MiniSWEConfigError(ValueError):
+    """Raised when a mini-SWE configuration contains unsupported structure."""
+
+
+@dataclass(frozen=True)
+class MiniSWEEndpointSettings:
+    """OpenAI-compatible endpoint settings, kept separate from run metadata."""
+
+    base_url: str
+    model: str
+    request_timeout_seconds: float | None = None
+    max_retries: int | None = None
+
+
+SUPPORTED_TOP_LEVEL_FIELDS = frozenset({"agent", "environment", "model"})
+SUPPORTED_AGENT_FIELDS = frozenset(
+    {
+        "system_template",
+        "instance_template",
+        "step_limit",
+        "cost_limit",
+        "wall_time_limit_seconds",
+        "max_consecutive_format_errors",
+        "output_path",
+    }
+)
+SUPPORTED_ENVIRONMENT_FIELDS = frozenset({"cwd", "env", "timeout"})
+SUPPORTED_MODEL_FIELDS = frozenset(
+    {
+        "model_name",
+        "model_kwargs",
+        "litellm_model_registry",
+        "set_cache_control",
+        "cost_tracking",
+        "format_error_template",
+        "observation_template",
+        "multimodal_regex",
+        "action_regex",
+    }
+)
+_SENSITIVE_KEY = re.compile(
+    r"(?:^|[_-])(?:api[_-]?key|authorization|token|password|secret)(?:$|[_-])", re.IGNORECASE
+)
+
+
+def _type_name(value: object) -> str:
+    value_type = type(value)
+    return f"{value_type.__module__}.{value_type.__qualname__}"
+
+
+def _child_path(path: str, key: str) -> str:
+    if key.isidentifier():
+        return f"{path}.{key}"
+    return f"{path}[{json.dumps(key)}]"
+
+
+def _is_pydantic_model(value: object) -> bool:
+    """Recognize Pydantic v2 models without making Pydantic a cmpilot dependency."""
+    return callable(getattr(value, "model_dump", None)) and isinstance(
+        getattr(type(value), "model_fields", None), dict
+    )
+
+
+def to_plain_data(value: Any, path: str = "$") -> Any:
+    """Convert supported structured values to JSON/YAML-safe basic data.
+
+    Path, Enum, dataclass, Pydantic-model, and tuple values are converted
+    explicitly. All other custom values are rejected at their exact path.
+    """
+    if value is None or isinstance(value, (str, bool)):
+        return value
+    if isinstance(value, int):
+        return int(value)
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise PlainDataError(f"{path}: non-finite float {_type_name(value)} is not supported")
+        return float(value)
+    if isinstance(value, PurePath):
+        return str(value)
+    if isinstance(value, Enum):
+        return to_plain_data(value.value, path)
+    if callable(getattr(value, "get_secret_value", None)):
+        raise PlainDataError(f"{path}: secret wrapper {_type_name(value)} is not supported")
+    if is_dataclass(value) and not isinstance(value, type):
+        return {
+            field.name: to_plain_data(getattr(value, field.name), _child_path(path, field.name))
+            for field in fields(value)
+        }
+    if _is_pydantic_model(value):
+        return to_plain_data(value.model_dump(mode="python"), path)
+    if isinstance(value, dict):
+        result: dict[str, Any] = {}
+        for key, item in value.items():
+            if not isinstance(key, str):
+                raise PlainDataError(
+                    f"{path}: dictionary key {key!r} has unsupported type {_type_name(key)}; expected builtins.str"
+                )
+            result[key] = to_plain_data(item, _child_path(path, key))
+        return result
+    if isinstance(value, (list, tuple)):
+        return [to_plain_data(item, f"{path}[{index}]") for index, item in enumerate(value)]
+    raise PlainDataError(f"{path}: unsupported value type {_type_name(value)}")
+
+
+def validate_plain_data(value: Any, path: str = "$") -> None:
+    """Require only null, scalar primitives, lists, and string-keyed dictionaries."""
+    if value is None or isinstance(value, (str, bool)):
+        return
+    if isinstance(value, int):
+        return
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise PlainDataError(f"{path}: non-finite float {_type_name(value)} is not supported")
+        return
+    if isinstance(value, list):
+        for index, item in enumerate(value):
+            validate_plain_data(item, f"{path}[{index}]")
+        return
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if not isinstance(key, str):
+                raise PlainDataError(
+                    f"{path}: dictionary key {key!r} has unsupported type {_type_name(key)}; expected builtins.str"
+                )
+            validate_plain_data(item, _child_path(path, key))
+        return
+    raise PlainDataError(f"{path}: unsupported value type {_type_name(value)}")
+
+
+def describe_data_types(value: Any, path: str = "$") -> dict[str, str]:
+    """Return the Python type observed at every reachable configuration path."""
+    result = {path: _type_name(value)}
+    if isinstance(value, dict):
+        for key, item in value.items():
+            key_path = _child_path(path, key) if isinstance(key, str) else f"{path}[key={key!r}]"
+            result.update(describe_data_types(item, key_path))
+    elif isinstance(value, (list, tuple)):
+        for index, item in enumerate(value):
+            result.update(describe_data_types(item, f"{path}[{index}]"))
+    elif is_dataclass(value) and not isinstance(value, type):
+        for field in fields(value):
+            result.update(describe_data_types(getattr(value, field.name), _child_path(path, field.name)))
+    elif _is_pydantic_model(value):
+        result.update(describe_data_types(value.model_dump(mode="python"), path))
+    return result
+
+
+def deterministic_json(value: Any) -> tuple[Any, str]:
+    """Canonicalize, validate, serialize, parse, and compare a JSON structure."""
+    plain = to_plain_data(value)
+    validate_plain_data(plain)
+    text = json.dumps(plain, indent=2, sort_keys=True, allow_nan=False) + "\n"
+    parsed = json.loads(text)
+    validate_plain_data(parsed)
+    if json.dumps(parsed, sort_keys=True, allow_nan=False) != json.dumps(plain, sort_keys=True, allow_nan=False):
+        raise PlainDataError("$: JSON round trip changed the configuration structure")
+    return plain, text
+
+
+def assert_no_sensitive_keys(value: Any, path: str = "$") -> None:
+    """Reject secret-bearing fields before a configuration artifact is written."""
+    validate_plain_data(value, path)
+    if isinstance(value, dict):
+        for key, item in value.items():
+            child = _child_path(path, key)
+            if _SENSITIVE_KEY.search(key):
+                raise PlainDataError(f"{child}: sensitive configuration keys must not be persisted")
+            assert_no_sensitive_keys(item, child)
+    elif isinstance(value, list):
+        for index, item in enumerate(value):
+            assert_no_sensitive_keys(item, f"{path}[{index}]")
+
+
+def _merge_dicts(*layers: dict[str, Any]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for layer in layers:
+        for key, value in layer.items():
+            if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+                result[key] = _merge_dicts(result[key], value)
+            elif isinstance(value, dict):
+                result[key] = _merge_dicts(value)
+            else:
+                result[key] = value
+    return result
+
+
+def _require_supported_fields(section: str, value: Any, supported: frozenset[str]) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise MiniSWEConfigError(f"$.{section}: expected dictionary, found {_type_name(value)}")
+    unknown = sorted(set(value) - supported)
+    if unknown:
+        raise MiniSWEConfigError(f"$.{section}: unsupported mini-SWE-agent 2.4.6 fields: {unknown}")
+    return value
+
+
+def build_mini_swe_config(
+    base_config: dict[str, Any],
+    overlay_config: dict[str, Any],
+    *,
+    endpoint: MiniSWEEndpointSettings,
+    repository: Path,
+    trajectory: Path,
+    agent_environment: dict[str, str],
+) -> dict[str, Any]:
+    """Build only the fields accepted by the selected 2.4.6 classes."""
+    for name, layer in (("base", base_config), ("overlay", overlay_config)):
+        if not isinstance(layer, dict):
+            raise MiniSWEConfigError(f"$.{name}: expected dictionary, found {_type_name(layer)}")
+        unknown = sorted(set(layer) - SUPPORTED_TOP_LEVEL_FIELDS)
+        if unknown:
+            raise MiniSWEConfigError(f"$.{name}: unsupported top-level fields: {unknown}")
+
+    merged = _merge_dicts(base_config, overlay_config)
+    agent = dict(_require_supported_fields("agent", merged.get("agent", {}), SUPPORTED_AGENT_FIELDS))
+    environment = dict(
+        _require_supported_fields("environment", merged.get("environment", {}), SUPPORTED_ENVIRONMENT_FIELDS)
+    )
+    model = dict(_require_supported_fields("model", merged.get("model", {}), SUPPORTED_MODEL_FIELDS))
+
+    agent["output_path"] = trajectory
+    environment["cwd"] = str(repository)
+    configured_environment = environment.get("env", {})
+    if not isinstance(configured_environment, dict):
+        raise MiniSWEConfigError("$.environment.env: expected dictionary")
+    environment["env"] = configured_environment | agent_environment
+
+    model["model_name"] = "openai/" + endpoint.model
+    model_kwargs = model.get("model_kwargs", {})
+    if not isinstance(model_kwargs, dict):
+        raise MiniSWEConfigError("$.model.model_kwargs: expected dictionary")
+    endpoint_kwargs: dict[str, Any] = {
+        "api_base": endpoint.base_url,
+        "temperature": 0,
+        "drop_params": True,
+    }
+    if endpoint.request_timeout_seconds is not None:
+        endpoint_kwargs["timeout"] = endpoint.request_timeout_seconds
+    if endpoint.max_retries is not None:
+        endpoint_kwargs["max_retries"] = endpoint.max_retries
+    model["model_kwargs"] = model_kwargs | endpoint_kwargs
+
+    return {"agent": agent, "environment": environment, "model": model}

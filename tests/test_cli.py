@@ -22,3 +22,22 @@ def test_smoke_dry_run_never_calls_live_runner() -> None:
 
     dry.assert_called_once()
     run.assert_not_called()
+
+
+def test_adapter_preflight_cli_uses_fixed_dummy_endpoint(tmp_path) -> None:
+    artifacts = tmp_path / "artifacts"
+    with patch("cmpilot.__main__.run_adapter_preflight", return_value=0) as preflight:
+        result = main(
+            [
+                "adapter-preflight",
+                "--mini-python",
+                "/mini/python",
+                "--artifact-dir",
+                str(artifacts),
+            ]
+        )
+
+    assert result == 0
+    config = preflight.call_args.args[0]
+    assert config.base_url == "http://127.0.0.1:9/v1"
+    assert config.mini_python == "/mini/python"
