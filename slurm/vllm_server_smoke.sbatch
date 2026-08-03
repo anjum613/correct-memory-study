@@ -110,6 +110,7 @@ nvidia-smi > "$ARTIFACT_DIR/nvidia-smi-before.txt"
 nvidia-smi topo -m > "$ARTIFACT_DIR/nvidia-smi-topology.txt"
 printf '%q ' vllm serve "$MODEL" --revision "$REVISION" --host 127.0.0.1 --port 8000 \
     --dtype bfloat16 --max-model-len 4096 --gpu-memory-utilization 0.70 \
+    --guided-decoding-backend lm-format-enforcer \
     > "$ARTIFACT_DIR/server-command.txt"
 printf '\n' >> "$ARTIFACT_DIR/server-command.txt"
 
@@ -122,6 +123,7 @@ setsid vllm serve "$MODEL" \
     --dtype bfloat16 \
     --max-model-len 4096 \
     --gpu-memory-utilization 0.70 \
+    --guided-decoding-backend lm-format-enforcer \
     > "$ARTIFACT_DIR/server.stdout.log" \
     2> "$ARTIFACT_DIR/server.stderr.log" &
 SERVER_PID=$!
