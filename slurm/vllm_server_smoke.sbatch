@@ -80,10 +80,16 @@ trap on_exit EXIT
 hostname -f > "$ARTIFACT_DIR/hostname.txt"
 git -C "$PROJECT" rev-parse HEAD > "$ARTIFACT_DIR/git-commit.txt"
 git -C "$PROJECT" --no-pager status --short --branch > "$ARTIFACT_DIR/git-status.txt"
-module purge
-module list > "$ARTIFACT_DIR/module-list.txt" 2>&1
+# shellcheck disable=SC1091
+source "$PROJECT/scripts/vllm_smoke_batch_bootstrap.sh"
+if vllm_smoke_bootstrap "$ARTIFACT_DIR" "$VENV"; then
+    :
+else
+    bootstrap_status=$?
+    printf "bootstrap_exit_status=%s\n" "$bootstrap_status" >> "$ARTIFACT_DIR/batch-shell-preflight.txt"
+    exit "$bootstrap_status"
+fi
 
-source "$VENV/bin/activate"
 export HF_HOME=/home/s224049759/model-cache/huggingface
 export HF_HUB_DISABLE_TELEMETRY=1
 export TOKENIZERS_PARALLELISM=false
