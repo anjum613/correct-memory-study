@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 
@@ -30,6 +31,7 @@ def test_adapter_preflight_batch_uses_absolute_interpreters_without_activation()
     assert "conda run" not in contents
     assert "conda info" not in contents
     assert '"$MINI_PY" -m pip' not in contents
+    assert re.search(r"\bpip\b", contents, flags=re.IGNORECASE) is None
     assert "command -v conda" not in contents
 
 

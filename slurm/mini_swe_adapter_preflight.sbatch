@@ -105,14 +105,20 @@ for config_class in (AgentConfig, LocalEnvironmentConfig, LitellmTextbasedModelC
     print("extra:", config_class.model_config.get("extra"))
 PY
 
-"$MINI_PY" - <<'PY' | LC_ALL=C sort > "$ARTIFACT_DIR/pip-freeze-agent.txt"
+"$MINI_PY" - <<'PY' | LC_ALL=C sort > "$ARTIFACT_DIR/installed-packages-agent.txt"
 from importlib.metadata import distributions
 
 for distribution in distributions():
     if name := distribution.metadata.get("Name"):
         print(f"{name}=={distribution.version}")
 PY
-"$CMPILOT_PY" -m pip freeze | LC_ALL=C sort > "$ARTIFACT_DIR/pip-freeze-cmpilot.txt"
+"$CMPILOT_PY" - <<'PY' | LC_ALL=C sort > "$ARTIFACT_DIR/installed-packages-cmpilot.txt"
+from importlib.metadata import distributions
+
+for distribution in distributions():
+    if name := distribution.metadata.get("Name"):
+        print(f"{name}=={distribution.version}")
+PY
 
 printf '%q ' "$CMPILOT_PY" -m cmpilot adapter-preflight \
     --mini-python "$MINI_PY" \
