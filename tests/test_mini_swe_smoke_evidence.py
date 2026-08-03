@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from scripts.mini_swe_smoke_evidence import gpu_evidence
 
 
 ROOT = Path(__file__).parents[1]
+GPU_SCRIPT = ROOT / "slurm" / "mini_swe_agent_smoke.sbatch"
 
 
 def test_agent_config_has_exact_limits_without_endpoint_metadata() -> None:
@@ -21,6 +23,21 @@ def test_agent_config_has_exact_limits_without_endpoint_metadata() -> None:
     lowered = contents.lower()
     assert "memory" not in lowered
     assert "reference patch" not in lowered
+
+    batch = GPU_SCRIPT.read_text(encoding="utf-8")
+    for executable in ("CMPILOT_PY", "MINI_PY", "VLLM_PY", "VLLM_BIN"):
+        assert f'test -x "${executable}"' in batch
+    assert "UV_BIN" not in batch
+    assert re.search(r"\bpip\b", batch, flags=re.IGNORECASE) is None
+    assert "conda activate" not in batch
+    assert "conda run" not in batch
+    assert "conda info" not in batch
+    assert "command -v conda" not in batch
+    assert batch.count("record_installed_packages") == 4
+    assert "from importlib.metadata import distributions" in batch
+    assert "installed-packages-vllm.txt" in batch
+    assert "installed-packages-agent.txt" in batch
+    assert "installed-packages-cmpilot.txt" in batch
 
 
 def test_gpu_evidence_reports_peak_observed_memory(tmp_path: Path) -> None:

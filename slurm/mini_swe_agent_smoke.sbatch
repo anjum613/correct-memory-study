@@ -19,7 +19,6 @@ CMPILOT_PY=/home/s224049759/environments/cmpilot-conda/bin/python
 MINI_PY=/home/s224049759/environments/mini-swe-agent-smoke/bin/python
 VLLM_PY=/home/s224049759/environments/vllm-smoke/bin/python
 VLLM_BIN=/home/s224049759/environments/vllm-smoke/bin/vllm
-UV_BIN=/home/s224049759/.local/bin/uv
 ARTIFACT_ROOT=/home/s224049759/run-artifacts/mini-swe-smoke-3
 MODEL=Qwen/Qwen2.5-Coder-1.5B-Instruct
 REVISION=2e1fd397ee46e1388853d2af2c993145b0f1098a
@@ -95,6 +94,18 @@ record_agent_cleanup() {
     printf 'no_agent_process_remains\n' >> "$ARTIFACT_DIR/process-cleanup.txt"
 }
 
+record_installed_packages() {
+    local interpreter=$1
+    local output_path=$2
+    "$interpreter" - <<'PY' | LC_ALL=C sort > "$output_path"
+from importlib.metadata import distributions
+
+for distribution in distributions():
+    if name := distribution.metadata.get("Name"):
+        print(f"{name}=={distribution.version}")
+PY
+}
+
 finalize_result() {
     local script_status=$1
     "$CMPILOT_PY" "$PROJECT/scripts/mini_swe_smoke_evidence.py" finalize \
@@ -133,13 +144,11 @@ test -x "$CMPILOT_PY"
 test -x "$MINI_PY"
 test -x "$VLLM_PY"
 test -x "$VLLM_BIN"
-test -x "$UV_BIN"
 {
     printf 'CMPILOT_PY=%s\n' "$(readlink -f "$CMPILOT_PY")"
     printf 'MINI_PY=%s\n' "$(readlink -f "$MINI_PY")"
     printf 'VLLM_PY=%s\n' "$(readlink -f "$VLLM_PY")"
     printf 'VLLM_BIN=%s\n' "$(readlink -f "$VLLM_BIN")"
-    printf 'UV_BIN=%s\n' "$(readlink -f "$UV_BIN")"
 } > "$ARTIFACT_DIR/executable-paths.txt"
 {
     "$CMPILOT_PY" --version
@@ -181,10 +190,9 @@ export no_proxy=127.0.0.1,localhost
 
 "$VLLM_PY" "$PROJECT/scripts/check_vllm_guided_decoding_deps.py" \
     > "$ARTIFACT_DIR/guided-decoding-dependency-check.txt" 2>&1
-"$VLLM_PY" -m pip freeze | sort > "$ARTIFACT_DIR/pip-freeze-vllm.txt"
-"$UV_BIN" pip check --python "$MINI_PY" > "$ARTIFACT_DIR/agent-environment-check.txt" 2>&1
-"$UV_BIN" pip freeze --python "$MINI_PY" | sort > "$ARTIFACT_DIR/pip-freeze-agent.txt"
-"$CMPILOT_PY" -m pip freeze | sort > "$ARTIFACT_DIR/pip-freeze-cmpilot.txt"
+record_installed_packages "$VLLM_PY" "$ARTIFACT_DIR/installed-packages-vllm.txt"
+record_installed_packages "$MINI_PY" "$ARTIFACT_DIR/installed-packages-agent.txt"
+record_installed_packages "$CMPILOT_PY" "$ARTIFACT_DIR/installed-packages-cmpilot.txt"
 "$MINI_PY" -c "from importlib.metadata import version; print(version('mini-swe-agent'))" \
     > "$ARTIFACT_DIR/agent-version.txt"
 "$CMPILOT_PY" -c "from importlib.metadata import version; print(version('cmpilot'))" \
