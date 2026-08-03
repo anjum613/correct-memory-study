@@ -105,6 +105,8 @@ python -m pip freeze | sort > "$ARTIFACT_DIR/pip-freeze.txt"
 printf '%s\n' "$REVISION" > "$ARTIFACT_DIR/model-revision.txt"
 printf '%s\n' "generation-config=vllm unsupported by vLLM 0.6.1.post2 CLI; request uses temperature=0" \
     > "$ARTIFACT_DIR/compatibility-note.txt"
+python "$PROJECT/scripts/check_vllm_guided_decoding_deps.py" \
+    > "$ARTIFACT_DIR/guided-decoding-dependency-check.txt" 2>&1
 
 nvidia-smi > "$ARTIFACT_DIR/nvidia-smi-before.txt"
 nvidia-smi topo -m > "$ARTIFACT_DIR/nvidia-smi-topology.txt"
