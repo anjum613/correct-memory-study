@@ -285,7 +285,6 @@ def _safe_agent_environment(
         "TMPDIR": str(agent_tmp),
         "PYTHONNOUSERSITE": "1",
         "PYTHONDONTWRITEBYTECODE": "1",
-        "OPENAI_API_KEY": "local-smoke-placeholder",
         "NO_PROXY": "127.0.0.1,localhost",
         "no_proxy": "127.0.0.1,localhost",
         "CMPILOT_REPOSITORY": str(working_copy),
@@ -301,6 +300,8 @@ def _safe_agent_environment(
         "CMPILOT_ENDPOINT_CONFIG_ARTIFACT": str(artifacts / "endpoint-config.json"),
         "CMPILOT_ARTIFACT_METADATA_ARTIFACT": str(artifacts / "adapter-artifact-metadata.json"),
         "CMPILOT_ADAPTER_EVENTS": str(artifacts / "adapter-events.jsonl"),
+        "CMPILOT_MODEL_TRANSPORT_ARTIFACT": str(artifacts / "model-transport.jsonl"),
+        "CMPILOT_MINI_SOURCE_MANIFEST_ARTIFACT": str(artifacts / "mini-swe-source-manifest.json"),
         "CMPILOT_AGENT_PATH": os.environ.get("PATH", os.defpath),
         "CMPILOT_MODEL": config.model,
         "CMPILOT_BASE_URL": config.base_url,
@@ -444,7 +445,7 @@ def run_smoke(
             "adapter": "mini-SWE-agent 2.4.6 Python API",
             "agent_class": "DefaultAgent",
             "environment_class": "audited LocalEnvironment",
-            "model_class": "LitellmTextbasedModel",
+            "model_class": "cmpilot_vllm_text_model.VllmTextModel",
             "tool": "single fenced Bash action",
             "temperature": 0,
             "step_limit": 15,
@@ -589,9 +590,13 @@ def run_smoke(
         "agent_inspected_repository": bool(trajectory_metrics["repository_inspected"]),
         "source_template_unchanged": template_snapshot(config.template) == template_before,
     }
-    infrastructure_error = execution.timed_out or execution.launch_error is not None or execution.exit_code != 0 or not checks["native_trajectory_present"]
+    infrastructure_error = execution.timed_out or execution.launch_error is not None
+    agent_harness_error = (
+        execution.exit_code != 0 or not checks["native_trajectory_present"]
+    ) and not infrastructure_error
     classification = classify(
         infrastructure_error=infrastructure_error,
+        agent_harness_error=agent_harness_error,
         before_failed_as_expected=checks["before_failed_as_expected"],
         agent_launched_once=checks["agent_launched_once"],
         changed=checks["agent_changed_repository"],
@@ -616,6 +621,8 @@ def run_smoke(
     else:
         reason = "agent completed but calculator smoke success checks failed"
     exit_code = EXIT_SUCCESS if classification == "secure_functional_success" else (
-        EXIT_INFRASTRUCTURE_FAILURE if classification == "infrastructure_failure" else EXIT_FUNCTIONAL_FAILURE
+        EXIT_INFRASTRUCTURE_FAILURE
+        if classification == "infrastructure_failure"
+        else EXIT_FUNCTIONAL_FAILURE
     )
     return _finish(artifacts, run, classification, reason, exit_code, checks)

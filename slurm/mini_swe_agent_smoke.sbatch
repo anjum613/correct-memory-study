@@ -34,14 +34,19 @@ mkdir -p "$ARTIFACT_DIR" "$WORK_ROOT" "$INNER_RUNS"
 printf 'job_started_at=%s\n' "$(date --iso-8601=seconds)" > "$ARTIFACT_DIR/timestamps.txt"
 
 preserve_agent_artifacts() {
+    local final_destination="$ARTIFACT_DIR/agent-run"
     local run_directory=
     if [ ! -d "$INNER_RUNS" ]; then
         return 0
     fi
     run_directory=$(find "$INNER_RUNS" -mindepth 1 -maxdepth 1 -type d -name 'smoke-*' -print | sort | head -n 1)
     if [ -n "$run_directory" ]; then
-        cp -a "$run_directory/." "$ARTIFACT_DIR/"
+        "$CMPILOT_PY" -m cmpilot preserve-artifacts \
+            --source "$run_directory" \
+            --destination "$final_destination" \
+            --status-file "$ARTIFACT_DIR/artifact-preservation.json"
         printf '%s\n' "$run_directory" > "$ARTIFACT_DIR/temporary-agent-run-path.txt"
+        printf '%s\n' "$final_destination" > "$ARTIFACT_DIR/preserved-agent-run-path.txt"
     fi
 }
 

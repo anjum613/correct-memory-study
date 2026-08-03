@@ -14,6 +14,11 @@ from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from cmpilot.outcome_classifier import (
+    classification_dimensions,
+    correct_post_server_classification,
+)
+
 
 MODEL_ID = "Qwen/Qwen2.5-Coder-1.5B-Instruct"
 MODEL_REVISION = "2e1fd397ee46e1388853d2af2c993145b0f1098a"
@@ -167,16 +172,38 @@ def gpu_evidence(artifact_dir: Path) -> dict[str, object]:
 
 def finalize(args: argparse.Namespace) -> int:
     artifact_dir: Path = args.artifact_dir
-    run = load_json(artifact_dir / "run.json")
+    agent_dir = artifact_dir / "agent-run"
+    if not agent_dir.is_dir():
+        agent_dir = artifact_dir
+    run = load_json(agent_dir / "run.json")
     probe = load_json(artifact_dir / "server-probe.json")
     cleanup_text = (artifact_dir / "process-cleanup.txt").read_text(encoding="utf-8") if (
         artifact_dir / "process-cleanup.txt"
     ).is_file() else ""
     clean_shutdown = "graceful_termination_confirmed" in cleanup_text
     no_process_remained = "no_server_process_remains" in cleanup_text and "no_agent_process_remains" in cleanup_text
-    classification = run.get("final_classification", "infrastructure_failure")
-    functional_success = classification == "secure_functional_success"
     server_success = probe.get("status") == "passed"
+    adapter_events = (
+        (agent_dir / "adapter-events.jsonl").read_text(encoding="utf-8")
+        if (agent_dir / "adapter-events.jsonl").is_file()
+        else ""
+    )
+    agent_initialized = '"event": "agent_initialized"' in adapter_events
+    reported_classification = run.get("final_classification", "infrastructure_failure")
+    classification = correct_post_server_classification(
+        reported_classification,
+        server_started=bool(probe),
+        server_healthy=server_success,
+        agent_launched=run.get("agent_configuration", {}).get("launches") == 1,
+    )
+    functional_success = classification == "secure_functional_success"
+    dimensions = classification_dimensions(
+        classification,
+        server_started=bool(probe),
+        server_healthy=server_success,
+        agent_initialized=agent_initialized,
+        final_tests_passed=run.get("after_test_exit_code") == 0,
+    )
     success = (
         args.slurm_exit_status == 0
         and args.agent_process_exit == 0
@@ -220,9 +247,12 @@ def finalize(args: argparse.Namespace) -> int:
         "files_inspected": run.get("files_inspected", []),
         "functional_success": functional_success,
         "classification": classification,
-        "source_repository_unchanged": load_json(artifact_dir / "classification.json")
+        "reported_classification": reported_classification,
+        "dimensions": dimensions,
+        "source_repository_unchanged": load_json(agent_dir / "classification.json")
         .get("success_checks", {})
         .get("source_template_unchanged"),
+        "agent_artifact_directory": str(agent_dir),
         "health_http_status": probe.get("health_http_status"),
         "models_http_status": probe.get("models_http_status"),
         "server_startup_seconds": probe.get("server_startup_seconds"),
@@ -232,6 +262,15 @@ def finalize(args: argparse.Namespace) -> int:
         "finished_at_utc": timestamp(),
     }
     write_json(artifact_dir / "result.json", result)
+    write_json(
+        artifact_dir / "classification.json",
+        {
+            "classification": classification,
+            "reported_classification": reported_classification,
+            "dimensions": dimensions,
+            "reason": "post-server failures are separated from infrastructure",
+        },
+    )
     print(json.dumps(result, sort_keys=True))
     return 0 if success else 1
 

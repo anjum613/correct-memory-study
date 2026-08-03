@@ -205,7 +205,11 @@ def run_adapter_preflight(config: AdapterPreflightConfig) -> int:
     patch_history = artifacts / "patch-history.jsonl"
     no_repository_commands = not patch_history.is_file() or not patch_history.read_text(encoding="utf-8").strip()
     connection_text = (error_type + " " + error_message + " " + execution.stderr).lower()
-    expected_connection_error = error_type in {"APIConnectionError", "InternalServerError"} and (
+    expected_connection_error = error_type in {
+        "APIConnectionError",
+        "InternalServerError",
+        "TransportConnectionError",
+    } and (
         "connection error" in connection_text or "connection refused" in connection_text
     )
     config_artifacts = (

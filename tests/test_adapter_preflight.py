@@ -36,10 +36,11 @@ def test_exact_adapter_reaches_first_request_before_dummy_connection_failure(tmp
 
     assert exit_code == 0
     assert result["classification"] == PASS_CLASSIFICATION
-    assert result["expected_error_type"] == "InternalServerError"
-    assert "Connection error" in result["expected_error_message"]
+    assert result["expected_error_type"] == "TransportConnectionError"
+    assert "Connection refused" in result["expected_error_message"]
     assert event_names == [
         "adapter_started",
+        "installed_sources_validated",
         "configuration_serialized",
         "mini_swe_config_validated",
         "agent_initialized",
@@ -48,7 +49,7 @@ def test_exact_adapter_reaches_first_request_before_dummy_connection_failure(tmp
         "agent_failed",
     ]
     assert trajectory["info"]["model_stats"]["api_calls"] == 1
-    assert trajectory["info"]["exit_status"] == "InternalServerError"
+    assert trajectory["info"]["exit_status"] == "TransportConnectionError"
     assert initial_hashes == final_hashes
     assert types["$.agent.output_path"] == "pathlib.PosixPath"
     assert not (artifacts / "patch.diff").read_text(encoding="utf-8")

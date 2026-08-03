@@ -10,7 +10,9 @@ from pathlib import Path
 from typing import Any
 
 
-_SENSITIVE_KEY = re.compile(r"(?:api[_-]?key|authorization|token|password|secret)", re.IGNORECASE)
+_SENSITIVE_KEY = re.compile(
+    r"(?:^|[_-])(?:api[_-]?key|authorization|token|password|secret)(?:$|[_-])", re.IGNORECASE
+)
 _ASSIGNMENT = re.compile(
     r"(?P<key>\b[A-Za-z_]*(?:api[_-]?key|authorization|token|password|secret)\b)"
     r"(?P<separator>\s*[:=]\s*)"
@@ -43,7 +45,11 @@ def redact_value(value: Any) -> Any:
     """Return a recursively redacted JSON-compatible value."""
     if isinstance(value, dict):
         return {
-            str(key): "[REDACTED]" if _SENSITIVE_KEY.search(str(key)) else redact_value(item)
+            str(key): (
+                "[REDACTED]"
+                if _SENSITIVE_KEY.search(str(key)) and not isinstance(item, (bool, type(None)))
+                else redact_value(item)
+            )
             for key, item in value.items()
         }
     if isinstance(value, list):

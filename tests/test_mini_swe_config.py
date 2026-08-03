@@ -179,9 +179,13 @@ def test_mini_swe_config_generation_uses_only_supported_sections(tmp_path: Path)
     assert types["$.agent.output_path"] == "pathlib.PosixPath"
     assert plain["agent"]["output_path"] == str(tmp_path / "trajectory.json")
     assert plain["environment"]["cwd"] == str(tmp_path / "repository")
-    assert plain["model"]["model_name"] == "openai/test-model"
-    assert plain["model"]["model_kwargs"]["api_base"] == "http://127.0.0.1:9/v1"
-    assert plain["model"]["model_kwargs"]["max_retries"] == 0
+    assert plain["model"]["model_class"] == "cmpilot_vllm_text_model.VllmTextModel"
+    assert plain["model"]["model_name"] == "test-model"
+    assert plain["model"]["base_url"] == "http://127.0.0.1:9/v1"
+    assert plain["model"]["max_tokens"] == 512
+    assert plain["model"]["connect_timeout_seconds"] == 2.0
+    assert plain["model"]["read_timeout_seconds"] == 2.0
+    assert "model_kwargs" not in plain["model"]
 
 
 def test_unknown_mini_swe_fields_are_rejected_instead_of_silently_discarded(tmp_path: Path) -> None:
@@ -202,7 +206,7 @@ def test_secrets_are_not_written_and_max_tokens_is_not_a_secret(tmp_path: Path) 
     assert_no_sensitive_keys(plain)
     assert "local-smoke-placeholder" not in text
     assert "OPENAI_API_KEY" not in text
-    assert plain["model"]["model_kwargs"]["max_tokens"] == 512
+    assert plain["model"]["max_tokens"] == 512
     with pytest.raises(PlainDataError, match=r"\$\.model\.api_key: sensitive"):
         assert_no_sensitive_keys({"model": {"api_key": "must-not-persist"}})
 

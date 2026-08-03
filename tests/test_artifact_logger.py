@@ -24,3 +24,25 @@ def test_artifact_writes_redact_secrets(tmp_path) -> None:
     assert "another-test-value" not in text_path.read_text()
     assert "test-only-value" not in json_path.read_text()
     assert "test-password-value" not in json_path.read_text()
+
+
+def test_artifact_writes_preserve_usage_counts_and_boolean_audit_fields(tmp_path) -> None:
+    json_path = tmp_path / "result.json"
+
+    write_json(
+        json_path,
+        {
+            "prompt_tokens": 10,
+            "completion_tokens": 4,
+            "total_tokens": 14,
+            "no_authorization_header": True,
+            "api_key": "must-hide",
+        },
+    )
+    result = __import__("json").loads(json_path.read_text(encoding="utf-8"))
+
+    assert result["prompt_tokens"] == 10
+    assert result["completion_tokens"] == 4
+    assert result["total_tokens"] == 14
+    assert result["no_authorization_header"] is True
+    assert result["api_key"] == "[REDACTED]"

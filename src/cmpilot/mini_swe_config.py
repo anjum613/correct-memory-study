@@ -27,6 +27,8 @@ class MiniSWEEndpointSettings:
     model: str
     request_timeout_seconds: float | None = None
     max_retries: int | None = None
+    connect_timeout_seconds: float = 10.0
+    read_timeout_seconds: float = 120.0
 
 
 SUPPORTED_TOP_LEVEL_FIELDS = frozenset({"agent", "environment", "model"})
@@ -44,17 +46,19 @@ SUPPORTED_AGENT_FIELDS = frozenset(
 SUPPORTED_ENVIRONMENT_FIELDS = frozenset({"cwd", "env", "timeout"})
 SUPPORTED_MODEL_FIELDS = frozenset(
     {
-        "model_name",
         "model_kwargs",
-        "litellm_model_registry",
-        "set_cache_control",
         "cost_tracking",
         "format_error_template",
         "observation_template",
         "multimodal_regex",
         "action_regex",
+        "temperature",
+        "max_tokens",
+        "connect_timeout_seconds",
+        "read_timeout_seconds",
     }
 )
+DIRECT_MODEL_CLASS = "cmpilot_vllm_text_model.VllmTextModel"
 _SENSITIVE_KEY = re.compile(
     r"(?:^|[_-])(?:api[_-]?key|authorization|token|password|secret)(?:$|[_-])", re.IGNORECASE
 )
@@ -218,8 +222,10 @@ def build_mini_swe_config(
     repository: Path,
     trajectory: Path,
     agent_environment: dict[str, str],
+    transport_artifact: Path | None = None,
+    event_path: Path | None = None,
 ) -> dict[str, Any]:
-    """Build only the fields accepted by the selected 2.4.6 classes."""
+    """Build the minimal direct-model configuration loaded by mini-SWE 2.4.6."""
     for name, layer in (("base", base_config), ("overlay", overlay_config)):
         if not isinstance(layer, dict):
             raise MiniSWEConfigError(f"$.{name}: expected dictionary, found {_type_name(layer)}")
@@ -232,7 +238,7 @@ def build_mini_swe_config(
     environment = dict(
         _require_supported_fields("environment", merged.get("environment", {}), SUPPORTED_ENVIRONMENT_FIELDS)
     )
-    model = dict(_require_supported_fields("model", merged.get("model", {}), SUPPORTED_MODEL_FIELDS))
+    model_input = dict(_require_supported_fields("model", merged.get("model", {}), SUPPORTED_MODEL_FIELDS))
 
     agent["output_path"] = trajectory
     environment["cwd"] = str(repository)
@@ -241,19 +247,46 @@ def build_mini_swe_config(
         raise MiniSWEConfigError("$.environment.env: expected dictionary")
     environment["env"] = configured_environment | agent_environment
 
-    model["model_name"] = "openai/" + endpoint.model
-    model_kwargs = model.get("model_kwargs", {})
-    if not isinstance(model_kwargs, dict):
+    # default.yaml contains LiteLLM's drop_params setting. It is recognized
+    # only as legacy input and never crosses the direct-model boundary.
+    legacy_kwargs = model_input.pop("model_kwargs", {})
+    if not isinstance(legacy_kwargs, dict):
         raise MiniSWEConfigError("$.model.model_kwargs: expected dictionary")
-    endpoint_kwargs: dict[str, Any] = {
-        "api_base": endpoint.base_url,
-        "temperature": 0,
-        "drop_params": True,
+    unknown_legacy = sorted(set(legacy_kwargs) - {"drop_params", "temperature", "max_tokens"})
+    if unknown_legacy:
+        raise MiniSWEConfigError(
+            f"$.model.model_kwargs: unsupported direct-adapter fields: {unknown_legacy}"
+        )
+    model_input.pop("cost_tracking", None)
+    if endpoint.max_retries not in (None, 0):
+        raise MiniSWEConfigError(
+            "$.endpoint.max_retries: the direct adapter performs exactly one HTTP attempt"
+        )
+
+    request_timeout = endpoint.request_timeout_seconds
+    temperature = model_input.pop("temperature", legacy_kwargs.get("temperature", 0.0))
+    max_tokens = model_input.pop("max_tokens", legacy_kwargs.get("max_tokens", 512))
+    connect_timeout = model_input.pop(
+        "connect_timeout_seconds",
+        request_timeout if request_timeout is not None else endpoint.connect_timeout_seconds,
+    )
+    read_timeout = model_input.pop(
+        "read_timeout_seconds",
+        request_timeout if request_timeout is not None else endpoint.read_timeout_seconds,
+    )
+    model = {
+        "model_class": DIRECT_MODEL_CLASS,
+        "model_name": endpoint.model,
+        "base_url": endpoint.base_url,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "connect_timeout_seconds": connect_timeout,
+        "read_timeout_seconds": read_timeout,
+        "transport_artifact_path": str(
+            transport_artifact or trajectory.with_name("model-transport.jsonl")
+        ),
+        "event_path": str(event_path or trajectory.with_name("adapter-events.jsonl")),
+        **model_input,
     }
-    if endpoint.request_timeout_seconds is not None:
-        endpoint_kwargs["timeout"] = endpoint.request_timeout_seconds
-    if endpoint.max_retries is not None:
-        endpoint_kwargs["max_retries"] = endpoint.max_retries
-    model["model_kwargs"] = model_kwargs | endpoint_kwargs
 
     return {"agent": agent, "environment": environment, "model": model}

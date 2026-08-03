@@ -4,10 +4,14 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Sequence
+from dataclasses import asdict
 from pathlib import Path
 
 from .adapter_preflight import AdapterPreflightConfig, run_adapter_preflight
+from .artifact_logger import write_json
+from .artifact_preserver import atomic_preserve_directory
 from .doctor import collect_report, render_report
+from .multiturn_preflight import MultiturnPreflightConfig, run_multiturn_preflight
 from .smoke_runner import dry_run, resolve_config, run_smoke
 
 
@@ -29,6 +33,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     adapter_preflight.add_argument("--mini-python", required=True, help="absolute mini-SWE-agent 2.4.6 interpreter")
     adapter_preflight.add_argument("--artifact-dir", required=True, help="directory for preflight artifacts")
     adapter_preflight.add_argument("--timeout", type=float, default=45, help="adapter timeout in seconds")
+    multiturn = commands.add_parser(
+        "multiturn-preflight", help="run the deterministic direct-adapter CPU integration"
+    )
+    multiturn.add_argument("--mini-python", required=True, help="absolute mini-SWE-agent 2.4.6 interpreter")
+    multiturn.add_argument("--artifact-dir", required=True, help="directory for immutable preflight artifacts")
+    multiturn.add_argument("--timeout", type=int, default=90, help="agent timeout in seconds")
+    preserve = commands.add_parser(
+        "preserve-artifacts", help="atomically preserve one run directory once"
+    )
+    preserve.add_argument("--source", required=True)
+    preserve.add_argument("--destination", required=True)
+    preserve.add_argument("--status-file")
     arguments = parser.parse_args(argv)
 
     if arguments.command == "doctor":
@@ -49,6 +65,23 @@ def main(argv: Sequence[str] | None = None) -> int:
                 timeout_seconds=arguments.timeout,
             )
         )
+    if arguments.command == "multiturn-preflight":
+        return run_multiturn_preflight(
+            MultiturnPreflightConfig(
+                mini_python=arguments.mini_python,
+                artifact_dir=Path(arguments.artifact_dir),
+                timeout_seconds=arguments.timeout,
+            )
+        )
+    if arguments.command == "preserve-artifacts":
+        result = atomic_preserve_directory(
+            Path(arguments.source), Path(arguments.destination)
+        )
+        record = asdict(result)
+        if arguments.status_file:
+            write_json(Path(arguments.status_file), record)
+        print(record["status"])
+        return 0
 
     return 1
 

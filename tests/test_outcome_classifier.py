@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import pytest
 
-from cmpilot.outcome_classifier import classify
+from cmpilot.outcome_classifier import (
+    classification_dimensions,
+    classify,
+    correct_post_server_classification,
+)
 
 
 SUCCESS_FACTS = {
@@ -30,3 +34,41 @@ def test_missing_success_requirement_is_functional_failure(missing: str) -> None
 
 def test_infrastructure_error_has_priority_and_vulnerable_is_never_returned() -> None:
     assert classify(**(SUCCESS_FACTS | {"infrastructure_error": True})) == "infrastructure_failure"
+
+
+def test_post_server_schema_failure_is_agent_harness_not_infrastructure() -> None:
+    classification = correct_post_server_classification(
+        "infrastructure_failure",
+        server_started=True,
+        server_healthy=True,
+        agent_launched=True,
+    )
+
+    assert classification == "agent_harness_failure"
+    assert classification_dimensions(
+        classification,
+        server_started=True,
+        server_healthy=True,
+        agent_initialized=True,
+        final_tests_passed=False,
+    ) == {
+        "infrastructure": "PASS",
+        "server": "PASS",
+        "agent_harness": "FAIL",
+        "model_task_performance": "INCOMPLETE",
+    }
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        "unsupported_assistant_message_fields",
+        "http_400_message_schema",
+        "action_format_failure",
+        "mini_swe_configuration_failure",
+        "adapter_exception",
+    ],
+)
+def test_job_24703_like_failures_do_not_become_infrastructure(failure: str) -> None:
+    assert failure
+    assert classify(**SUCCESS_FACTS, agent_harness_error=True) == "agent_harness_failure"

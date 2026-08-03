@@ -12,6 +12,9 @@ from cmpilot.mini_swe_adapter import (
     METADATA_VERSION_QUERY,
     RUNTIME_CONFIG_MODULE,
     mini_swe_info,
+    RUNTIME_MODEL_MODULE,
+    RUNTIME_SOURCE_MANIFEST_MODULE,
+    RUNTIME_TRANSPORT_MODULE,
     write_adapter,
 )
 
@@ -80,7 +83,8 @@ def test_mini_swe_info_rejects_empty_or_malformed_version_output(output: str) ->
 
 
 def test_adapter_matches_the_shipped_text_action_config_and_smoke_limits() -> None:
-    assert "LitellmTextbasedModel" in ADAPTER_SOURCE
+    assert "VllmTextModel" in ADAPTER_SOURCE
+    assert "LitellmTextbasedModel" not in ADAPTER_SOURCE
     assert "AuditedLocalEnvironment" in ADAPTER_SOURCE
     assert 'CMPILOT_PATCH_HISTORY' in ADAPTER_SOURCE
     assert 'CMPILOT_AGENT_CONFIG_SOURCE' in ADAPTER_SOURCE
@@ -95,9 +99,10 @@ def test_adapter_uses_strict_config_boundary_before_agent_initialization() -> No
     assert "yaml.safe_load" in ADAPTER_SOURCE
     assert "AgentConfig(**mini_config" in ADAPTER_SOURCE
     assert "LocalEnvironmentConfig(**mini_config" in ADAPTER_SOURCE
-    assert "LitellmTextbasedModelConfig(**mini_config" in ADAPTER_SOURCE
+    assert "VllmTextModelConfig(**model_settings)" in ADAPTER_SOURCE
+    assert "get_model_class" in ADAPTER_SOURCE
     assert 'emit_event("agent_initialized")' in ADAPTER_SOURCE
-    assert 'emit_event("model_request_attempted")' in ADAPTER_SOURCE
+    assert 'CMPILOT_MODEL_TRANSPORT_ARTIFACT' in ADAPTER_SOURCE
     assert "recursive_merge" not in ADAPTER_SOURCE
 
 
@@ -106,3 +111,9 @@ def test_write_adapter_preserves_the_canonical_runtime_helper(tmp_path: Path) ->
     write_adapter(adapter)
     helper = tmp_path / RUNTIME_CONFIG_MODULE
     assert adapter.read_text(encoding="utf-8") == ADAPTER_SOURCE
+    for name in (
+        RUNTIME_MODEL_MODULE,
+        RUNTIME_TRANSPORT_MODULE,
+        RUNTIME_SOURCE_MANIFEST_MODULE,
+    ):
+        assert (tmp_path / name).is_file()

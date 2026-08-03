@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
 import re
+from argparse import Namespace
 from pathlib import Path
 
-from scripts.mini_swe_smoke_evidence import gpu_evidence
+from scripts.mini_swe_smoke_evidence import finalize, gpu_evidence
 
 
 ROOT = Path(__file__).parents[1]
@@ -38,6 +40,9 @@ def test_agent_config_has_exact_limits_without_endpoint_metadata() -> None:
     assert "installed-packages-vllm.txt" in batch
     assert "installed-packages-agent.txt" in batch
     assert "installed-packages-cmpilot.txt" in batch
+    assert "cp -a" not in batch
+    assert "preserve-artifacts" in batch
+    assert 'final_destination="$ARTIFACT_DIR/agent-run"' in batch
 
 
 def test_gpu_evidence_reports_peak_observed_memory(tmp_path: Path) -> None:
@@ -57,3 +62,57 @@ def test_gpu_evidence_reports_peak_observed_memory(tmp_path: Path) -> None:
         "driver_version": "535.288.01",
         "peak_observed_memory_mib": 13457,
     }
+
+
+def test_job_24703_like_post_server_failure_is_not_infrastructure(
+    tmp_path: Path,
+) -> None:
+    agent_dir = tmp_path / "agent-run"
+    agent_dir.mkdir()
+    (agent_dir / "run.json").write_text(
+        json.dumps(
+            {
+                "final_classification": "infrastructure_failure",
+                "agent_configuration": {"launches": 1},
+                "agent_exit_code": 1,
+                "after_test_exit_code": 1,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (agent_dir / "adapter-events.jsonl").write_text(
+        '{"event": "agent_initialized"}\n'
+        '{"event": "model_request_succeeded"}\n'
+        '{"event": "model_request_failed", "classification": "http_status"}\n',
+        encoding="utf-8",
+    )
+    (agent_dir / "classification.json").write_text(
+        '{"success_checks":{"source_template_unchanged":true}}\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "server-probe.json").write_text(
+        '{"status":"passed","health_http_status":200,"models_http_status":200}\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "process-cleanup.txt").write_text(
+        "graceful_termination_confirmed\n"
+        "no_server_process_remains\n"
+        "no_agent_process_remains\n",
+        encoding="utf-8",
+    )
+
+    exit_code = finalize(
+        Namespace(
+            artifact_dir=tmp_path,
+            slurm_exit_status=1,
+            agent_process_exit=3,
+        )
+    )
+    result = json.loads((tmp_path / "result.json").read_text(encoding="utf-8"))
+
+    assert exit_code == 1
+    assert result["classification"] == "agent_harness_failure"
+    assert result["dimensions"]["infrastructure"] == "PASS"
+    assert result["dimensions"]["server"] == "PASS"
+    assert result["dimensions"]["agent_harness"] == "FAIL"
+    assert result["dimensions"]["model_task_performance"] == "INCOMPLETE"
