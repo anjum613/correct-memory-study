@@ -150,6 +150,15 @@ def _trajectory_metrics(path: Path, repository_files: set[str]) -> dict[str, obj
         "termination_reason": "trajectory missing",
         "repository_inspected": False,
         "files_inspected": [],
+        "technical_validity": "UNKNOWN",
+        "protocol_safety_status": "UNKNOWN",
+        "model_format_status": "UNKNOWN",
+        "invalid_response_count": 0,
+        "invalid_action_count": 0,
+        "executed_action_count": 0,
+        "repository_progress": False,
+        "functional_outcome": "UNKNOWN",
+        "failure_dimension": "unknown",
     }
     if not path.is_file():
         return empty
@@ -173,7 +182,7 @@ def _trajectory_metrics(path: Path, repository_files: set[str]) -> dict[str, obj
         if not isinstance(extra, dict):
             continue
         actions = extra.get("actions", [])
-        if isinstance(actions, list):
+        if isinstance(actions, list) and not extra.get("protocol_rejected"):
             commands.extend(
                 str(action.get("command", ""))
                 for action in actions
@@ -198,6 +207,24 @@ def _trajectory_metrics(path: Path, repository_files: set[str]) -> dict[str, obj
 
     info = trajectory.get("info", {}) if isinstance(trajectory, dict) else {}
     model_stats = info.get("model_stats", {}) if isinstance(info, dict) else {}
+    protocol = info.get("protocol", {}) if isinstance(info, dict) else {}
+    if not isinstance(protocol, dict):
+        protocol = {}
+    protocol_defaults = {
+        "technical_validity": "UNKNOWN",
+        "protocol_safety_status": "UNKNOWN",
+        "model_format_status": "UNKNOWN",
+        "invalid_response_count": 0,
+        "invalid_action_count": 0,
+        "executed_action_count": len(commands),
+        "repository_progress": False,
+        "functional_outcome": "UNKNOWN",
+        "failure_dimension": "unknown",
+    }
+    protocol_metrics = {
+        key: protocol.get(key, default)
+        for key, default in protocol_defaults.items()
+    }
     model_requests = model_stats.get("api_calls", len(commands)) if isinstance(model_stats, dict) else len(commands)
     inspected_files = sorted(
         relative_path
@@ -216,6 +243,7 @@ def _trajectory_metrics(path: Path, repository_files: set[str]) -> dict[str, obj
         "termination_reason": info.get("exit_status", "") if isinstance(info, dict) else "",
         "repository_inspected": repository_inspected,
         "files_inspected": inspected_files,
+        **protocol_metrics,
     }
 
 
@@ -399,9 +427,31 @@ def _finish(
 ) -> int:
     run["finished_at_utc"] = datetime.now(UTC).isoformat()
     run["final_classification"] = classification
+    dimension_names = (
+        "technical_validity",
+        "protocol_safety_status",
+        "model_format_status",
+        "termination_reason",
+        "invalid_response_count",
+        "invalid_action_count",
+        "executed_action_count",
+        "repository_progress",
+        "functional_outcome",
+        "failure_dimension",
+    )
+    dimensions = {
+        name: run[name]
+        for name in dimension_names
+        if name in run
+    }
     write_json(
         artifacts / "classification.json",
-        {"classification": classification, "reason": reason, "success_checks": checks or {}},
+        {
+            "classification": classification,
+            "dimensions": dimensions,
+            "reason": reason,
+            "success_checks": checks or {},
+        },
     )
     _write_run_json(artifacts, run)
     print(f"Smoke artifacts: {artifacts}")
@@ -443,7 +493,7 @@ def run_smoke(
         "operating_system": platform.platform(),
         "agent_configuration": {
             "adapter": "mini-SWE-agent 2.4.6 Python API",
-            "agent_class": "DefaultAgent",
+            "agent_class": "project-owned HardenedDefaultAgent",
             "environment_class": "audited LocalEnvironment",
             "model_class": "cmpilot_vllm_text_model.VllmTextModel",
             "tool": "single fenced Bash action",

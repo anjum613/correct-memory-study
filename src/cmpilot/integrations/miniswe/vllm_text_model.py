@@ -15,6 +15,19 @@ from minisweagent.models.utils.actions_text import format_observation_messages, 
 from minisweagent.models.utils.openai_multimodal import expand_multimodal_content
 
 try:
+    from .action_protocol import (
+        ACTION_REGEX,
+        FORMAT_ERROR_TEMPLATE,
+        escape_action_syntax_for_prompt,
+    )
+except ImportError:
+    from cmpilot_action_protocol import (  # type: ignore[no-redef]
+        ACTION_REGEX,
+        FORMAT_ERROR_TEMPLATE,
+        escape_action_syntax_for_prompt,
+    )
+
+try:
     from .openai_transport import (
         CompletionResult,
         MessageBoundaryError,
@@ -44,10 +57,8 @@ class VllmTextModelConfig(BaseModel):
     read_timeout_seconds: float = Field(default=120.0, gt=0.0)
     transport_artifact_path: Path | None = None
     event_path: Path | None = None
-    action_regex: str = r"```mswea_bash_command\s*\n(.*?)\n```"
-    format_error_template: str = (
-        "Please always provide EXACTLY ONE action in triple backticks, found {{actions|length}} actions."
-    )
+    action_regex: str = ACTION_REGEX
+    format_error_template: str = FORMAT_ERROR_TEMPLATE
     observation_template: str = (
         "{% if output.exception_info %}<exception>{{output.exception_info}}</exception>\n{% endif %}"
         "<returncode>{{output.returncode}}</returncode>\n<output>\n{{output.output}}</output>"
@@ -236,12 +247,22 @@ class VllmTextModel:
         outputs: list[dict[str, Any]],
         template_vars: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
-        return format_observation_messages(
+        messages = format_observation_messages(
             outputs,
             observation_template=self.config.observation_template,
             template_vars=template_vars,
             multimodal_regex=self.config.multimodal_regex,
         )
+        for message in messages:
+            content = message.get("content")
+            if isinstance(content, str):
+                safe_content = escape_action_syntax_for_prompt(content)
+                if safe_content != content:
+                    message["content"] = safe_content
+                    extra = message.setdefault("extra", {})
+                    if isinstance(extra, dict):
+                        extra["action_syntax_escaped"] = True
+        return messages
 
     def get_template_vars(self, **kwargs: Any) -> dict[str, Any]:
         return self.config.model_dump()

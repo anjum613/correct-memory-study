@@ -9,6 +9,8 @@ from pathlib import Path
 
 
 EXPECTED_VERSION = "2.4.6"
+RUNTIME_ACTION_PROTOCOL_MODULE = "cmpilot_action_protocol.py"
+RUNTIME_HARDENED_AGENT_MODULE = "cmpilot_hardened_agent.py"
 RUNTIME_CONFIG_MODULE = "cmpilot_mini_swe_config.py"
 RUNTIME_MODEL_MODULE = "cmpilot_vllm_text_model.py"
 RUNTIME_TRANSPORT_MODULE = "cmpilot_openai_transport.py"
@@ -75,6 +77,8 @@ def write_adapter(path: Path) -> None:
     """Snapshot every project-owned runtime module beside the adapter."""
     path.write_text(ADAPTER_SOURCE, encoding="utf-8")
     sources = {
+        RUNTIME_ACTION_PROTOCOL_MODULE: _INTEGRATION_ROOT / "action_protocol.py",
+        RUNTIME_HARDENED_AGENT_MODULE: _INTEGRATION_ROOT / "hardened_agent.py",
         RUNTIME_CONFIG_MODULE: Path(__file__).with_name("mini_swe_config.py"),
         RUNTIME_MODEL_MODULE: _INTEGRATION_ROOT / "vllm_text_model.py",
         RUNTIME_TRANSPORT_MODULE: _INTEGRATION_ROOT / "openai_transport.py",

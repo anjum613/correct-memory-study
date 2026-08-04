@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from cmpilot.mini_swe_adapter import (
+    RUNTIME_ACTION_PROTOCOL_MODULE,
     RUNTIME_MODEL_MODULE,
     RUNTIME_SOURCE_MANIFEST_MODULE,
     RUNTIME_TRANSPORT_MODULE,
@@ -87,6 +88,7 @@ def test_direct_model_loads_through_mini_full_import_path(tmp_path: Path) -> Non
 
     assert result.returncode == 0, result.stderr
     assert "cmpilot_vllm_text_model.VllmTextModel" in result.stdout
+    assert (tmp_path / RUNTIME_ACTION_PROTOCOL_MODULE).is_file()
     assert (tmp_path / RUNTIME_MODEL_MODULE).is_file()
     assert (tmp_path / RUNTIME_TRANSPORT_MODULE).is_file()
     assert (tmp_path / RUNTIME_SOURCE_MANIFEST_MODULE).is_file()

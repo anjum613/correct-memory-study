@@ -41,6 +41,7 @@ def test_exact_adapter_reaches_first_request_before_dummy_connection_failure(tmp
     assert event_names == [
         "adapter_started",
         "installed_sources_validated",
+        "prompt_safety_validated",
         "configuration_serialized",
         "mini_swe_config_validated",
         "agent_initialized",

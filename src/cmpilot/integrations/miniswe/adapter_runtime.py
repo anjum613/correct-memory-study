@@ -12,10 +12,21 @@ from pathlib import Path
 
 import yaml
 from minisweagent import __version__, package_dir
-from minisweagent.agents.default import AgentConfig, DefaultAgent
+from minisweagent.agents.default import AgentConfig
 from minisweagent.environments.local import LocalEnvironment, LocalEnvironmentConfig
 from minisweagent.models import get_model_class
 
+from cmpilot_action_protocol import (
+    ACTION_REGEX,
+    FORMAT_ERROR_TEMPLATE,
+    INITIAL_SYSTEM_TEMPLATE,
+    INSTANCE_TEMPLATE,
+    INVALID_ACTION_TEMPLATE,
+    PROTOCOL_LIMIT_MESSAGE,
+    prompt_match_report,
+    render_recovery_prompt,
+)
+from cmpilot_hardened_agent import HardenedDefaultAgent
 from cmpilot_mini_swe_config import (
     MiniSWEEndpointSettings,
     assert_no_sensitive_keys,
@@ -133,6 +144,30 @@ raw_mini_config = build_mini_swe_config(
     transport_artifact=transport_artifact,
     event_path=event_path,
 )
+raw_mini_config["agent"]["system_template"] = INITIAL_SYSTEM_TEMPLATE
+raw_mini_config["agent"]["instance_template"] = INSTANCE_TEMPLATE
+raw_mini_config["model"]["action_regex"] = ACTION_REGEX
+raw_mini_config["model"]["format_error_template"] = FORMAT_ERROR_TEMPLATE
+prompt_matches = prompt_match_report(
+    {
+        "initial_system": INITIAL_SYSTEM_TEMPLATE,
+        "instance": INSTANCE_TEMPLATE.replace("{{task}}", task),
+        "format_error_recovery": FORMAT_ERROR_TEMPLATE,
+        "invalid_content_recovery": INVALID_ACTION_TEMPLATE,
+        "protocol_limit": PROTOCOL_LIMIT_MESSAGE,
+        "realistic_recovery": render_recovery_prompt(
+            event="INVALID_ACTION_CONTENT",
+            action_count=1,
+            validation_reason="exact placeholder",
+        ),
+    }
+)
+if prompt_matches["initial_system"] > 1 or any(
+    count for name, count in prompt_matches.items() if name != "initial_system"
+):
+    raise ValueError(f"unsafe harness-authored prompt parser matches: {prompt_matches}")
+emit_event("prompt_safety_validated", parser_match_counts=prompt_matches)
+
 
 _, type_text = deterministic_json(describe_data_types(raw_mini_config))
 Path(os.environ["CMPILOT_AGENT_CONFIG_TYPES_ARTIFACT"]).write_text(
@@ -164,7 +199,7 @@ if model_class is not VllmTextModel:
     raise TypeError(f"unexpected direct model class: {model_class!r}")
 validated_model = VllmTextModelConfig(**model_settings)
 loader_validation = {
-    "agent_class": "minisweagent.agents.default.AgentConfig",
+    "agent_class": "cmpilot_hardened_agent.HardenedDefaultAgent",
     "agent": validated_agent.model_dump(mode="json"),
     "environment_class": "minisweagent.environments.local.LocalEnvironmentConfig",
     "environment": validated_environment.model_dump(mode="json"),
@@ -197,7 +232,13 @@ environment = AuditedLocalEnvironment(
     audit_path=patch_history,
     **mini_config["environment"],
 )
-agent = DefaultAgent(model, environment, **mini_config["agent"])
+agent = HardenedDefaultAgent(
+    model,
+    environment,
+    repository=repository,
+    event_sink=emit_event,
+    **mini_config["agent"],
+)
 emit_event("agent_initialized")
 print("mini-SWE-agent version: " + __version__)
 try:

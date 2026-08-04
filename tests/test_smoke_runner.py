@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -62,6 +63,24 @@ def fake_failed_agent(_command, _cwd, environment, _timeout) -> AgentExecution:
     Path(environment["CMPILOT_TRAJECTORY"]).write_text('{"messages": []}\n', encoding="utf-8")
     return AgentExecution(exit_code=0, stdout="fake agent completed\n", stderr="", timed_out=False)
 
+
+def fake_protocol_failure_agent(_command, _cwd, environment, _timeout) -> AgentExecution:
+    Path(environment["CMPILOT_TRAJECTORY"]).write_text(
+        '{"info":{"model_stats":{"api_calls":2},"exit_status":"REPEATED_INVALID_ACTION",'
+        '"protocol":{"technical_validity":"PASS","protocol_safety_status":"PASS",'
+        '"model_format_status":"FAIL","invalid_response_count":2,"invalid_action_count":2,'
+        '"executed_action_count":0,"repository_progress":false,'
+        '"functional_outcome":"INCOMPLETE","failure_dimension":"semantic_invalid_action"}},'
+        '"messages":[{"role":"assistant","content":"rejected placeholder",'
+        '"extra":{"protocol_rejected":true,"actions":[{"command":"<action>"}]}}]}',
+        encoding="utf-8",
+    )
+    return AgentExecution(
+        exit_code=0,
+        stdout="safe model protocol failure\\n",
+        stderr="",
+        timed_out=False,
+    )
 
 def test_resolve_config_prefers_cli_over_environment(tmp_path: Path) -> None:
     arguments = SimpleNamespace(
@@ -151,6 +170,28 @@ def test_failed_functional_smoke_is_not_retried(tmp_path: Path) -> None:
     assert '"final_classification": "functional_failure"' in (run_directory / "run.json").read_text()
 
 
+def test_safe_model_protocol_failure_is_classified_dimensionally(tmp_path: Path) -> None:
+    config = smoke_config(tmp_path)
+    with patch("cmpilot.smoke_runner.preflight", return_value=passing_preflight()), patch(
+        "cmpilot.smoke_runner.execute_agent", side_effect=fake_protocol_failure_agent
+    ):
+        result = run_smoke(config)
+
+    run_directory = next(config.runs_root.iterdir())
+    run = json.loads((run_directory / "run.json").read_text(encoding="utf-8"))
+    classification = json.loads(
+        (run_directory / "classification.json").read_text(encoding="utf-8")
+    )
+
+    assert result == 3
+    assert run["final_classification"] == "functional_failure"
+    assert run["technical_validity"] == "PASS"
+    assert run["protocol_safety_status"] == "PASS"
+    assert run["model_format_status"] == "FAIL"
+    assert run["termination_reason"] == "REPEATED_INVALID_ACTION"
+    assert run["command_count"] == 0
+    assert classification["dimensions"]["failure_dimension"] == "semantic_invalid_action"
+
 def test_unavailable_server_creates_infrastructure_failure_artifact(tmp_path: Path) -> None:
     config = smoke_config(tmp_path)
     unavailable = PreflightResult(
@@ -227,7 +268,11 @@ def test_source_snapshot_excludes_git_and_test_caches(tmp_path: Path) -> None:
 def test_trajectory_metrics_records_usage_and_repository_inspection(tmp_path: Path) -> None:
     trajectory = tmp_path / "trajectory.json"
     trajectory.write_text(
-        '{"info":{"model_stats":{"api_calls":2},"exit_status":"Submitted"},'
+        '{"info":{"model_stats":{"api_calls":2},"exit_status":"Submitted",'
+        '"protocol":{"technical_validity":"PASS","protocol_safety_status":"PASS",'
+        '"model_format_status":"PASS","invalid_response_count":1,"invalid_action_count":1,'
+        '"executed_action_count":1,"repository_progress":true,'
+        '"functional_outcome":"SUBMITTED","failure_dimension":"model_task"}},'
         '"messages":[{"role":"assistant","extra":{"actions":[{"command":"sed -n 1,80p calculator.py"}],'
         '"response":{"usage":{"prompt_tokens":40,"completion_tokens":12,"total_tokens":52}}}}]}',
         encoding="utf-8",
@@ -242,3 +287,11 @@ def test_trajectory_metrics_records_usage_and_repository_inspection(tmp_path: Pa
     assert metrics["termination_reason"] == "Submitted"
     assert metrics["repository_inspected"] is True
     assert metrics["files_inspected"] == ["calculator.py"]
+    assert metrics["technical_validity"] == "PASS"
+    assert metrics["protocol_safety_status"] == "PASS"
+    assert metrics["model_format_status"] == "PASS"
+    assert metrics["invalid_response_count"] == 1
+    assert metrics["invalid_action_count"] == 1
+    assert metrics["executed_action_count"] == 1
+    assert metrics["repository_progress"] is True
+    assert metrics["functional_outcome"] == "SUBMITTED"

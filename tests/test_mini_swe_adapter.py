@@ -9,6 +9,8 @@ import pytest
 from cmpilot.mini_swe_adapter import (
     ADAPTER_SOURCE,
     EXPECTED_VERSION,
+    RUNTIME_ACTION_PROTOCOL_MODULE,
+    RUNTIME_HARDENED_AGENT_MODULE,
     METADATA_VERSION_QUERY,
     RUNTIME_CONFIG_MODULE,
     mini_swe_info,
@@ -111,7 +113,10 @@ def test_write_adapter_preserves_the_canonical_runtime_helper(tmp_path: Path) ->
     write_adapter(adapter)
     helper = tmp_path / RUNTIME_CONFIG_MODULE
     assert adapter.read_text(encoding="utf-8") == ADAPTER_SOURCE
+    assert helper.is_file()
     for name in (
+        RUNTIME_ACTION_PROTOCOL_MODULE,
+        RUNTIME_HARDENED_AGENT_MODULE,
         RUNTIME_MODEL_MODULE,
         RUNTIME_TRANSPORT_MODULE,
         RUNTIME_SOURCE_MANIFEST_MODULE,
