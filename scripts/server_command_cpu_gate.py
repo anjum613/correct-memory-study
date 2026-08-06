@@ -39,6 +39,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--project-root", type=Path, required=True)
     parser.add_argument("--expected-environment-fingerprint", required=True)
     parser.add_argument("--expected-content-digest", required=True)
+    parser.add_argument("--command-plan", type=Path, required=True)
+    parser.add_argument("--expected-command-plan-sha256", required=True)
     parser.add_argument("--cmpilot-python", type=Path, required=True)
     return parser
 
@@ -70,6 +72,8 @@ def _run(arguments: argparse.Namespace, artifact_dir: Path) -> dict[str, object]
     project_root = arguments.project_root.resolve(strict=True)
     sys.path.insert(0, str(project_root / "src"))
 
+    from cmpilot.batch_script_attestation import require_digest_match
+    from cmpilot.file_digest import sha256_file
     from cmpilot.environment_content_digest import (
         CONTENT_DIGEST_SCHEMA,
         fingerprint_installed_distributions,
@@ -81,8 +85,8 @@ def _run(arguments: argparse.Namespace, artifact_dir: Path) -> dict[str, object]
     )
     from cmpilot.guided_backend import (
         QWEN32B_SNAPSHOT,
+        minimal_chat_request,
         run_backend_preflight,
-        write_qwen32b_load_gate_plan,
     )
     from cmpilot.server_command import (
         EXTRACTION_FAILURE,
@@ -143,14 +147,30 @@ def _run(arguments: argparse.Namespace, artifact_dir: Path) -> dict[str, object]
     if content_digest.sha256 != arguments.expected_content_digest:
         raise RuntimeError("environment-content-digest mismatch")
 
-    plan = write_qwen32b_load_gate_plan(
-        artifact_dir / "generated-load-gate-plan", port=49773
+    command_plan = arguments.command_plan.resolve(strict=True)
+    command_plan_sha256 = sha256_file(command_plan)
+    require_digest_match(
+        arguments.expected_command_plan_sha256,
+        command_plan_sha256,
+        context="server-command-plan",
+        record=artifact_dir / "server-command-plan-digest-comparison.json",
     )
-    expected = validate_qwen32b_server_command(load_command_argv(plan.command_json))
+    submitted_plan = artifact_dir / "submitted-server-command.json"
+    submitted_plan.write_bytes(command_plan.read_bytes())
+    _write_json(
+        artifact_dir / "server-command-plan-integrity.json",
+        {
+            "expected_sha256": arguments.expected_command_plan_sha256,
+            "observed_sha256": command_plan_sha256,
+            "path": str(command_plan),
+            "schema": "server-command-plan-integrity-v1",
+        },
+    )
+    expected = validate_qwen32b_server_command(load_command_argv(command_plan))
     extraction_dir = artifact_dir / "valid-extraction"
     extraction_dir.mkdir()
     block = render_bash_command_extraction(
-        command_json=plan.command_json,
+        command_json=command_plan,
         artifact_dir=extraction_dir,
         extractor=project_root / "scripts" / "extract_server_command.py",
     )
@@ -236,7 +256,7 @@ def _run(arguments: argparse.Namespace, artifact_dir: Path) -> dict[str, object]
         }
     _write_json(artifact_dir / "invalid-input-evidence.json", invalid_evidence)
 
-    request = json.loads(plan.request_json.read_text(encoding="utf-8"))
+    request = minimal_chat_request()
     preflight = run_backend_preflight(
         expected, request, tokenizer_path=QWEN32B_SNAPSHOT
     )
@@ -249,6 +269,7 @@ def _run(arguments: argparse.Namespace, artifact_dir: Path) -> dict[str, object]
         "-m",
         "pytest",
         "-q",
+        "tests/test_batch_script_attestation.py",
         "tests/test_server_command.py",
         "tests/test_shared_runtime.py",
         "tests/test_environment_content_digest.py",
@@ -282,6 +303,7 @@ def _run(arguments: argparse.Namespace, artifact_dir: Path) -> dict[str, object]
     return {
         "backend_import": preflight["import_path"],
         "backend_import_result": preflight["import_result"],
+        "command_plan_sha256": command_plan_sha256,
         "environment_content_digest": content_digest.sha256,
         "environment_fingerprint": environment_fingerprint.sha256,
         "extracted_argument_count": len(extracted),

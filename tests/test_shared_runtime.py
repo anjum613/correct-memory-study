@@ -28,6 +28,7 @@ from cmpilot.server_command_cpu_job import stage_server_command_cpu_gate
 ROOT = Path(__file__).parents[1]
 FIXTURES = ROOT / "tests" / "fixtures"
 HPC_SHARED_ROOT = Path("/home/s224049759")
+DIGEST_TOOL = ROOT / "scripts" / "batch_script_attestation.py"
 
 
 @pytest.fixture
@@ -131,13 +132,15 @@ def test_generated_wrapper_verifies_driver_hash_and_copies_driver(
         driver_sha256=digest,
         artifact_root=artifact_root,
         driver_interpreter=Path("/usr/bin/bash"),
-        shared_roots=(shared_test_root,),
+        digest_tool=DIGEST_TOOL,
+        shared_roots=(HPC_SHARED_ROOT,),
     )
 
     assert f"EXPECTED_DRIVER_SHA256={digest}" in wrapper
-    assert "/usr/bin/sha256sum -- \"$DRIVER_PATH\"" in wrapper
+    assert '"$DIGEST_TOOL" verify' in wrapper
+    assert "sha256sum" not in wrapper
     assert '"$DRIVER_PATH" "$ARTIFACT_DIR/submitted-driver.sh"' in wrapper
-    validate_script_runtime_paths(wrapper, shared_roots=(shared_test_root,))
+    validate_script_runtime_paths(wrapper, shared_roots=(HPC_SHARED_ROOT,))
 
     wrapper_path = shared_test_root / "pre-submit" / "gate.sbatch"
     wrapper_path.write_text(wrapper, encoding="utf-8", newline="\n")
@@ -170,7 +173,8 @@ def test_driver_hash_mismatch_fails_before_backend_checks(
         driver_sha256=digest,
         artifact_root=artifact_root,
         driver_interpreter=Path("/usr/bin/bash"),
-        shared_roots=(shared_test_root,),
+        digest_tool=DIGEST_TOOL,
+        shared_roots=(HPC_SHARED_ROOT,),
     )
     wrapper_path = shared_test_root / "pre-submit" / "gate.sbatch"
     wrapper_path.write_text(wrapper, encoding="utf-8", newline="\n")
@@ -207,7 +211,8 @@ def test_generated_script_has_no_required_login_tmp_reference(
         driver_sha256=digest,
         artifact_root=tmp_path / "artifacts",
         driver_interpreter=Path("/usr/bin/bash"),
-        shared_roots=(shared_test_root,),
+        digest_tool=DIGEST_TOOL,
+        shared_roots=(HPC_SHARED_ROOT,),
     )
 
     marker_lines = [
@@ -269,10 +274,15 @@ def test_server_command_cpu_gate_is_cpu_only_and_declares_dependencies(
     assert "/usr/bin/jq" not in script
     assert all(token != "jq" for line in script.splitlines() for token in line.split())
     assert bundle.driver.sha256 == sha256_file(bundle.driver.path)
+    assert bundle.command_plan_sha256 == sha256_file(bundle.command_plan)
+    assert bundle.command_plan.stat().st_mode & 0o222 == 0
+    assert "SUBMITTED_SCRIPT_SHA256" not in script
+    assert "sha256sum" not in script
     assert validate_script_executables(script)
     assert validate_script_runtime_paths(script)
     assert manifest["dependency_audit"]["jq_required"] is False
-    assert manifest["schema"] == "server-command-cpu-gate-bundle-v1"
+    assert manifest["schema"] == "server-command-cpu-gate-bundle-v2"
+    assert manifest["command_plan"]["sha256"] == bundle.command_plan_sha256
 
 
 def test_executable_validator_rejects_unavailable_declared_command() -> None:

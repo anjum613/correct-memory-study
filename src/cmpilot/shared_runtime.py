@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -12,6 +11,8 @@ import shlex
 import shutil
 import stat
 from typing import Iterable, Sequence
+
+from cmpilot.file_digest import sha256_file
 
 
 NON_SHARED_RUNTIME_PATH = "NON_SHARED_RUNTIME_PATH"
@@ -34,14 +35,6 @@ class StagedRuntimeDriver:
     path: Path
     sha256: str
     source: Path
-
-
-def sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def _beneath(path: Path, root: Path) -> bool:
@@ -194,22 +187,50 @@ def render_cpu_gate_wrapper(
     driver_interpreter: Path,
     driver_arguments: Iterable[str] = (),
     required_runtime_paths: Iterable[Path] = (),
+    strict_runtime_inputs: Iterable[StagedRuntimeDriver] = (),
+    digest_tool: Path | None = None,
+    digest_interpreter: Path = Path(
+        "/home/s224049759/environments/cmpilot-conda/bin/python"
+    ),
     submitted_script_path: Path | None = None,
     shared_roots: Sequence[Path] = DEFAULT_SHARED_ROOTS,
     job_name: str = "guided-backend-shared-path",
 ) -> str:
     """Render the CPU-only wrapper that verifies and preserves its shared driver."""
-    validated_driver = validate_runtime_path(
-        driver_path, shared_roots=shared_roots
+    validated_driver = validate_runtime_path(driver_path, shared_roots=shared_roots)
+    if digest_tool is None:
+        digest_tool = (
+            Path(__file__).resolve().parents[2]
+            / "scripts"
+            / "batch_script_attestation.py"
+        )
+    validated_digest_tool = validate_runtime_path(
+        digest_tool, shared_roots=shared_roots
     )
     validated_requirements = [
         validate_runtime_path(path, shared_roots=shared_roots)
         for path in required_runtime_paths
     ]
+    validated_strict_inputs = [
+        StagedRuntimeDriver(
+            path=validate_runtime_path(reference.path, shared_roots=shared_roots),
+            sha256=reference.sha256,
+            source=reference.source,
+        )
+        for reference in strict_runtime_inputs
+    ]
     if not re.fullmatch(r"[0-9a-f]{64}", driver_sha256):
         raise ValueError("driver_sha256 must be lowercase SHA-256")
-    if not artifact_root.is_absolute() or not driver_interpreter.is_absolute():
-        raise ValueError("artifact root and driver interpreter must be absolute")
+    if any(
+        not re.fullmatch(r"[0-9a-f]{64}", item.sha256)
+        for item in validated_strict_inputs
+    ):
+        raise ValueError("strict runtime input hashes must be lowercase SHA-256")
+    if not all(
+        path.is_absolute()
+        for path in (artifact_root, driver_interpreter, digest_interpreter)
+    ):
+        raise ValueError("artifact root and interpreters must be absolute")
     mandatory_executables = tuple(
         dict.fromkeys(
             (
@@ -218,8 +239,8 @@ def render_cpu_gate_wrapper(
                 Path("/usr/bin/hostname"),
                 Path("/usr/bin/mkdir"),
                 Path("/usr/bin/printf"),
-                Path("/usr/bin/sha256sum"),
                 driver_interpreter,
+                digest_interpreter,
             )
         )
     )
@@ -236,14 +257,37 @@ def render_cpu_gate_wrapper(
             '"$ARTIFACT_DIR/submitted.sbatch"\n'
         )
     arguments = " ".join(shlex.quote(str(value)) for value in driver_arguments)
+    marked_runtime_paths = tuple(
+        dict.fromkeys(
+            (
+                validated_digest_tool,
+                *validated_requirements,
+                *(reference.path for reference in validated_strict_inputs),
+            )
+        )
+    )
     requirement_markers = "".join(
-        f"{REQUIRED_FILE_MARKER}{path}\n" for path in validated_requirements
+        f"{REQUIRED_FILE_MARKER}{path}\n" for path in marked_runtime_paths
     )
     executable_markers = "".join(
         f"{REQUIRED_EXECUTABLE_MARKER}{path}\n" for path in mandatory_executables
     )
     executable_array = " ".join(
         shlex.quote(str(path)) for path in mandatory_executables
+    )
+    strict_path_array = " ".join(
+        shlex.quote(str(reference.path)) for reference in validated_strict_inputs
+    )
+    strict_hash_array = " ".join(
+        shlex.quote(reference.sha256) for reference in validated_strict_inputs
+    )
+    strict_context_array = " ".join(
+        shlex.quote(
+            "server-command-plan"
+            if "server-command" in reference.path.name
+            else reference.path.name
+        )
+        for reference in validated_strict_inputs
     )
     invocation = (
         'exec "$DRIVER_INTERPRETER" "$DRIVER_PATH"'
@@ -264,11 +308,16 @@ def render_cpu_gate_wrapper(
 {requirement_markers}{submitted_marker}{executable_markers}set -euo pipefail
 {_quoted_assignment("DRIVER_PATH", validated_driver)}
 EXPECTED_DRIVER_SHA256={driver_sha256}
+{_quoted_assignment("DIGEST_TOOL", validated_digest_tool)}
+{_quoted_assignment("DIGEST_INTERPRETER", digest_interpreter)}
 {_quoted_assignment("ARTIFACT_ROOT", artifact_root)}
 {_quoted_assignment("DRIVER_INTERPRETER", driver_interpreter)}
 {submitted_assignment}
 ARTIFACT_DIR="$ARTIFACT_ROOT/${{SLURM_JOB_ID:?SLURM_JOB_ID is required}}"
 MANDATORY_EXECUTABLES=({executable_array})
+STRICT_RUNTIME_PATHS=({strict_path_array})
+STRICT_RUNTIME_SHA256S=({strict_hash_array})
+STRICT_RUNTIME_CONTEXTS=({strict_context_array})
 for REQUIRED_EXECUTABLE in "${{MANDATORY_EXECUTABLES[@]}}"; do
     if [[ ! -f "$REQUIRED_EXECUTABLE" || ! -x "$REQUIRED_EXECUTABLE" ]]; then
         /usr/bin/printf '{MISSING_MANDATORY_EXECUTABLE}: %s\\n' \
@@ -278,26 +327,68 @@ for REQUIRED_EXECUTABLE in "${{MANDATORY_EXECUTABLES[@]}}"; do
 done
 /usr/bin/mkdir -p -- "$ARTIFACT_DIR"
 
+set +e
+"$DIGEST_INTERPRETER" "$DIGEST_TOOL" observe --path "$0" \
+    --record "$ARTIFACT_DIR/running-script-observation.json" \
+    >"$ARTIFACT_DIR/running-script-observation.stdout" \
+    2>"$ARTIFACT_DIR/running-script-observation.stderr"
+RUNNING_SCRIPT_OBSERVATION_STATUS=$?
+set -e
+/usr/bin/printf '%s\\n' "$RUNNING_SCRIPT_OBSERVATION_STATUS" \
+    >"$ARTIFACT_DIR/running-script-observation.exit"
+
 write_failure() {{
     local label=$1
     /usr/bin/printf '{{"backend_checks_ran":false,"label":"%s"}}\\n' "$label" \
         >"$ARTIFACT_DIR/classification.json"
 }}
 
+verify_runtime_input() {{
+    local input_path=$1
+    local expected_digest=$2
+    local context=$3
+    local evidence_stem=$4
+    local status
+    set +e
+    "$DIGEST_INTERPRETER" "$DIGEST_TOOL" verify \
+        --path "$input_path" \
+        --expected "$expected_digest" \
+        --context "$context" \
+        --record "$ARTIFACT_DIR/${{evidence_stem}}-digest-comparison.json" \
+        >"$ARTIFACT_DIR/${{evidence_stem}}.sha256" \
+        2>"$ARTIFACT_DIR/${{evidence_stem}}-digest.stderr"
+    status=$?
+    set -e
+    /usr/bin/printf '%s\\n' "$status" \
+        >"$ARTIFACT_DIR/${{evidence_stem}}-digest.exit"
+    return "$status"
+}}
+
 if [[ ! -f "$DRIVER_PATH" || ! -r "$DRIVER_PATH" ]]; then
     write_failure {NON_SHARED_RUNTIME_PATH}
     exit 41
 fi
-ACTUAL_DRIVER_SHA256=$(/usr/bin/sha256sum -- "$DRIVER_PATH")
-ACTUAL_DRIVER_SHA256=${{ACTUAL_DRIVER_SHA256%% *}}
-if [[ "$ACTUAL_DRIVER_SHA256" != "$EXPECTED_DRIVER_SHA256" ]]; then
+if ! verify_runtime_input \
+    "$DRIVER_PATH" "$EXPECTED_DRIVER_SHA256" shared-driver driver; then
     write_failure {RUNTIME_SOURCE_HASH_MISMATCH}
     exit 42
 fi
 
+for ((INPUT_INDEX=0; INPUT_INDEX<${{#STRICT_RUNTIME_PATHS[@]}}; INPUT_INDEX++)); do
+    INPUT_PATH=${{STRICT_RUNTIME_PATHS[$INPUT_INDEX]}}
+    INPUT_SHA256=${{STRICT_RUNTIME_SHA256S[$INPUT_INDEX]}}
+    INPUT_CONTEXT=${{STRICT_RUNTIME_CONTEXTS[$INPUT_INDEX]}}
+    INPUT_STEM="strict-runtime-input-${{INPUT_INDEX}}"
+    if ! verify_runtime_input \
+        "$INPUT_PATH" "$INPUT_SHA256" "$INPUT_CONTEXT" "$INPUT_STEM"; then
+        write_failure {RUNTIME_SOURCE_HASH_MISMATCH}
+        exit 43
+    fi
+    /usr/bin/cp -- "$INPUT_PATH" "$ARTIFACT_DIR/${{INPUT_STEM}}"
+done
+
 /usr/bin/hostname >"$ARTIFACT_DIR/hostname.txt"
 /usr/bin/printf '%s\\n' "$DRIVER_PATH" >"$ARTIFACT_DIR/driver-path.txt"
-/usr/bin/printf '%s\\n' "$ACTUAL_DRIVER_SHA256" >"$ARTIFACT_DIR/driver.sha256"
 /usr/bin/cp -- "$DRIVER_PATH" "$ARTIFACT_DIR/submitted-driver.sh"
 {submitted_copy}export ARTIFACT_DIR
 {invocation}"""

@@ -77,7 +77,6 @@ _EXTERNAL_EXECUTABLES = (
     ExternalExecutable("cluster-core", True, Path("/usr/bin/hostname"), ("cpu", "gpu")),
     ExternalExecutable("cluster-core", True, Path("/usr/bin/mkdir"), ("cpu", "gpu")),
     ExternalExecutable("cluster-core", True, Path("/usr/bin/printf"), ("cpu", "gpu")),
-    ExternalExecutable("cluster-core", True, Path("/usr/bin/sha256sum"), ("cpu", "gpu")),
     ExternalExecutable("cluster-core", True, Path("/usr/bin/curl"), ("gpu",)),
     ExternalExecutable(
         "cluster-core",

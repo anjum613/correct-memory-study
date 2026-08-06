@@ -20,18 +20,28 @@ def main() -> int:
     parser.add_argument("--pre-submit-directory", type=Path, required=True)
     parser.add_argument("--expected-environment-fingerprint", required=True)
     parser.add_argument("--expected-content-digest", required=True)
+    parser.add_argument(
+        "--artifact-root",
+        type=Path,
+        default=Path("/home/s224049759/run-artifacts/server-command-extraction"),
+    )
+    parser.add_argument("--job-name", default="server-command-extraction")
     arguments = parser.parse_args()
     bundle = stage_server_command_cpu_gate(
         project_root=ROOT,
         pre_submit_directory=arguments.pre_submit_directory,
         expected_environment_fingerprint=arguments.expected_environment_fingerprint,
         expected_content_digest=arguments.expected_content_digest,
+        artifact_root=arguments.artifact_root,
+        job_name=arguments.job_name,
     )
     print(
         json.dumps(
             {
                 "driver_path": str(bundle.driver.path),
                 "driver_sha256": bundle.driver.sha256,
+                "command_plan": str(bundle.command_plan),
+                "command_plan_sha256": bundle.command_plan_sha256,
                 "pre_submit_directory": str(bundle.pre_submit_directory),
                 "runtime_manifest": str(bundle.runtime_manifest),
                 "submitted_script": str(bundle.submitted_script),

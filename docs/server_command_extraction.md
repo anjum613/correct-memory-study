@@ -23,8 +23,8 @@ path is classified separately as
 External executable assumptions are recorded in three groups:
 
 - `cluster-core`: absolute commands required from the cluster operating
-  system, such as Bash, `cp`, `mkdir`, `printf`, `sha256sum`, and GPU-only
-  diagnostics such as `nvidia-smi`;
+  system, such as Bash, `cp`, `mkdir`, `printf`, and GPU-only diagnostics such
+  as `nvidia-smi`;
 - `project-environment`: absolute interpreters and launchers supplied by the
   frozen project environments;
 - `optional-diagnostic`: commands such as `numactl` whose absence may omit a
