@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import socket
 import subprocess
+import shlex
 import sys
 from typing import Sequence
 
@@ -61,6 +62,7 @@ def _run(arguments: argparse.Namespace, artifact_dir: Path) -> dict[str, object]
         run_backend_preflight,
         write_qwen32b_load_gate_plan,
     )
+    from cmpilot.server_command import load_command_argv
 
     os.environ.update(
         {
@@ -118,9 +120,8 @@ def _run(arguments: argparse.Namespace, artifact_dir: Path) -> dict[str, object]
     plan_paths = write_qwen32b_load_gate_plan(
         artifact_dir / "generated-load-gate-plan", port=49773
     )
-    command_record = json.loads(plan_paths.command_json.read_text(encoding="utf-8"))
     request = json.loads(plan_paths.request_json.read_text(encoding="utf-8"))
-    command = tuple(command_record["argv"])
+    command = load_command_argv(plan_paths.command_json)
     if command.count("--guided-decoding-backend") != 1:
         raise RuntimeError("generated command does not have exactly one backend option")
     position = command.index("--guided-decoding-backend")
@@ -182,7 +183,7 @@ def _run(arguments: argparse.Namespace, artifact_dir: Path) -> dict[str, object]
         "environment_fingerprint": environment_fingerprint.sha256,
         "environment_fingerprint_schema": SCHEMA_VERSION,
         "forbidden_modules": preflight["forbidden_modules"],
-        "generated_command": command_record["shell"],
+        "generated_command": shlex.join(command),
         "label": PASS_LABEL,
         "ordinary_processor_is_none": preflight["processor_is_none"],
         "targeted_tests_exit_code": completed.returncode,

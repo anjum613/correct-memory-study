@@ -18,9 +18,11 @@ from cmpilot.shared_runtime import (
     sha256_file,
     stage_runtime_driver,
     validate_runtime_path,
+    validate_script_executables,
     validate_script_runtime_paths,
 )
 from cmpilot.guided_backend_cpu_job import stage_guided_backend_cpu_gate
+from cmpilot.server_command_cpu_job import stage_server_command_cpu_gate
 
 
 ROOT = Path(__file__).parents[1]
@@ -243,6 +245,41 @@ def test_project_cpu_gate_generator_stages_every_runtime_path_on_shared_storage(
     validated = validate_script_runtime_paths(script)
     assert bundle.driver.path in validated
     assert bundle.submitted_script in validated
+
+
+def test_server_command_cpu_gate_is_cpu_only_and_declares_dependencies(
+    shared_test_root: Path,
+) -> None:
+    bundle = stage_server_command_cpu_gate(
+        project_root=ROOT,
+        pre_submit_directory=shared_test_root / "pre-submit-command-gate",
+        expected_environment_fingerprint="1" * 64,
+        expected_content_digest="2" * 64,
+        artifact_root=shared_test_root / "command-artifacts",
+    )
+    script = bundle.submitted_script.read_text(encoding="utf-8")
+    manifest = json.loads(bundle.runtime_manifest.read_text(encoding="utf-8"))
+
+    assert "#SBATCH --partition=Virtual" in script
+    assert "#SBATCH --nodes=1" in script
+    assert "#SBATCH --cpus-per-task=2" in script
+    assert "#SBATCH --mem=4G" in script
+    assert "#SBATCH --time=00:20:00" in script
+    assert "#SBATCH --gres" not in script
+    assert "/usr/bin/jq" not in script
+    assert all(token != "jq" for line in script.splitlines() for token in line.split())
+    assert bundle.driver.sha256 == sha256_file(bundle.driver.path)
+    assert validate_script_executables(script)
+    assert validate_script_runtime_paths(script)
+    assert manifest["dependency_audit"]["jq_required"] is False
+    assert manifest["schema"] == "server-command-cpu-gate-bundle-v1"
+
+
+def test_executable_validator_rejects_unavailable_declared_command() -> None:
+    script = "# CMPILOT_MANDATORY_EXECUTABLE=/does/not/exist/cmpilot-command\n"
+
+    with pytest.raises(RuntimePathError, match="MISSING_MANDATORY_EXECUTABLE"):
+        validate_script_executables(script)
 
 
 def test_job_25264_fixture_is_path_visibility_failure_without_backend_result() -> None:

@@ -91,12 +91,14 @@ def test_generated_plan_records_backend_command_request_and_offline_mode(
     tmp_path: Path,
 ) -> None:
     paths = write_qwen32b_load_gate_plan(tmp_path, port=49773)
-    command_record = json.loads(paths.command_json.read_text(encoding="utf-8"))
+    command = json.loads(paths.command_json.read_text(encoding="utf-8"))
+    command_metadata = json.loads(paths.command_metadata.read_text(encoding="utf-8"))
     configuration = json.loads(paths.effective_configuration.read_text(encoding="utf-8"))
     manifest = json.loads(paths.run_manifest.read_text(encoding="utf-8"))
     request = json.loads(paths.request_json.read_text(encoding="utf-8"))
 
-    assert command_record["argv"].count(BACKEND_OPTION) == 1
+    assert command.count(BACKEND_OPTION) == 1
+    assert command_metadata["argv_file"] == paths.command_json.name
     assert configuration["guided_decoding_backend"] == GUIDED_DECODING_BACKEND
     assert configuration["offline_environment"] == offline_environment()
     assert manifest["guided_decoding_backend"] == GUIDED_DECODING_BACKEND
@@ -126,7 +128,7 @@ class RejectBrokenBackends(importlib.abc.MetaPathFinder):
 sys.meta_path.insert(0, RejectBrokenBackends())
 from cmpilot.guided_backend import run_backend_preflight
 
-command = tuple(json.loads(pathlib.Path(sys.argv[1]).read_text())["argv"])
+command = tuple(json.loads(pathlib.Path(sys.argv[1]).read_text()))
 request = json.loads(pathlib.Path(sys.argv[2]).read_text())
 result = run_backend_preflight(command, request, tokenizer_path=pathlib.Path(sys.argv[3]))
 print("BACKEND_RESULT=" + json.dumps({

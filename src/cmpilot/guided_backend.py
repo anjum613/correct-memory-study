@@ -13,23 +13,22 @@ import shlex
 import sys
 from typing import Mapping, Sequence
 
+from cmpilot.server_command import (
+    BACKEND_OPTION,
+    COMMAND_ARRAY_SCHEMA,
+    GUIDED_DECODING_BACKEND,
+    QWEN32B_REVISION,
+    QWEN32B_SNAPSHOT,
+    VLLM_PYTHON,
+    load_command_argv,
+)
 
-GUIDED_DECODING_BACKEND = "lm-format-enforcer"
-BACKEND_OPTION = "--guided-decoding-backend"
 PREFLIGHT_IMPORT = (
     "vllm.model_executor.guided_decoding.lm_format_enforcer_decoding"
 )
 PREFLIGHT_PASS = "GUIDED_BACKEND_PREFLIGHT_PASS"
 PREFLIGHT_FAIL = "GUIDED_BACKEND_PREFLIGHT_FAIL"
 DEPENDENCY_FAILURE = "GUIDED_BACKEND_DEPENDENCY_FAILURE"
-
-VLLM_PYTHON = Path("/home/s224049759/environments/vllm-smoke/bin/python")
-QWEN32B_REVISION = "381fc969f78efac66bc87ff7ddeadb7e73c218a7"
-QWEN32B_SNAPSHOT = Path(
-    "/home/s224049759/model-cache/huggingface/hub/"
-    "models--Qwen--Qwen2.5-Coder-32B-Instruct/snapshots/"
-    + QWEN32B_REVISION
-)
 
 GUIDANCE_REQUEST_FIELDS = frozenset(
     {
@@ -53,6 +52,7 @@ class GuidedBackendError(RuntimeError):
 @dataclass(frozen=True)
 class LoadGatePlanPaths:
     command_json: Path
+    command_metadata: Path
     command_text: Path
     effective_configuration: Path
     request_json: Path
@@ -228,10 +228,10 @@ def write_qwen32b_load_gate_plan(
     request = minimal_chat_request(model=snapshot)
     validate_no_guidance_request(request)
     environment = offline_environment()
-    command_record = {
-        "argv": list(command),
+    command_metadata = {
+        "argv_file": "server-command.json",
         "guided_decoding_backend": GUIDED_DECODING_BACKEND,
-        "schema": "qwen32b-vllm-command-v1",
+        "schema": "qwen32b-vllm-command-metadata-v2",
         "shell": shlex.join(command),
     }
     configuration = {
@@ -253,10 +253,11 @@ def write_qwen32b_load_gate_plan(
         "tokenizer": str(snapshot),
         "trust_remote_code": False,
     }
-    command_bytes = _json_bytes(command_record)
+    command_bytes = _json_bytes(list(command))
     request_bytes = _json_bytes(request)
     paths = LoadGatePlanPaths(
         command_json=artifact_dir / "server-command.json",
+        command_metadata=artifact_dir / "server-command-metadata.json",
         command_text=artifact_dir / "server-command.txt",
         effective_configuration=artifact_dir / "effective-configuration.json",
         request_json=artifact_dir / "minimal-request.canonical.json",
@@ -271,9 +272,12 @@ def write_qwen32b_load_gate_plan(
         "ordinary_request_has_guidance": False,
         "schema": "qwen32b-load-gate-plan-v1",
         "server_command": paths.command_json.name,
+        "server_command_metadata": paths.command_metadata.name,
+        "server_command_schema": COMMAND_ARRAY_SCHEMA,
         "server_command_sha256": hashlib.sha256(command_bytes).hexdigest(),
     }
     paths.command_json.write_bytes(command_bytes)
+    _write_json(paths.command_metadata, command_metadata)
     paths.command_text.write_text(shlex.join(command) + "\n", encoding="utf-8", newline="\n")
     _write_json(paths.effective_configuration, configuration)
     paths.request_json.write_bytes(request_bytes)
@@ -369,10 +373,10 @@ def classify_load_gate_traceback(traceback_text: str) -> dict[str, object]:
 
 
 def _read_command(path: Path) -> tuple[str, ...]:
-    record = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(record, dict) or not isinstance(record.get("argv"), list):
-        raise GuidedBackendError("command record must contain an argv list")
-    return tuple(str(argument) for argument in record["argv"])
+    try:
+        return load_command_argv(path)
+    except ValueError as error:
+        raise GuidedBackendError(str(error)) from error
 
 
 def _generate_command(arguments: argparse.Namespace) -> int:

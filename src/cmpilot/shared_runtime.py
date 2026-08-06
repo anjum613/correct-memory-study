@@ -17,7 +17,9 @@ from typing import Iterable, Sequence
 NON_SHARED_RUNTIME_PATH = "NON_SHARED_RUNTIME_PATH"
 BATCH_RUNTIME_PATH_VISIBILITY_FAILURE = "BATCH_RUNTIME_PATH_VISIBILITY_FAILURE"
 RUNTIME_SOURCE_HASH_MISMATCH = "RUNTIME_SOURCE_HASH_MISMATCH"
+MISSING_MANDATORY_EXECUTABLE = "MISSING_MANDATORY_EXECUTABLE"
 REQUIRED_FILE_MARKER = "# CMPILOT_REQUIRED_RUNTIME_FILE="
+REQUIRED_EXECUTABLE_MARKER = "# CMPILOT_MANDATORY_EXECUTABLE="
 DEFAULT_SHARED_ROOTS = (Path("/home/s224049759"),)
 _NODE_LOCAL_ROOTS = (Path("/tmp"), Path("/var/tmp"))
 _MISSING_PATH = re.compile(r"cannot stat ['\"](?P<path>[^'\"]+)['\"]")
@@ -116,6 +118,37 @@ def validate_script_runtime_paths(
     )
 
 
+def executable_paths_from_script(script: str) -> tuple[str, ...]:
+    """Return executable declarations embedded in a generated script."""
+    return tuple(
+        line.removeprefix(REQUIRED_EXECUTABLE_MARKER)
+        for line in script.splitlines()
+        if line.startswith(REQUIRED_EXECUTABLE_MARKER)
+    )
+
+
+def validate_script_executables(script: str) -> tuple[Path, ...]:
+    """Fail before submission when a declared executable is unavailable."""
+    raw_paths = executable_paths_from_script(script)
+    if not raw_paths:
+        raise RuntimePathError(
+            f"{MISSING_MANDATORY_EXECUTABLE}: generated script declares no executables"
+        )
+    validated: list[Path] = []
+    for raw_path in raw_paths:
+        path = Path(raw_path)
+        if not path.is_absolute():
+            raise RuntimePathError(
+                f"{MISSING_MANDATORY_EXECUTABLE}: path is not absolute: {raw_path}"
+            )
+        if not path.is_file() or not os.access(path, os.X_OK):
+            raise RuntimePathError(
+                f"{MISSING_MANDATORY_EXECUTABLE}: unavailable: {raw_path}"
+            )
+        validated.append(path.resolve())
+    return tuple(validated)
+
+
 def stage_runtime_driver(
     source: Path,
     pre_submit_directory: Path,
@@ -177,6 +210,19 @@ def render_cpu_gate_wrapper(
         raise ValueError("driver_sha256 must be lowercase SHA-256")
     if not artifact_root.is_absolute() or not driver_interpreter.is_absolute():
         raise ValueError("artifact root and driver interpreter must be absolute")
+    mandatory_executables = tuple(
+        dict.fromkeys(
+            (
+                Path("/usr/bin/bash"),
+                Path("/usr/bin/cp"),
+                Path("/usr/bin/hostname"),
+                Path("/usr/bin/mkdir"),
+                Path("/usr/bin/printf"),
+                Path("/usr/bin/sha256sum"),
+                driver_interpreter,
+            )
+        )
+    )
     submitted_marker = ""
     submitted_assignment = "SUBMITTED_SCRIPT_PATH=''"
     submitted_copy = ""
@@ -193,12 +239,18 @@ def render_cpu_gate_wrapper(
     requirement_markers = "".join(
         f"{REQUIRED_FILE_MARKER}{path}\n" for path in validated_requirements
     )
+    executable_markers = "".join(
+        f"{REQUIRED_EXECUTABLE_MARKER}{path}\n" for path in mandatory_executables
+    )
+    executable_array = " ".join(
+        shlex.quote(str(path)) for path in mandatory_executables
+    )
     invocation = (
         'exec "$DRIVER_INTERPRETER" "$DRIVER_PATH"'
         + (f" {arguments}" if arguments else "")
         + "\n"
     )
-    return f"""#!/usr/bin/env bash
+    wrapper = f"""#!/usr/bin/bash
 #SBATCH --partition=Virtual
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=2
@@ -206,16 +258,24 @@ def render_cpu_gate_wrapper(
 #SBATCH --time=00:20:00
 #SBATCH --no-requeue
 #SBATCH --job-name={job_name}
-#SBATCH --output=/home/s224049759/run-artifacts/guided-backend-shared-path/slurm-%j.out
-#SBATCH --error=/home/s224049759/run-artifacts/guided-backend-shared-path/slurm-%j.err
+#SBATCH --output={artifact_root}/slurm-%j.out
+#SBATCH --error={artifact_root}/slurm-%j.err
 {REQUIRED_FILE_MARKER}{validated_driver}
-{requirement_markers}{submitted_marker}set -euo pipefail
+{requirement_markers}{submitted_marker}{executable_markers}set -euo pipefail
 {_quoted_assignment("DRIVER_PATH", validated_driver)}
 EXPECTED_DRIVER_SHA256={driver_sha256}
 {_quoted_assignment("ARTIFACT_ROOT", artifact_root)}
 {_quoted_assignment("DRIVER_INTERPRETER", driver_interpreter)}
 {submitted_assignment}
 ARTIFACT_DIR="$ARTIFACT_ROOT/${{SLURM_JOB_ID:?SLURM_JOB_ID is required}}"
+MANDATORY_EXECUTABLES=({executable_array})
+for REQUIRED_EXECUTABLE in "${{MANDATORY_EXECUTABLES[@]}}"; do
+    if [[ ! -f "$REQUIRED_EXECUTABLE" || ! -x "$REQUIRED_EXECUTABLE" ]]; then
+        /usr/bin/printf '{MISSING_MANDATORY_EXECUTABLE}: %s\\n' \
+            "$REQUIRED_EXECUTABLE" >&2
+        exit 40
+    fi
+done
 /usr/bin/mkdir -p -- "$ARTIFACT_DIR"
 
 write_failure() {{
@@ -241,6 +301,8 @@ fi
 /usr/bin/cp -- "$DRIVER_PATH" "$ARTIFACT_DIR/submitted-driver.sh"
 {submitted_copy}export ARTIFACT_DIR
 {invocation}"""
+    validate_script_executables(wrapper)
+    return wrapper
 
 
 def classify_batch_runtime_failure(
