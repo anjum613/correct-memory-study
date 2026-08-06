@@ -97,6 +97,7 @@ mkdir -p "$VLLM_LOG_DIR"
 log_file="$VLLM_LOG_DIR/vllm-smoke-$(date -u +%Y%m%d-%H%M%S).log"
 printf 'Starting vLLM for %s on %s:%s; logs: %s\n' "$VLLM_MODEL" "$VLLM_HOST" "$VLLM_PORT" "$log_file"
 printf 'Selected vLLM dtype: %s\n' "$VLLM_DTYPE"
+printf '%s\n' 'Selected guided-decoding backend: lm-format-enforcer'
 printf '%s\n' 'Native tool calling is enabled because mini-SWE-agent DefaultAgent uses a native Bash tool.'
 printf '%s\n' 'Model downloads are disabled; the requested model must already be available in the workstation cache.'
 
@@ -107,5 +108,6 @@ singularity exec --nv "$VLLM_SINGULARITY_IMAGE" \
   --host "$VLLM_HOST" \
   --port "$VLLM_PORT" \
   --dtype "$VLLM_DTYPE" \
+  --guided-decoding-backend lm-format-enforcer \
   --enable-auto-tool-choice \
   --tool-call-parser hermes 2>&1 | tee "$log_file"

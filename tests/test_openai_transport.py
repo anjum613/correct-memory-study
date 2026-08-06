@@ -134,6 +134,19 @@ def test_direct_transport_sends_no_authorization_header(tmp_path: Path) -> None:
 
     assert result.status_code == 200
     assert result.excluded_message_paths == ("$.messages[0].extra",)
+    assert set(result.request).isdisjoint(
+        {
+            "guided_choice",
+            "guided_decoding_backend",
+            "guided_grammar",
+            "guided_json",
+            "guided_regex",
+            "guided_whitespace_pattern",
+            "response_format",
+            "tool_choice",
+            "tools",
+        }
+    )
     assert result.body["choices"][0]["message"]["provider_specific_fields"]
     assert server.state.requests[0]["authorization_present"] is False
     persisted = (tmp_path / "requests.jsonl").read_text(encoding="utf-8").lower()

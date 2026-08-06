@@ -65,6 +65,16 @@ def test_launcher_passes_one_explicit_dtype_argument(
     assert arguments[dtype_positions[0] + 1] == expected_dtype
     assert f"Selected vLLM dtype: {expected_dtype}" in result.stdout
 
+    backend_positions = [
+        index
+        for index, argument in enumerate(arguments)
+        if argument == "--guided-decoding-backend"
+    ]
+    assert backend_positions == [arguments.index("--guided-decoding-backend")]
+    assert arguments[backend_positions[0] + 1] == "lm-format-enforcer"
+    assert "outlines" not in arguments
+    assert "Selected guided-decoding backend: lm-format-enforcer" in result.stdout
+
 
 def test_launcher_help_documents_half_for_turing_quadro_rtx_5000() -> None:
     result = subprocess.run(

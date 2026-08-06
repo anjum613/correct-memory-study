@@ -44,6 +44,10 @@ def test_agent_config_has_exact_limits_without_endpoint_metadata() -> None:
     assert "preserve-artifacts" in batch
     assert 'final_destination="$ARTIFACT_DIR/agent-run"' in batch
 
+    assert batch.count("--guided-decoding-backend lm-format-enforcer") == 2
+    assert "guided_decoding_backend=lm-format-enforcer" in batch
+    assert "--guided-decoding-backend outlines" not in batch
+
 
 def test_gpu_evidence_reports_peak_observed_memory(tmp_path: Path) -> None:
     (tmp_path / "gpu-info.txt").write_text(
