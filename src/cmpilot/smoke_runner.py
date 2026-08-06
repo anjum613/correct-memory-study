@@ -159,6 +159,15 @@ def _trajectory_metrics(path: Path, repository_files: set[str]) -> dict[str, obj
         "repository_progress": False,
         "functional_outcome": "UNKNOWN",
         "failure_dimension": "unknown",
+        "command_authorization_status": "UNKNOWN",
+        "policy_version": None,
+        "policy_violation_count": 0,
+        "prohibited_command_categories": [],
+        "repeated_policy_violation_count": 0,
+        "environment_mutation_attempted": False,
+        "environment_mutation_executed": False,
+        "network_access_attempted": False,
+        "network_access_executed": False,
     }
     if not path.is_file():
         return empty
@@ -182,7 +191,11 @@ def _trajectory_metrics(path: Path, repository_files: set[str]) -> dict[str, obj
         if not isinstance(extra, dict):
             continue
         actions = extra.get("actions", [])
-        if isinstance(actions, list) and not extra.get("protocol_rejected"):
+        if (
+            isinstance(actions, list)
+            and not extra.get("protocol_rejected")
+            and not extra.get("action_policy_rejected")
+        ):
             commands.extend(
                 str(action.get("command", ""))
                 for action in actions
@@ -220,6 +233,15 @@ def _trajectory_metrics(path: Path, repository_files: set[str]) -> dict[str, obj
         "repository_progress": False,
         "functional_outcome": "UNKNOWN",
         "failure_dimension": "unknown",
+        "command_authorization_status": "UNKNOWN",
+        "policy_version": None,
+        "policy_violation_count": 0,
+        "prohibited_command_categories": [],
+        "repeated_policy_violation_count": 0,
+        "environment_mutation_attempted": False,
+        "environment_mutation_executed": False,
+        "network_access_attempted": False,
+        "network_access_executed": False,
     }
     protocol_metrics = {
         key: protocol.get(key, default)
@@ -330,6 +352,7 @@ def _safe_agent_environment(
         "CMPILOT_ADAPTER_EVENTS": str(artifacts / "adapter-events.jsonl"),
         "CMPILOT_MODEL_TRANSPORT_ARTIFACT": str(artifacts / "model-transport.jsonl"),
         "CMPILOT_MINI_SOURCE_MANIFEST_ARTIFACT": str(artifacts / "mini-swe-source-manifest.json"),
+        "CMPILOT_COMMAND_POLICY_ARTIFACT": str(artifacts / "command-authorization-policy.json"),
         "CMPILOT_AGENT_PATH": os.environ.get("PATH", os.defpath),
         "CMPILOT_MODEL": config.model,
         "CMPILOT_BASE_URL": config.base_url,
@@ -438,6 +461,15 @@ def _finish(
         "repository_progress",
         "functional_outcome",
         "failure_dimension",
+        "command_authorization_status",
+        "policy_version",
+        "policy_violation_count",
+        "prohibited_command_categories",
+        "repeated_policy_violation_count",
+        "environment_mutation_attempted",
+        "environment_mutation_executed",
+        "network_access_attempted",
+        "network_access_executed",
     )
     dimensions = {
         name: run[name]

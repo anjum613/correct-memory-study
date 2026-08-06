@@ -13,12 +13,20 @@ from typing import Any
 _SENSITIVE_KEY = re.compile(
     r"(?:^|[_-])(?:api[_-]?key|authorization|token|password|secret)(?:$|[_-])", re.IGNORECASE
 )
+_PUBLIC_AUTHORIZATION_KEYS = frozenset(
+    {"command_authorization_policy", "command_authorization_status"}
+)
 _ASSIGNMENT = re.compile(
     r"(?P<key>\b[A-Za-z_]*(?:api[_-]?key|authorization|token|password|secret)\b)"
     r"(?P<separator>\s*[:=]\s*)"
     r"(?P<value>[^\s,;]+)",
     re.IGNORECASE,
 )
+
+
+def _is_sensitive_key(value: object) -> bool:
+    key = str(value)
+    return key.lower() not in _PUBLIC_AUTHORIZATION_KEYS and _SENSITIVE_KEY.search(key) is not None
 
 
 def create_run_directory(runs_root: Path) -> tuple[Path, str]:
@@ -47,7 +55,7 @@ def redact_value(value: Any) -> Any:
         return {
             str(key): (
                 "[REDACTED]"
-                if _SENSITIVE_KEY.search(str(key)) and not isinstance(item, (bool, type(None)))
+                if _is_sensitive_key(key) and not isinstance(item, (bool, type(None)))
                 else redact_value(item)
             )
             for key, item in value.items()

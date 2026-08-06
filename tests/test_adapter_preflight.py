@@ -33,6 +33,9 @@ def test_exact_adapter_reaches_first_request_before_dummy_connection_failure(tmp
     initial_hashes = json.loads((artifacts / "initial-file-hashes.json").read_text(encoding="utf-8"))
     final_hashes = json.loads((artifacts / "final-file-hashes.json").read_text(encoding="utf-8"))
     types = json.loads((artifacts / "agent-config-types.json").read_text(encoding="utf-8"))
+    policy = json.loads(
+        (artifacts / "command-authorization-policy.json").read_text(encoding="utf-8")
+    )
 
     assert exit_code == 0
     assert result["classification"] == PASS_CLASSIFICATION
@@ -41,6 +44,7 @@ def test_exact_adapter_reaches_first_request_before_dummy_connection_failure(tmp
     assert event_names == [
         "adapter_started",
         "installed_sources_validated",
+        "command_authorization_policy_loaded",
         "prompt_safety_validated",
         "configuration_serialized",
         "mini_swe_config_validated",
@@ -56,4 +60,5 @@ def test_exact_adapter_reaches_first_request_before_dummy_connection_failure(tmp
     assert not (artifacts / "patch.diff").read_text(encoding="utf-8")
     assert not (artifacts / "git-status.txt").read_text(encoding="utf-8")
     assert not (artifacts / "patch-history.jsonl").exists()
+    assert policy["policy_version"] == "calculator-capability-policy-v1"
     assert all(result["checks"].values())

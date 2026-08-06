@@ -46,3 +46,19 @@ def test_artifact_writes_preserve_usage_counts_and_boolean_audit_fields(tmp_path
     assert result["total_tokens"] == 14
     assert result["no_authorization_header"] is True
     assert result["api_key"] == "[REDACTED]"
+
+
+def test_public_command_authorization_dimensions_are_not_treated_as_credentials(tmp_path) -> None:
+    json_path = tmp_path / "classification.json"
+
+    write_json(
+        json_path,
+        {
+            "command_authorization_status": "PASS_WITH_BLOCKED_VIOLATIONS",
+            "authorization": "must-hide",
+        },
+    )
+    result = __import__("json").loads(json_path.read_text(encoding="utf-8"))
+
+    assert result["command_authorization_status"] == "PASS_WITH_BLOCKED_VIOLATIONS"
+    assert result["authorization"] == "[REDACTED]"

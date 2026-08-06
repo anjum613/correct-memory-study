@@ -92,6 +92,7 @@ def _configuration_artifacts_contain_secrets(artifacts: Path) -> bool:
         "cmpilot-run-metadata.json",
         "adapter-artifact-metadata.json",
         "mini-swe-loader-validation.json",
+        "command-authorization-policy.json",
     )
     forbidden = ("openai_api_key", '"api_key"', "authorization:", "password:", "secret:")
     for name in names:

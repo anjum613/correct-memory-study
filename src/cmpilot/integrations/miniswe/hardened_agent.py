@@ -10,6 +10,14 @@ from minisweagent.agents.default import DefaultAgent
 from minisweagent.exceptions import FormatError, InterruptAgentFlow
 
 try:
+    from .command_authorization import (
+        ACTION_POLICY_VIOLATION,
+        REPEATED_POLICY_VIOLATION,
+        AuthorizationDecision,
+        CommandAuthorizationState,
+        authorize_command,
+        render_policy_recovery_prompt,
+    )
     from .action_protocol import (
         ProtocolErrorState,
         ProtocolEvaluation,
@@ -20,6 +28,14 @@ try:
         repository_hash,
     )
 except ImportError:
+    from cmpilot_command_authorization import (  # type: ignore[no-redef]
+        ACTION_POLICY_VIOLATION,
+        REPEATED_POLICY_VIOLATION,
+        AuthorizationDecision,
+        CommandAuthorizationState,
+        authorize_command,
+        render_policy_recovery_prompt,
+    )
     from cmpilot_action_protocol import (  # type: ignore[no-redef]
         ProtocolErrorState,
         ProtocolEvaluation,
@@ -40,6 +56,20 @@ class ProtocolRejected(Exception):
         self.evaluation = evaluation
 
 
+class ActionPolicyRejected(Exception):
+    def __init__(
+        self,
+        decision: AuthorizationDecision,
+        *,
+        raw_response: str,
+        termination_reason: str | None,
+    ):
+        super().__init__(decision.reason or ACTION_POLICY_VIOLATION)
+        self.decision = decision
+        self.raw_response = raw_response
+        self.termination_reason = termination_reason
+
+
 class HardenedDefaultAgent(DefaultAgent):
     """DefaultAgent with semantic validation and state-aware protocol guards."""
 
@@ -58,6 +88,7 @@ class HardenedDefaultAgent(DefaultAgent):
         self.protocol_state = ProtocolErrorState(
             maximum_consecutive_errors=self.config.max_consecutive_format_errors or 3
         )
+        self.command_authorization_state = CommandAuthorizationState()
         self.stagnation_guard = StagnationGuard()
         self.executed_action_count = 0
         self.repository_progress = False
@@ -101,6 +132,25 @@ class HardenedDefaultAgent(DefaultAgent):
                 "validation_reason": evaluation.validation_reason,
                 "rejected_command": evaluation.rejected_command,
                 "termination_reason": evaluation.termination_reason,
+            },
+        )
+
+    def _policy_recovery_message(
+        self,
+        decision: AuthorizationDecision,
+        termination_reason: str | None,
+    ) -> dict[str, Any]:
+        return self.model.format_message(
+            role="user",
+            content=render_policy_recovery_prompt(decision.reason or ACTION_POLICY_VIOLATION),
+            extra={
+                "interrupt_type": ACTION_POLICY_VIOLATION,
+                "action_policy_recovery": True,
+                "policy_version": decision.policy_version,
+                "command_category": decision.category,
+                "matched_rule": decision.matched_rule,
+                "authorization_reason": decision.reason,
+                "termination_reason": termination_reason,
             },
         )
 
@@ -198,6 +248,56 @@ class HardenedDefaultAgent(DefaultAgent):
             )
         self.add_messages(*messages)
 
+    def _record_policy_rejection(self, error: ActionPolicyRejected) -> None:
+        decision = error.decision
+        last_message = self.messages[-1]
+        extra = last_message.setdefault("extra", {})
+        if not isinstance(extra, dict):
+            extra = {}
+            last_message["extra"] = extra
+        extra.update(
+            {
+                "action_policy_event": ACTION_POLICY_VIOLATION,
+                "action_policy_rejected": True,
+                "policy_version": decision.policy_version,
+                "rejected_command": decision.command,
+                "command_category": decision.category,
+                "matched_rule": decision.matched_rule,
+                "authorization_reason": decision.reason,
+                "raw_model_response": error.raw_response,
+                "raw_response_sha256": self._raw_digest(error.raw_response),
+                "termination_reason": error.termination_reason,
+            }
+        )
+        self._emit(
+            ACTION_POLICY_VIOLATION,
+            policy_version=decision.policy_version,
+            prohibited_command=decision.command,
+            command_category=decision.category,
+            matched_rule=decision.matched_rule,
+            authorization_reason=decision.reason,
+            policy_violation_count=self.command_authorization_state.policy_violation_count,
+            consecutive_policy_violation_count=(
+                self.command_authorization_state.consecutive_policy_violation_count
+            ),
+            raw_response_sha256=self._raw_digest(error.raw_response),
+            termination_reason=error.termination_reason,
+        )
+        messages = [self._policy_recovery_message(decision, error.termination_reason)]
+        if error.termination_reason:
+            messages.append(
+                self._exit_message(
+                    error.termination_reason,
+                    policy_version=decision.policy_version,
+                    prohibited_command=decision.command,
+                    command_category=decision.category,
+                    matched_rule=decision.matched_rule,
+                    authorization_reason=decision.reason,
+                    raw_response_sha256=self._raw_digest(error.raw_response),
+                )
+            )
+        self.add_messages(*messages)
+
     def run(self, task: str = "", **kwargs: Any) -> dict[str, Any]:
         self.extra_template_vars |= {"task": task, **kwargs}
         self.messages = []
@@ -218,6 +318,8 @@ class HardenedDefaultAgent(DefaultAgent):
                 self._record_format_error(error)
             except ProtocolRejected as error:
                 self._record_semantic_rejection(error.evaluation)
+            except ActionPolicyRejected as error:
+                self._record_policy_rejection(error)
             except InterruptAgentFlow as error:
                 self.add_messages(*error.messages)
             except Exception as error:
@@ -249,7 +351,24 @@ class HardenedDefaultAgent(DefaultAgent):
         ):
             raise RuntimeError("production parser and semantic validator action mismatch")
 
+        # Required enforcement order: parser -> semantic validation -> command
+        # authorization -> repository capture -> environment execution.
         command = evaluation.command or ""
+        authorization = authorize_command(command)
+        if not authorization.authorized:
+            state_decision = self.command_authorization_state.record_violation(authorization)
+            raise ActionPolicyRejected(
+                authorization,
+                raw_response=raw_response,
+                termination_reason=state_decision.termination_reason,
+            )
+        self.command_authorization_state.record_authorized()
+        self._emit(
+            "command_authorized",
+            command=command,
+            policy_version=authorization.policy_version,
+            command_category=authorization.category,
+        )
         before = repository_hash(self.repository)
         try:
             output = self.env.execute(actions[0])
@@ -313,9 +432,15 @@ class HardenedDefaultAgent(DefaultAgent):
             repository_progress=self.repository_progress,
             functional_outcome="SUBMITTED" if reason == "Submitted" else "INCOMPLETE",
         )
+        if reason == REPEATED_POLICY_VIOLATION:
+            dimensions.update(
+                model_format_status="PASS",
+                failure_dimension="command_authorization",
+            )
         return {
             **dimensions,
             **self.protocol_state.as_dict(),
+            **self.command_authorization_state.as_dict(),
             "transitions": [
                 fingerprint.as_dict()
                 for fingerprint in self.stagnation_guard.transitions

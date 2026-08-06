@@ -26,6 +26,7 @@ from cmpilot_action_protocol import (
     prompt_match_report,
     render_recovery_prompt,
 )
+from cmpilot_command_authorization import policy_specification
 from cmpilot_hardened_agent import HardenedDefaultAgent
 from cmpilot_mini_swe_config import (
     MiniSWEEndpointSettings,
@@ -92,6 +93,12 @@ Path(os.environ["CMPILOT_MINI_SOURCE_MANIFEST_ARTIFACT"]).write_text(
     encoding="utf-8",
 )
 emit_event("installed_sources_validated")
+command_policy = policy_specification()
+Path(os.environ["CMPILOT_COMMAND_POLICY_ARTIFACT"]).write_text(
+    json.dumps(command_policy, indent=2, sort_keys=True) + "\n",
+    encoding="utf-8",
+)
+emit_event("command_authorization_policy_loaded", policy_version=command_policy["policy_version"])
 
 repository = Path(os.environ["CMPILOT_REPOSITORY"])
 task_file = Path(os.environ["CMPILOT_TASK_FILE"])
@@ -119,6 +126,7 @@ artifact_metadata = {
     "model_transport": transport_artifact,
     "agent_config_yaml": Path(os.environ["CMPILOT_AGENT_CONFIG_ARTIFACT"]),
     "agent_config_json": Path(os.environ["CMPILOT_AGENT_CONFIG_JSON_ARTIFACT"]),
+    "command_authorization_policy": Path(os.environ["CMPILOT_COMMAND_POLICY_ARTIFACT"]),
 }
 
 base_config = yaml.safe_load(

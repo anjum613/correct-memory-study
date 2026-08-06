@@ -62,6 +62,16 @@ DIRECT_MODEL_CLASS = "cmpilot_vllm_text_model.VllmTextModel"
 _SENSITIVE_KEY = re.compile(
     r"(?:^|[_-])(?:api[_-]?key|authorization|token|password|secret)(?:$|[_-])", re.IGNORECASE
 )
+_PUBLIC_AUTHORIZATION_KEYS = frozenset(
+    {"command_authorization_policy", "command_authorization_status"}
+)
+
+
+def _is_sensitive_key(key: str) -> bool:
+    return (
+        key.lower() not in _PUBLIC_AUTHORIZATION_KEYS
+        and _SENSITIVE_KEY.search(key) is not None
+    )
 
 
 def _type_name(value: object) -> str:
@@ -184,7 +194,7 @@ def assert_no_sensitive_keys(value: Any, path: str = "$") -> None:
     if isinstance(value, dict):
         for key, item in value.items():
             child = _child_path(path, key)
-            if _SENSITIVE_KEY.search(key):
+            if _is_sensitive_key(key):
                 raise PlainDataError(f"{child}: sensitive configuration keys must not be persisted")
             assert_no_sensitive_keys(item, child)
     elif isinstance(value, list):
