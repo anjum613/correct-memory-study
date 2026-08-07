@@ -20,7 +20,14 @@ from typing import Any, Callable
 from .artifact_logger import create_run_directory, write_json, write_text
 from .mini_swe_adapter import MiniSWEInfo, command, mini_swe_info, write_adapter
 from .outcome_classifier import classify
-from .repository_manager import final_patch, git, prepare_working_copy, run_tests, template_snapshot
+from .repository_manager import (
+    final_patch,
+    git,
+    prepare_working_copy,
+    repository_preparation_record,
+    run_tests,
+    template_snapshot,
+)
 from .vllm_client import ModelProbe, probe_models, validate_model
 
 
@@ -577,6 +584,11 @@ def run_smoke(
             config.template,
             destination=artifacts / "working-copy",
         )
+        preparation_record = repository_preparation_record(
+            config.template,
+            working_copy,
+            initial_commit,
+        )
     except (OSError, subprocess.SubprocessError) as error:
         return _finish(
             artifacts,
@@ -589,6 +601,8 @@ def run_smoke(
     run["temporary_repository_path"] = str(working_copy)
     run["initial_commit"] = initial_commit
     write_text(artifacts / "initial-commit.txt", initial_commit + "\n")
+    run["repository_preparation"] = preparation_record
+    write_json(artifacts / "repository-preparation.json", preparation_record)
     initial_snapshot = _source_snapshot(working_copy)
     write_json(artifacts / "initial-file-hashes.json", _snapshot_artifact(initial_snapshot))
     write_text(artifacts / "initial-tree.txt", "\n".join(str(path) for path in sorted(initial_snapshot)) + "\n")

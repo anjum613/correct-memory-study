@@ -13,7 +13,13 @@ from typing import Any
 
 from .artifact_logger import write_json, write_text
 from .mini_swe_adapter import command, mini_swe_info, write_adapter
-from .repository_manager import final_patch, git, prepare_working_copy, template_snapshot
+from .repository_manager import (
+    final_patch,
+    git,
+    prepare_working_copy,
+    repository_preparation_record,
+    template_snapshot,
+)
 from .smoke_runner import (
     DEFAULT_TASK,
     DEFAULT_TEMPLATE,
@@ -146,10 +152,16 @@ def run_adapter_preflight(config: AdapterPreflightConfig) -> int:
         config.template,
         destination=artifacts / "working-copy",
     )
+    preparation_record = repository_preparation_record(
+        config.template,
+        working_copy,
+        initial_commit,
+    )
     initial_snapshot = _source_snapshot(working_copy)
     write_json(artifacts / "original-file-hashes.json", _snapshot_artifact(template_before))
     write_json(artifacts / "initial-file-hashes.json", _snapshot_artifact(initial_snapshot))
     write_text(artifacts / "initial-commit.txt", initial_commit + "\n")
+    write_json(artifacts / "repository-preparation.json", preparation_record)
     task_text = config.task_file.read_text(encoding="utf-8")
     write_text(artifacts / "task.txt", task_text)
     write_text(artifacts / "task-instruction.md", task_text)
