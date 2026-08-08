@@ -12,6 +12,7 @@ from minisweagent.exceptions import FormatError, InterruptAgentFlow
 try:
     from .command_authorization import (
         ACTION_POLICY_VIOLATION,
+        INTERACTIVE_EDITOR_PROHIBITED,
         PROTECTED_PATH_WRITE_ATTEMPT,
         REPEATED_POLICY_VIOLATION,
         AuthorizationDecision,
@@ -36,9 +37,11 @@ try:
         capture_protected_path_state,
         check_protected_path_integrity,
     )
+    from .context_budget import ContextBudgetExhausted
 except ImportError:
     from cmpilot_command_authorization import (  # type: ignore[no-redef]
         ACTION_POLICY_VIOLATION,
+        INTERACTIVE_EDITOR_PROHIBITED,
         PROTECTED_PATH_WRITE_ATTEMPT,
         REPEATED_POLICY_VIOLATION,
         AuthorizationDecision,
@@ -63,6 +66,7 @@ except ImportError:
         capture_protected_path_state,
         check_protected_path_integrity,
     )
+    from cmpilot_context_budget import ContextBudgetExhausted  # type: ignore[no-redef]
 
 
 EventSink = Callable[..., None]
@@ -342,6 +346,27 @@ class HardenedDefaultAgent(DefaultAgent):
                 matched_rule=decision.matched_rule,
                 shell_invocations=0,
             )
+        if decision.reason == INTERACTIVE_EDITOR_PROHIBITED:
+            protected_relationship = (
+                decision.matched_rule == "interactive-editor-protected-target"
+            )
+            self._emit(
+                INTERACTIVE_EDITOR_PROHIBITED,
+                prohibited_command=decision.command,
+                command_category=decision.category,
+                matched_rule=decision.matched_rule,
+                protected_path_relationship=protected_relationship,
+                shell_invocations=0,
+            )
+            if protected_relationship:
+                self._emit(
+                    PROTECTED_PATH_WRITE_ATTEMPT,
+                    prohibited_command=decision.command,
+                    command_category=decision.category,
+                    matched_rule="interactive-editor-protected-relationship",
+                    relationship_only=True,
+                    shell_invocations=0,
+                )
         messages = [self._policy_recovery_message(decision, error.termination_reason)]
         if error.termination_reason:
             messages.append(
@@ -379,6 +404,14 @@ class HardenedDefaultAgent(DefaultAgent):
                 self._record_semantic_rejection(error.evaluation)
             except ActionPolicyRejected as error:
                 self._record_policy_rejection(error)
+            except ContextBudgetExhausted as error:
+                self.add_messages(
+                    self._exit_message(
+                        "CONTEXT_BUDGET_EXHAUSTED",
+                        context_budget=error.budget.as_dict(),
+                        http_request_sent=False,
+                    )
+                )
             except InterruptAgentFlow as error:
                 self.add_messages(*error.messages)
             except Exception as error:

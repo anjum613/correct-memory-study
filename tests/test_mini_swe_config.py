@@ -183,6 +183,15 @@ def test_mini_swe_config_generation_uses_only_supported_sections(tmp_path: Path)
     assert plain["model"]["model_name"] == "test-model"
     assert plain["model"]["base_url"] == "http://127.0.0.1:9/v1"
     assert plain["model"]["max_tokens"] == 512
+    assert plain["model"]["context_limit"] == 4096
+    assert plain["model"]["context_safety_margin"] == 32
+    assert plain["model"]["minimum_useful_completion"] == 64
+    assert plain["model"]["tokenizer_path"].endswith(
+        "381fc969f78efac66bc87ff7ddeadb7e73c218a7"
+    )
+    assert plain["model"]["request_budget_artifact_path"] == str(
+        tmp_path / "request-budgets.jsonl"
+    )
     assert plain["model"]["connect_timeout_seconds"] == 2.0
     assert plain["model"]["read_timeout_seconds"] == 2.0
     assert "model_kwargs" not in plain["model"]
@@ -213,8 +222,31 @@ def test_secrets_are_not_written_and_max_tokens_is_not_a_secret(tmp_path: Path) 
 
 def test_public_command_authorization_policy_metadata_is_not_a_credential() -> None:
     assert_no_sensitive_keys(
-        {"command_authorization_policy": {"policy_version": "calculator-capability-policy-v2"}}
+        {"command_authorization_policy": {"policy_version": "calculator-capability-policy-v3"}}
     )
+
+
+def test_direct_model_rejects_context_policy_changes() -> None:
+    result = _run_in_mini_environment(
+        """
+        from pydantic import ValidationError
+        from cmpilot.integrations.miniswe.vllm_text_model import VllmTextModelConfig
+
+        try:
+            VllmTextModelConfig(
+                model_name='model',
+                base_url='http://127.0.0.1:9/v1',
+                context_limit=8192,
+            )
+        except ValidationError:
+            print('frozen-context-rejected')
+        else:
+            raise AssertionError('context policy change was accepted')
+        """
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip().endswith("frozen-context-rejected")
 
 
 def test_secret_wrapper_is_rejected() -> None:

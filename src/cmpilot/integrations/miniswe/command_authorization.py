@@ -25,7 +25,7 @@ except ImportError:
     )
 
 
-POLICY_VERSION = "calculator-capability-policy-v2"
+POLICY_VERSION = "calculator-capability-policy-v3"
 ACTION_POLICY_VIOLATION = "ACTION_POLICY_VIOLATION"
 REPEATED_POLICY_VIOLATION = "REPEATED_POLICY_VIOLATION"
 PACKAGE_MANAGEMENT_PROHIBITED = "PACKAGE_MANAGEMENT_PROHIBITED"
@@ -34,6 +34,7 @@ SYSTEM_MUTATION_PROHIBITED = "SYSTEM_MUTATION_PROHIBITED"
 UNSAFE_COMMAND_INDIRECTION = "UNSAFE_COMMAND_INDIRECTION"
 PROTECTED_PATH_WRITE_ATTEMPT = "PROTECTED_PATH_WRITE_ATTEMPT"
 INACCESSIBLE_PATH_ACCESS_ATTEMPT = "INACCESSIBLE_PATH_ACCESS_ATTEMPT"
+INTERACTIVE_EDITOR_PROHIBITED = "INTERACTIVE_EDITOR_PROHIBITED"
 
 ALLOWED_REPOSITORY_WORK = "allowed_repository_work"
 PROHIBITED_ENVIRONMENT_MUTATION = "prohibited_environment_mutation"
@@ -42,16 +43,34 @@ PROHIBITED_NETWORK_ACCESS = "prohibited_network_access"
 PROHIBITED_EXECUTION_INDIRECTION = "prohibited_execution_indirection"
 PROHIBITED_PROTECTED_PATH_WRITE = "prohibited_protected_path_write"
 PROHIBITED_HARNESS_PATH_ACCESS = "prohibited_harness_path_access"
+PROHIBITED_INTERACTIVE_EDITOR = "prohibited_interactive_editor"
 
 POLICY_RECOVERY_PROMPT = """The previous command is not permitted by the command-authorization policy.
 Use only existing repository tools and dependencies, and edit only writable task files.
 Choose one different inspection, edit, build, or test command, then wait for its observation.
+"""
+INTERACTIVE_EDITOR_RECOVERY_PROMPT = """Interactive editors are not permitted in this non-interactive task.
+Use an authorized noninteractive repository editing method. Tests are read-only.
 """
 
 _CONTROL_OPERATORS = frozenset({";", "&&", "||", "|", "|&"})
 _REDIRECTION_OPERATORS = frozenset({">", ">>", "<", "<>"})
 _WRITE_REDIRECTION_OPERATORS = frozenset({">", ">>", "<>"})
 _SHELL_EXECUTABLES = frozenset({"bash", "dash", "ksh", "sh", "zsh"})
+_INTERACTIVE_EDITORS = frozenset(
+    {
+        "ed",
+        "emacs",
+        "emacsclient",
+        "ex",
+        "nano",
+        "nvim",
+        "pico",
+        "vi",
+        "view",
+        "vim",
+    }
+)
 _DIRECT_NETWORK_EXECUTABLES = frozenset(
     {
         "curl",
@@ -133,12 +152,18 @@ class CommandAuthorizationState:
         self.repeated_policy_violation_count = 0
         self._last_rejected_command: str | None = None
         self.prohibited_command_categories: set[str] = set()
+        self.interactive_editor_attempted = False
+        self.protected_path_relationship_attempted = False
 
     def record_violation(self, decision: AuthorizationDecision) -> PolicyStateDecision:
         if decision.authorized:
             raise ValueError("authorized command cannot be recorded as a policy violation")
         self.policy_violation_count += 1
         self.prohibited_command_categories.add(decision.category)
+        if decision.reason == INTERACTIVE_EDITOR_PROHIBITED:
+            self.interactive_editor_attempted = True
+            if decision.matched_rule == "interactive-editor-protected-target":
+                self.protected_path_relationship_attempted = True
         normalized = _normalize(decision.command)
         if normalized == self._last_rejected_command:
             self.consecutive_policy_violation_count += 1
@@ -160,6 +185,7 @@ class CommandAuthorizationState:
         network_attempted = PROHIBITED_NETWORK_ACCESS in self.prohibited_command_categories
         protected_path_attempted = (
             PROHIBITED_PROTECTED_PATH_WRITE in self.prohibited_command_categories
+            or self.protected_path_relationship_attempted
         )
         return {
             "command_authorization_status": (
@@ -179,6 +205,11 @@ class CommandAuthorizationState:
             "protected_path_violation": False,
             "protected_path_write_attempted": protected_path_attempted,
             "protected_path_write_executed": False,
+            "interactive_editor_attempted": self.interactive_editor_attempted,
+            "interactive_editor_executed": False,
+            "interactive_editor_protected_path_relationship": (
+                self.protected_path_relationship_attempted
+            ),
         }
 
 
@@ -674,6 +705,22 @@ def _analyze_segment(
     executable = _basename(executable_token)
     arguments = stripped[1:]
 
+    if executable in _INTERACTIVE_EDITORS:
+        protected_relationship = any(
+            _target_is_protected(target, task_policy)
+            for target in _plain_operands(arguments)
+        )
+        return _rejected(
+            command,
+            category=PROHIBITED_INTERACTIVE_EDITOR,
+            reason=INTERACTIVE_EDITOR_PROHIBITED,
+            matched_rule=(
+                "interactive-editor-protected-target"
+                if protected_relationship
+                else "interactive-editor"
+            ),
+        )
+
     inaccessible_rule = _inaccessible_path_rule(executable, arguments, task_policy)
     if inaccessible_rule is not None:
         return _inaccessible_path_rejection(command, inaccessible_rule)
@@ -843,6 +890,8 @@ def authorize_command(
 
 def render_policy_recovery_prompt(reason: str) -> str:
     """Return parser-inert recovery guidance without echoing rejected content."""
+    if reason == INTERACTIVE_EDITOR_PROHIBITED:
+        return INTERACTIVE_EDITOR_RECOVERY_PROMPT
     if not re.fullmatch(r"[A-Z_]+", reason):
         reason = ACTION_POLICY_VIOLATION
     return POLICY_RECOVERY_PROMPT + f"\nAuthorization reason: {reason}."
@@ -862,6 +911,7 @@ def policy_specification() -> dict[str, Any]:
             PROHIBITED_EXECUTION_INDIRECTION,
             PROHIBITED_PROTECTED_PATH_WRITE,
             PROHIBITED_HARNESS_PATH_ACCESS,
+            PROHIBITED_INTERACTIVE_EDITOR,
         ],
         "event": ACTION_POLICY_VIOLATION,
         "repeated_violation_termination": REPEATED_POLICY_VIOLATION,
@@ -930,5 +980,14 @@ def policy_specification() -> dict[str, Any]:
                 "external-oracle-access",
                 "harness-path-access",
             ],
+            "interactive_editors": {
+                "executables": sorted(_INTERACTIVE_EDITORS),
+                "absolute_paths_and_wrappers_inspected": True,
+                "reason": INTERACTIVE_EDITOR_PROHIBITED,
+                "ed_and_ex_included": (
+                    "line-oriented interactive editors can block in the "
+                    "non-interactive agent shell and bypass auditable edit mechanisms"
+                ),
+            },
         },
     }

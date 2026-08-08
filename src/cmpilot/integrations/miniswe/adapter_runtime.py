@@ -113,6 +113,7 @@ task = task_file.read_text(encoding="utf-8")
 trajectory = Path(os.environ["CMPILOT_TRAJECTORY"])
 patch_history = Path(os.environ["CMPILOT_PATCH_HISTORY"])
 transport_artifact = Path(os.environ["CMPILOT_MODEL_TRANSPORT_ARTIFACT"])
+request_budget_artifact = Path(os.environ["CMPILOT_REQUEST_BUDGET_ARTIFACT"])
 event_path = Path(os.environ["CMPILOT_ADAPTER_EVENTS"])
 preflight_mode = os.environ.get("CMPILOT_ADAPTER_PREFLIGHT") == "1"
 
@@ -124,6 +125,7 @@ cmpilot_run_metadata = {
 endpoint_settings = MiniSWEEndpointSettings(
     base_url=os.environ["CMPILOT_BASE_URL"],
     model=os.environ["CMPILOT_MODEL"],
+    tokenizer_path=os.environ["CMPILOT_TOKENIZER_PATH"],
     request_timeout_seconds=2.0 if preflight_mode else None,
     max_retries=0,
 )
@@ -131,6 +133,7 @@ artifact_metadata = {
     "trajectory": trajectory,
     "patch_history": patch_history,
     "model_transport": transport_artifact,
+    "request_budgets": request_budget_artifact,
     "agent_config_yaml": Path(os.environ["CMPILOT_AGENT_CONFIG_ARTIFACT"]),
     "agent_config_json": Path(os.environ["CMPILOT_AGENT_CONFIG_JSON_ARTIFACT"]),
     "command_authorization_policy": Path(os.environ["CMPILOT_COMMAND_POLICY_ARTIFACT"]),
@@ -158,6 +161,7 @@ raw_mini_config = build_mini_swe_config(
         "PYTHONDONTWRITEBYTECODE": "1",
     },
     transport_artifact=transport_artifact,
+    request_budget_artifact=request_budget_artifact,
     event_path=event_path,
 )
 raw_mini_config["agent"]["system_template"] = INITIAL_SYSTEM_TEMPLATE

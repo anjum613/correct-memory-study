@@ -26,7 +26,11 @@ from .post_agent_pipeline import (
     PostAgentPipeline,
     analyze_task_repository,
 )
-from .repository_manager import prepare_working_copy, run_tests
+from .repository_manager import (
+    prepare_working_copy,
+    repository_preparation_record,
+    run_tests,
+)
 from .task_file_policy import (
     PROTECTED_PATH_INTEGRITY_VIOLATION,
     apply_task_file_permissions,
@@ -197,6 +201,10 @@ def run_deterministic_job_25575_replay(
         destination=output_directory / "working-copy",
         task_policy=policy,
     )
+    preparation = repository_preparation_record(
+        source_repository, repository, initial_commit
+    )
+    _write_json(output_directory / "repository-preparation.json", preparation)
     permissions = apply_task_file_permissions(repository, policy)
     protected_expected = capture_protected_path_state(repository, policy)
     initial_test_hash = protected_expected[0].sha256
@@ -389,6 +397,7 @@ def run_deterministic_job_25575_replay(
     result = {
         "schema": "deterministic-job-25575-replay-v1",
         "initial_commit": initial_commit,
+        "repository_preparation": preparation,
         "package_install_shell_calls": sum(
             entry["command"] == PACKAGE_INSTALL_COMMAND for entry in shell_history
         ),

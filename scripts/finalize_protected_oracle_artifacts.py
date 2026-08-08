@@ -127,6 +127,15 @@ def main() -> int:
         "runtime-manifest.json",
         "protected-oracle-cpu-gate.sbatch",
         "protected-oracle-cpu-gate.py",
+        "calculator-final-harness-cpu-gate.sbatch",
+        "calculator-final-harness-cpu-gate.py",
+        "local-complete-tests.stdout",
+        "local-complete-tests.stderr",
+        "local-complete-tests.exit",
+        "local-targeted-tests.stdout",
+        "local-targeted-tests.stderr",
+        "local-targeted-tests.exit",
+        "job-25642-forensic-review.json",
     ):
         source = pre_submit / name
         if source.is_file():

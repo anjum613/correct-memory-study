@@ -14,6 +14,7 @@ from cmpilot.mini_swe_adapter import (
     RUNTIME_HARDENED_AGENT_MODULE,
     METADATA_VERSION_QUERY,
     RUNTIME_CONFIG_MODULE,
+    RUNTIME_CONTEXT_BUDGET_MODULE,
     mini_swe_info,
     RUNTIME_MODEL_MODULE,
     RUNTIME_SOURCE_MANIFEST_MODULE,
@@ -106,6 +107,8 @@ def test_adapter_uses_strict_config_boundary_before_agent_initialization() -> No
     assert "get_model_class" in ADAPTER_SOURCE
     assert 'emit_event("agent_initialized")' in ADAPTER_SOURCE
     assert 'CMPILOT_MODEL_TRANSPORT_ARTIFACT' in ADAPTER_SOURCE
+    assert 'CMPILOT_REQUEST_BUDGET_ARTIFACT' in ADAPTER_SOURCE
+    assert 'CMPILOT_TOKENIZER_PATH' in ADAPTER_SOURCE
     assert "recursive_merge" not in ADAPTER_SOURCE
 
 
@@ -122,5 +125,6 @@ def test_write_adapter_preserves_the_canonical_runtime_helper(tmp_path: Path) ->
         RUNTIME_MODEL_MODULE,
         RUNTIME_TRANSPORT_MODULE,
         RUNTIME_SOURCE_MANIFEST_MODULE,
+        RUNTIME_CONTEXT_BUDGET_MODULE,
     ):
         assert (tmp_path / name).is_file()

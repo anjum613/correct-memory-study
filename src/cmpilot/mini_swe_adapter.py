@@ -16,6 +16,7 @@ RUNTIME_HARDENED_AGENT_MODULE = "cmpilot_hardened_agent.py"
 RUNTIME_CONFIG_MODULE = "cmpilot_mini_swe_config.py"
 RUNTIME_MODEL_MODULE = "cmpilot_vllm_text_model.py"
 RUNTIME_TRANSPORT_MODULE = "cmpilot_openai_transport.py"
+RUNTIME_CONTEXT_BUDGET_MODULE = "cmpilot_context_budget.py"
 RUNTIME_SOURCE_MANIFEST_MODULE = "cmpilot_mini_swe_sources.py"
 _INTEGRATION_ROOT = Path(__file__).with_name("integrations") / "miniswe"
 SEMANTIC_VERSION = re.compile(r"\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?")
@@ -86,6 +87,7 @@ def write_adapter(path: Path) -> None:
         RUNTIME_CONFIG_MODULE: Path(__file__).with_name("mini_swe_config.py"),
         RUNTIME_MODEL_MODULE: _INTEGRATION_ROOT / "vllm_text_model.py",
         RUNTIME_TRANSPORT_MODULE: _INTEGRATION_ROOT / "openai_transport.py",
+        RUNTIME_CONTEXT_BUDGET_MODULE: _INTEGRATION_ROOT / "context_budget.py",
         RUNTIME_SOURCE_MANIFEST_MODULE: _INTEGRATION_ROOT / "source_manifest.py",
     }
     for destination, source in sources.items():

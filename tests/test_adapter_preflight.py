@@ -51,8 +51,9 @@ def test_exact_adapter_reaches_first_request_before_dummy_connection_failure(tmp
         "mini_swe_config_validated",
         "protected_path_baseline_captured",
         "agent_initialized",
-        "model_request_attempted",
-        "model_request_failed",
+            "model_request_attempted",
+            "model_request_budgeted",
+            "model_request_failed",
         "agent_failed",
     ]
     assert trajectory["info"]["model_stats"]["api_calls"] == 1
@@ -62,5 +63,5 @@ def test_exact_adapter_reaches_first_request_before_dummy_connection_failure(tmp
     assert not (artifacts / "patch.diff").read_text(encoding="utf-8")
     assert not (artifacts / "git-status.txt").read_text(encoding="utf-8")
     assert not (artifacts / "patch-history.jsonl").exists()
-    assert policy["policy_version"] == "calculator-capability-policy-v2"
+    assert policy["policy_version"] == "calculator-capability-policy-v3"
     assert all(result["checks"].values())

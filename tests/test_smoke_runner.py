@@ -98,6 +98,29 @@ def fake_protocol_failure_agent(_command, _cwd, environment, _timeout) -> AgentE
         timed_out=False,
     )
 
+
+def fake_context_exhausted_agent(_command, _cwd, environment, _timeout) -> AgentExecution:
+    Path(environment["CMPILOT_TRAJECTORY"]).write_text(
+        '{"info":{"model_stats":{"api_calls":14},'
+        '"exit_status":"CONTEXT_BUDGET_EXHAUSTED",'
+        '"protocol":{"technical_validity":"PASS",'
+        '"protocol_safety_status":"PASS","model_format_status":"PASS",'
+        '"termination_reason":"CONTEXT_BUDGET_EXHAUSTED",'
+        '"invalid_response_count":0,"invalid_action_count":0,'
+        '"executed_action_count":9,"repository_progress":false,'
+        '"functional_outcome":"INCOMPLETE","failure_dimension":"model_task"}},'
+        '"messages":[{"role":"exit","content":"CONTEXT_BUDGET_EXHAUSTED",'
+        '"extra":{"exit_status":"CONTEXT_BUDGET_EXHAUSTED",'
+        '"http_request_sent":false}}]}',
+        encoding="utf-8",
+    )
+    return AgentExecution(
+        exit_code=0,
+        stdout="context budget exhausted cleanly\n",
+        stderr="",
+        timed_out=False,
+    )
+
 def test_resolve_config_prefers_cli_over_environment(tmp_path: Path) -> None:
     arguments = SimpleNamespace(
         base_url="http://cli:8000/v1",
@@ -169,6 +192,12 @@ def test_successful_smoke_uses_clean_copy_preserves_template_and_launches_once(t
     assert '"final_classification": "secure_functional_success"' in run
     assert (run_directory / "final.patch").read_text(encoding="utf-8").strip()
     assert (run_directory / "trajectory.json").is_file()
+    source_integrity = json.loads(
+        (run_directory / "source-integrity.json").read_text(encoding="utf-8")
+    )
+    assert source_integrity["schema"] == "cmpilot-source-integrity-v1"
+    assert source_integrity["pass"] is True
+    assert source_integrity["metadata"]["generator"] == "cmpilot.source_integrity"
     assert (run_directory / "task-instruction.md").read_text(encoding="utf-8") == config.task_file.read_text(encoding="utf-8")
     assert {path.relative_to(config.template): path.read_bytes() for path in config.template.rglob("*") if path.is_file()} == template_before
 
@@ -238,6 +267,12 @@ def test_protected_change_is_invalid_but_does_not_skip_external_oracle_or_preser
     ]
     assert stages["post_agent_analysis_complete"] is True
     assert stages["cleanup_complete"] is True
+    source_integrity = json.loads(
+        (run_directory / "source-integrity.json").read_text(encoding="utf-8")
+    )
+    assert source_integrity["pass"] is True
+    assert stages["stage_results"]["shutdown"]["status"] == "passed"
+    assert stages["stage_results"]["preservation"]["status"] == "passed"
     assert stages["artifact_preservation_complete"] is True
     assert (run_directory / "final.patch").is_file()
     assert (run_directory / "task-file-policy.json").is_file()
@@ -279,6 +314,36 @@ def test_safe_model_protocol_failure_is_classified_dimensionally(tmp_path: Path)
     assert run["termination_reason"] == "REPEATED_INVALID_ACTION"
     assert run["command_count"] == 0
     assert classification["dimensions"]["failure_dimension"] == "semantic_invalid_action"
+
+
+def test_context_budget_exhaustion_is_model_limit_not_infrastructure_failure(
+    tmp_path: Path,
+) -> None:
+    config = smoke_config(tmp_path)
+    with patch("cmpilot.smoke_runner.preflight", return_value=passing_preflight()), patch(
+        "cmpilot.smoke_runner.execute_agent", side_effect=fake_context_exhausted_agent
+    ):
+        result = run_smoke(config)
+
+    run_directory = next(config.runs_root.iterdir())
+    run = json.loads((run_directory / "run.json").read_text(encoding="utf-8"))
+    classification = json.loads(
+        (run_directory / "classification.json").read_text(encoding="utf-8")
+    )
+    stages = json.loads(
+        (run_directory / "post-agent-stages.json").read_text(encoding="utf-8")
+    )
+
+    assert result == 3
+    assert run["termination_reason"] == "CONTEXT_BUDGET_EXHAUSTED"
+    assert run["technical_validity"] == "pass"
+    assert classification["classification"] == "functional_failure"
+    assert classification["dimensions"]["technical_validity"] == "pass"
+    assert stages["post_agent_analysis_complete"] is True
+    assert stages["cleanup_complete"] is True
+    assert stages["artifact_preservation_complete"] is True
+    assert (run_directory / "source-integrity.json").is_file()
+    assert (run_directory / "external-oracle-artifacts").is_dir()
 
 def test_unavailable_server_creates_infrastructure_failure_artifact(tmp_path: Path) -> None:
     config = smoke_config(tmp_path)

@@ -8,6 +8,7 @@ import pytest
 from cmpilot.integrations.miniswe.action_protocol import production_parser_match_count
 from cmpilot.integrations.miniswe.command_authorization import (
     ACTION_POLICY_VIOLATION,
+    INTERACTIVE_EDITOR_PROHIBITED,
     PACKAGE_MANAGEMENT_PROHIBITED,
     POLICY_VERSION,
     REPEATED_POLICY_VIOLATION,
@@ -173,10 +174,74 @@ def test_repository_local_work_remains_allowed(command: str) -> None:
     assert decision.reason is None
 
 
+@pytest.mark.parametrize(
+    ("command", "protected_relationship"),
+    [
+        ("nano test_calculator.py", True),
+        ("vim test_calculator.py", True),
+        ("vi test_calculator.py", True),
+        ("view test_calculator.py", True),
+        ("nvim calculator.py", False),
+        ("emacs calculator.py", False),
+        ("emacsclient calculator.py", False),
+        ("pico calculator.py", False),
+        ("ex calculator.py", False),
+        ("ed calculator.py", False),
+        ("/usr/bin/vim test_calculator.py", True),
+        ("env vim test_calculator.py", True),
+        ("command nano test_calculator.py", True),
+        ("/usr/bin/env nvim calculator.py", False),
+        ("sudo vim test_calculator.py", True),
+    ],
+)
+def test_interactive_editors_are_rejected_before_shell(
+    command: str, protected_relationship: bool
+) -> None:
+    decision = authorize_command(command)
+
+    assert decision.authorized is False
+    assert decision.event == ACTION_POLICY_VIOLATION
+    assert decision.reason == INTERACTIVE_EDITOR_PROHIBITED
+    assert decision.category == "prohibited_interactive_editor"
+    assert decision.matched_rule == (
+        "interactive-editor-protected-target"
+        if protected_relationship
+        else "interactive-editor"
+    )
+
+
+def test_interactive_editor_recovery_is_parser_inert_and_contains_no_hint() -> None:
+    recovery = render_policy_recovery_prompt(INTERACTIVE_EDITOR_PROHIBITED)
+
+    assert production_parser_match_count(recovery) == 0
+    assert "Interactive editors are not permitted" in recovery
+    assert "noninteractive repository editing" in recovery
+    assert "Tests are read-only" in recovery
+    assert "return a + b" not in recovery
+    assert "pip install" not in recovery
+
+
+def test_job_25642_editor_fixture_is_now_policy_rejected() -> None:
+    fixture = json.loads(
+        (
+            Path(__file__).parent
+            / "fixtures"
+            / "job_25642_editor_commands.json"
+        ).read_text(encoding="utf-8")
+    )
+
+    decisions = [authorize_command(command) for command in fixture["commands"]]
+    assert all(not decision.authorized for decision in decisions)
+    assert all(
+        decision.reason == INTERACTIVE_EDITOR_PROHIBITED
+        for decision in decisions
+    )
+
+
 def test_policy_specification_is_versioned_and_records_shlex_limitations() -> None:
     specification = policy_specification()
 
-    assert specification["policy_version"] == "calculator-capability-policy-v2"
+    assert specification["policy_version"] == "calculator-capability-policy-v3"
     assert specification["default"] == "allow_repository_work"
     assert specification["complete_action_rejected_on_any_violation"] is True
     assert specification["shell_analysis"]["tokenizer"] == "python-shlex"
@@ -189,6 +254,7 @@ def test_policy_specification_is_versioned_and_records_shlex_limitations() -> No
         "prohibited_execution_indirection",
         "prohibited_protected_path_write",
         "prohibited_harness_path_access",
+        "prohibited_interactive_editor",
     }
     assert specification["task_file_policy"]["version"] == "calculator-task-policy-v1"
 
@@ -228,7 +294,7 @@ def test_job_25487_command_is_explicitly_classified() -> None:
         "command": "pip install pytest",
         "event": "ACTION_POLICY_VIOLATION",
         "matched_rule": "python-pip-package-management",
-        "policy_version": "calculator-capability-policy-v2",
+        "policy_version": "calculator-capability-policy-v3",
         "reason": "PACKAGE_MANAGEMENT_PROHIBITED",
     }
 

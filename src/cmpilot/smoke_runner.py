@@ -9,6 +9,7 @@ import os
 import platform
 import re
 import signal
+import stat
 import subprocess
 import sys
 import time
@@ -36,6 +37,8 @@ from .repository_manager import (
     git,
     prepare_working_copy,
     repository_preparation_record,
+    repository_content_digest,
+    repository_mode_inventory,
     run_tests,
     template_snapshot,
 )
@@ -45,6 +48,8 @@ from .task_file_policy import (
     check_protected_path_integrity,
 )
 from .vllm_client import ModelProbe, probe_models, validate_model
+from .mini_swe_config import DEFAULT_QWEN32B_TOKENIZER_PATH
+from .source_integrity import INPUT_SCHEMA, generate_source_integrity
 
 
 DEFAULT_TEMPLATE = Path(__file__).parents[2] / "tasks" / "smoke_test" / "repository"
@@ -65,6 +70,7 @@ class SmokeConfig:
     template: Path = DEFAULT_TEMPLATE
     task_file: Path = DEFAULT_TASK
     oracle_source: Path = DEFAULT_CALCULATOR_ORACLE
+    tokenizer_path: str = DEFAULT_QWEN32B_TOKENIZER_PATH
 
 
 @dataclass(frozen=True)
@@ -383,11 +389,13 @@ def _safe_agent_environment(
         "CMPILOT_ARTIFACT_METADATA_ARTIFACT": str(artifacts / "adapter-artifact-metadata.json"),
         "CMPILOT_ADAPTER_EVENTS": str(artifacts / "adapter-events.jsonl"),
         "CMPILOT_MODEL_TRANSPORT_ARTIFACT": str(artifacts / "model-transport.jsonl"),
+        "CMPILOT_REQUEST_BUDGET_ARTIFACT": str(artifacts / "request-budgets.jsonl"),
         "CMPILOT_MINI_SOURCE_MANIFEST_ARTIFACT": str(artifacts / "mini-swe-source-manifest.json"),
         "CMPILOT_COMMAND_POLICY_ARTIFACT": str(artifacts / "command-authorization-policy.json"),
         "CMPILOT_TASK_POLICY_ARTIFACT": str(artifacts / "task-file-policy.json"),
         "CMPILOT_AGENT_PATH": os.environ.get("PATH", os.defpath),
         "CMPILOT_MODEL": config.model,
+        "CMPILOT_TOKENIZER_PATH": str(config.tokenizer_path),
         "CMPILOT_BASE_URL": config.base_url,
     }
 
@@ -660,6 +668,10 @@ def run_smoke(
     run["repository_preparation"] = preparation_record
     write_json(artifacts / "repository-preparation.json", preparation_record)
     write_json(
+        artifacts / "source-fixture-initial.json",
+        preparation_record["source"],
+    )
+    write_json(
         artifacts / "protected-path-baseline.json",
         {
             "task_policy_version": task_policy.version,
@@ -782,12 +794,49 @@ def run_smoke(
                 "job-owned immutable oracle was not created after agent termination"
             )
         oracle_integrity = validate_oracle_bundle(immutable_oracle)
-        valid = protected_integrity.ok and source_unchanged and oracle_integrity["valid"]
+        source_information = config.template.stat()
+        source_final = {
+            "content_digest": repository_content_digest(config.template).as_record(),
+            "mode_inventory": repository_mode_inventory(config.template),
+            "path": str(config.template),
+            "root_mode": format(stat.S_IMODE(source_information.st_mode), "04o"),
+        }
+        write_json(artifacts / "source-fixture-final.json", source_final)
+        source_integrity_input = {
+            "schema": INPUT_SCHEMA,
+            "comparisons": [
+                {
+                    "name": "source-fixture",
+                    "initial_path": str(artifacts / "source-fixture-initial.json"),
+                    "final_path": str(artifacts / "source-fixture-final.json"),
+                    "expected_root_mode": preparation_record["source"]["root_mode"],
+                }
+            ],
+            "findings": [],
+            "metadata": {
+                "source_template_unchanged": source_unchanged,
+                "generator": "cmpilot.source_integrity",
+            },
+        }
+        write_json(
+            artifacts / "source-integrity-input.json", source_integrity_input
+        )
+        source_integrity = generate_source_integrity(
+            artifacts / "source-integrity-input.json",
+            artifacts / "source-integrity.json",
+        )
+        valid = (
+            protected_integrity.ok
+            and source_unchanged
+            and oracle_integrity["valid"]
+            and source_integrity["pass"]
+        )
         record = {
             "technical_validity": "pass" if valid else "fail",
             "protected_path_integrity": protected_integrity.as_dict(),
             "source_template_unchanged": source_unchanged,
             "oracle_manifest_sha256": oracle_integrity["manifest_sha256"],
+            "source_integrity": source_integrity,
         }
         state["integrity"] = record
         return record

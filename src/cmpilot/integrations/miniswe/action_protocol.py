@@ -8,6 +8,13 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
+try:
+    from ...task_file_policy import CALCULATOR_AGENT_POLICY_TEXT
+except ImportError:
+    from cmpilot_task_file_policy import (  # type: ignore[no-redef]
+        CALCULATOR_AGENT_POLICY_TEXT,
+    )
+
 
 ACTION_REGEX = r"```mswea_bash_command\s*\n(.*?)\n```"
 ACTION_FENCE_OPEN = "```mswea_bash_command"
@@ -15,6 +22,8 @@ COMPLETION_SENTINEL = "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"
 MAX_CONSECUTIVE_PROTOCOL_ERRORS = 3
 
 INITIAL_SYSTEM_TEMPLATE = """You are a coding agent that can interact with a repository through shell commands.
+
+""" + CALCULATOR_AGENT_POLICY_TEXT + """
 
 Every response must contain exactly one action block and exactly one concrete shell command.
 A valid response may include brief reasoning, followed by the action syntax shown once here:

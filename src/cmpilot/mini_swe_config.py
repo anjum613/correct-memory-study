@@ -11,6 +11,13 @@ from pathlib import Path, PurePath
 from typing import Any
 
 
+DEFAULT_QWEN32B_TOKENIZER_PATH = (
+    "/home/s224049759/model-cache/huggingface/hub/"
+    "models--Qwen--Qwen2.5-Coder-32B-Instruct/snapshots/"
+    "381fc969f78efac66bc87ff7ddeadb7e73c218a7"
+)
+
+
 class PlainDataError(ValueError):
     """Raised when a value cannot safely cross the configuration boundary."""
 
@@ -29,6 +36,7 @@ class MiniSWEEndpointSettings:
     max_retries: int | None = None
     connect_timeout_seconds: float = 10.0
     read_timeout_seconds: float = 120.0
+    tokenizer_path: str = DEFAULT_QWEN32B_TOKENIZER_PATH
 
 
 SUPPORTED_TOP_LEVEL_FIELDS = frozenset({"agent", "environment", "model"})
@@ -56,6 +64,11 @@ SUPPORTED_MODEL_FIELDS = frozenset(
         "max_tokens",
         "connect_timeout_seconds",
         "read_timeout_seconds",
+        "tokenizer_path",
+        "context_limit",
+        "context_safety_margin",
+        "minimum_useful_completion",
+        "request_budget_artifact_path",
     }
 )
 DIRECT_MODEL_CLASS = "cmpilot_vllm_text_model.VllmTextModel"
@@ -233,6 +246,7 @@ def build_mini_swe_config(
     trajectory: Path,
     agent_environment: dict[str, str],
     transport_artifact: Path | None = None,
+    request_budget_artifact: Path | None = None,
     event_path: Path | None = None,
 ) -> dict[str, Any]:
     """Build the minimal direct-model configuration loaded by mini-SWE 2.4.6."""
@@ -284,16 +298,32 @@ def build_mini_swe_config(
         "read_timeout_seconds",
         request_timeout if request_timeout is not None else endpoint.read_timeout_seconds,
     )
+    tokenizer_path = model_input.pop("tokenizer_path", endpoint.tokenizer_path)
+    context_limit = model_input.pop("context_limit", 4096)
+    context_safety_margin = model_input.pop("context_safety_margin", 32)
+    minimum_useful_completion = model_input.pop("minimum_useful_completion", 64)
+    configured_budget_artifact = model_input.pop(
+        "request_budget_artifact_path", None
+    )
     model = {
         "model_class": DIRECT_MODEL_CLASS,
         "model_name": endpoint.model,
         "base_url": endpoint.base_url,
         "temperature": temperature,
         "max_tokens": max_tokens,
+        "tokenizer_path": tokenizer_path,
+        "context_limit": context_limit,
+        "context_safety_margin": context_safety_margin,
+        "minimum_useful_completion": minimum_useful_completion,
         "connect_timeout_seconds": connect_timeout,
         "read_timeout_seconds": read_timeout,
         "transport_artifact_path": str(
             transport_artifact or trajectory.with_name("model-transport.jsonl")
+        ),
+        "request_budget_artifact_path": str(
+            request_budget_artifact
+            or configured_budget_artifact
+            or trajectory.with_name("request-budgets.jsonl")
         ),
         "event_path": str(event_path or trajectory.with_name("adapter-events.jsonl")),
         **model_input,
