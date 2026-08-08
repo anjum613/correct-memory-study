@@ -345,6 +345,9 @@ def _artifact_directory(arguments: argparse.Namespace) -> Path:
 
 def _targeted_tests() -> tuple[str, ...]:
     return (
+        "tests/test_calculator_finalizer.py",
+        "tests/test_job_25692_forensics.py",
+        "tests/test_finalizer_robustness_cpu_job.py",
         "tests/test_context_budget.py",
         "tests/test_calculator_final_harness_evidence.py",
         "tests/test_job_25642_forensics.py",
