@@ -12,6 +12,7 @@ from minisweagent.exceptions import FormatError, InterruptAgentFlow
 try:
     from .command_authorization import (
         ACTION_POLICY_VIOLATION,
+        PROTECTED_PATH_WRITE_ATTEMPT,
         REPEATED_POLICY_VIOLATION,
         AuthorizationDecision,
         CommandAuthorizationState,
@@ -27,9 +28,18 @@ try:
         render_recovery_prompt,
         repository_hash,
     )
+    from ...task_file_policy import (
+        PROTECTED_PATH_INTEGRITY_VIOLATION,
+        ProtectedPathIntegrityResult,
+        TaskFilePolicy,
+        calculator_task_policy,
+        capture_protected_path_state,
+        check_protected_path_integrity,
+    )
 except ImportError:
     from cmpilot_command_authorization import (  # type: ignore[no-redef]
         ACTION_POLICY_VIOLATION,
+        PROTECTED_PATH_WRITE_ATTEMPT,
         REPEATED_POLICY_VIOLATION,
         AuthorizationDecision,
         CommandAuthorizationState,
@@ -44,6 +54,14 @@ except ImportError:
         protocol_result_dimensions,
         render_recovery_prompt,
         repository_hash,
+    )
+    from cmpilot_task_file_policy import (  # type: ignore[no-redef]
+        PROTECTED_PATH_INTEGRITY_VIOLATION,
+        ProtectedPathIntegrityResult,
+        TaskFilePolicy,
+        calculator_task_policy,
+        capture_protected_path_state,
+        check_protected_path_integrity,
     )
 
 
@@ -80,6 +98,7 @@ class HardenedDefaultAgent(DefaultAgent):
         *,
         repository: Path,
         event_sink: EventSink | None = None,
+        task_policy: TaskFilePolicy | None = None,
         **kwargs: Any,
     ):
         super().__init__(model, env, **kwargs)
@@ -90,13 +109,45 @@ class HardenedDefaultAgent(DefaultAgent):
         )
         self.command_authorization_state = CommandAuthorizationState()
         self.stagnation_guard = StagnationGuard()
+        self.task_policy = task_policy or calculator_task_policy()
+        self.protected_path_expected = capture_protected_path_state(
+            self.repository, self.task_policy
+        )
         self.executed_action_count = 0
         self.repository_progress = False
         self.termination_reason = ""
+        self.protected_path_integrity_checks = 0
+        self.protected_path_integrity_violation = False
+        self.protected_paths_modified: set[str] = set()
+        self._emit(
+            "protected_path_baseline_captured",
+            task_policy_version=self.task_policy.version,
+            protected_paths=[state.as_dict() for state in self.protected_path_expected],
+        )
 
     def _emit(self, event: str, **details: Any) -> None:
         if self.event_sink is not None:
             self.event_sink(event, **details)
+
+    def _check_protected_paths(self, command: str) -> ProtectedPathIntegrityResult:
+        self.protected_path_integrity_checks += 1
+        result = check_protected_path_integrity(
+            self.repository, self.protected_path_expected
+        )
+        if not result.ok:
+            self.protected_path_integrity_violation = True
+            self.protected_paths_modified.update(
+                violation.path for violation in result.violations
+            )
+            self._emit(
+                PROTECTED_PATH_INTEGRITY_VIOLATION,
+                command=command,
+                task_policy_version=self.task_policy.version,
+                violations=[
+                    violation.as_dict() for violation in result.violations
+                ],
+            )
+        return result
 
     def _exit_message(self, reason: str, **details: Any) -> dict[str, Any]:
         self.termination_reason = reason
@@ -283,6 +334,14 @@ class HardenedDefaultAgent(DefaultAgent):
             raw_response_sha256=self._raw_digest(error.raw_response),
             termination_reason=error.termination_reason,
         )
+        if decision.reason == PROTECTED_PATH_WRITE_ATTEMPT:
+            self._emit(
+                PROTECTED_PATH_WRITE_ATTEMPT,
+                prohibited_command=decision.command,
+                command_category=decision.category,
+                matched_rule=decision.matched_rule,
+                shell_invocations=0,
+            )
         messages = [self._policy_recovery_message(decision, error.termination_reason)]
         if error.termination_reason:
             messages.append(
@@ -354,7 +413,7 @@ class HardenedDefaultAgent(DefaultAgent):
         # Required enforcement order: parser -> semantic validation -> command
         # authorization -> repository capture -> environment execution.
         command = evaluation.command or ""
-        authorization = authorize_command(command)
+        authorization = authorize_command(command, task_policy=self.task_policy)
         if not authorization.authorized:
             state_decision = self.command_authorization_state.record_violation(authorization)
             raise ActionPolicyRejected(
@@ -375,18 +434,28 @@ class HardenedDefaultAgent(DefaultAgent):
         except InterruptAgentFlow:
             self.protocol_state.record_valid_action()
             self.executed_action_count += 1
+            integrity = self._check_protected_paths(command)
             self._emit(
                 "action_executed",
                 command=command,
                 completion_sentinel=True,
                 repository_before=before,
+                protected_path_integrity=integrity.as_dict(),
             )
+            if not integrity.ok:
+                return self.add_messages(
+                    self._exit_message(
+                        PROTECTED_PATH_INTEGRITY_VIOLATION,
+                        protected_paths_modified=sorted(self.protected_paths_modified),
+                    )
+                )
             raise
 
         self.protocol_state.record_valid_action()
         self.executed_action_count += 1
         after = repository_hash(self.repository)
         self.repository_progress = self.repository_progress or before != after
+        integrity = self._check_protected_paths(command)
         observation = output.get("output", "") if isinstance(output, dict) else ""
         if not isinstance(observation, str):
             observation = str(observation)
@@ -402,6 +471,7 @@ class HardenedDefaultAgent(DefaultAgent):
             "action_executed",
             command=command,
             completion_sentinel=False,
+            protected_path_integrity=integrity.as_dict(),
             transition=transition.fingerprint.as_dict(),
             termination_reason=transition.termination_reason,
         )
@@ -411,6 +481,16 @@ class HardenedDefaultAgent(DefaultAgent):
             self.get_template_vars(),
         )
         added = self.add_messages(*observation_messages)
+        if not integrity.ok:
+            added.extend(
+                self.add_messages(
+                    self._exit_message(
+                        PROTECTED_PATH_INTEGRITY_VIOLATION,
+                        protected_paths_modified=sorted(self.protected_paths_modified),
+                    )
+                )
+            )
+            return added
         if transition.termination_reason:
             added.extend(
                 self.add_messages(
@@ -437,10 +517,20 @@ class HardenedDefaultAgent(DefaultAgent):
                 model_format_status="PASS",
                 failure_dimension="command_authorization",
             )
+        if self.protected_path_integrity_violation:
+            dimensions.update(
+                technical_validity="FAIL",
+                protocol_safety_status="FAIL",
+                model_format_status="PASS",
+                failure_dimension="protected_path_integrity",
+            )
         return {
             **dimensions,
             **self.protocol_state.as_dict(),
             **self.command_authorization_state.as_dict(),
+            "protected_path_violation": self.protected_path_integrity_violation,
+            "protected_paths_modified": sorted(self.protected_paths_modified),
+            "protected_path_integrity_checks": self.protected_path_integrity_checks,
             "transitions": [
                 fingerprint.as_dict()
                 for fingerprint in self.stagnation_guard.transitions

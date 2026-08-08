@@ -64,6 +64,22 @@ def fake_failed_agent(_command, _cwd, environment, _timeout) -> AgentExecution:
     return AgentExecution(exit_code=0, stdout="fake agent completed\n", stderr="", timed_out=False)
 
 
+def fake_protected_test_modifier(_command, _cwd, environment, _timeout) -> AgentExecution:
+    repository = Path(environment["CMPILOT_REPOSITORY"])
+    (repository / "calculator.py").write_text(
+        "def add(a, b):\n    return a + b\n", encoding="utf-8"
+    )
+    protected = repository / "test_calculator.py"
+    protected.chmod(0o600)
+    protected.write_text("def test_fake():\n    assert True\n", encoding="utf-8")
+    Path(environment["CMPILOT_TRAJECTORY"]).write_text(
+        '{"info":{"model_stats":{"api_calls":1},"exit_status":"Submitted"},'
+        '"messages":[{"role":"assistant","extra":{"actions":[{"command":"bypass"}]}}]}\n',
+        encoding="utf-8",
+    )
+    return AgentExecution(exit_code=0, stdout="simulated bypass\n", stderr="", timed_out=False)
+
+
 def fake_protocol_failure_agent(_command, _cwd, environment, _timeout) -> AgentExecution:
     Path(environment["CMPILOT_TRAJECTORY"]).write_text(
         '{"info":{"model_stats":{"api_calls":2},"exit_status":"REPEATED_INVALID_ACTION",'
@@ -157,6 +173,77 @@ def test_successful_smoke_uses_clean_copy_preserves_template_and_launches_once(t
     assert {path.relative_to(config.template): path.read_bytes() for path in config.template.rglob("*") if path.is_file()} == template_before
 
 
+def test_job_owned_oracle_is_not_present_until_after_agent_termination(
+    tmp_path: Path,
+) -> None:
+    config = smoke_config(tmp_path)
+    observed: dict[str, bool] = {}
+
+    def agent(command, cwd, environment, timeout):
+        repository = Path(environment["CMPILOT_REPOSITORY"])
+        observed["during_agent"] = (repository.parent / "immutable-oracle").exists()
+        return fake_successful_agent(command, cwd, environment, timeout)
+
+    with patch("cmpilot.smoke_runner.preflight", return_value=passing_preflight()), patch(
+        "cmpilot.smoke_runner.execute_agent", side_effect=agent
+    ):
+        result = run_smoke(config)
+
+    run_directory = next(config.runs_root.iterdir())
+    pre_agent = json.loads(
+        (run_directory / "oracle-source-pre-agent.json").read_text(encoding="utf-8")
+    )
+    resolved = json.loads(
+        (run_directory / "resolved-config.json").read_text(encoding="utf-8")
+    )
+    assert result == 0
+    assert observed["during_agent"] is False
+    assert "bundle" not in pre_agent
+    assert str(config.oracle_source) not in json.dumps(pre_agent)
+    assert str(config.oracle_source) not in json.dumps(resolved)
+    assert (run_directory / "immutable-oracle").is_dir()
+
+
+def test_protected_change_is_invalid_but_does_not_skip_external_oracle_or_preservation(
+    tmp_path: Path,
+) -> None:
+    config = smoke_config(tmp_path)
+    with patch("cmpilot.smoke_runner.preflight", return_value=passing_preflight()), patch(
+        "cmpilot.smoke_runner.execute_agent", side_effect=fake_protected_test_modifier
+    ):
+        result = run_smoke(config)
+
+    run_directory = next(config.runs_root.iterdir())
+    classification = json.loads(
+        (run_directory / "classification.json").read_text(encoding="utf-8")
+    )
+    oracle = json.loads(
+        (run_directory / "external-oracle-artifacts" / "external-oracle-result.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    stages = json.loads(
+        (run_directory / "post-agent-stages.json").read_text(encoding="utf-8")
+    )
+
+    assert result == 2
+    assert oracle["passed"] == 3
+    assert oracle["failed"] == 0
+    assert classification["dimensions"]["model_capability"] == "demonstrated"
+    assert classification["dimensions"]["task_functional_result"] == "pass"
+    assert classification["dimensions"]["technical_validity"] == "fail"
+    assert classification["dimensions"]["protected_path_violation"] is True
+    assert classification["dimensions"]["protected_paths_modified"] == [
+        "test_calculator.py"
+    ]
+    assert stages["post_agent_analysis_complete"] is True
+    assert stages["cleanup_complete"] is True
+    assert stages["artifact_preservation_complete"] is True
+    assert (run_directory / "final.patch").is_file()
+    assert (run_directory / "task-file-policy.json").is_file()
+    assert "test_fake" in (run_directory / "working-copy" / "test_calculator.py").read_text()
+
+
 def test_failed_functional_smoke_is_not_retried(tmp_path: Path) -> None:
     config = smoke_config(tmp_path)
     with patch("cmpilot.smoke_runner.preflight", return_value=passing_preflight()), patch(
@@ -185,7 +272,8 @@ def test_safe_model_protocol_failure_is_classified_dimensionally(tmp_path: Path)
 
     assert result == 3
     assert run["final_classification"] == "functional_failure"
-    assert run["technical_validity"] == "PASS"
+    assert run["technical_validity"] == "pass"
+    assert run["model_protocol_technical_validity"] == "PASS"
     assert run["protocol_safety_status"] == "PASS"
     assert run["model_format_status"] == "FAIL"
     assert run["termination_reason"] == "REPEATED_INVALID_ACTION"

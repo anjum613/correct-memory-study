@@ -176,7 +176,7 @@ def test_repository_local_work_remains_allowed(command: str) -> None:
 def test_policy_specification_is_versioned_and_records_shlex_limitations() -> None:
     specification = policy_specification()
 
-    assert specification["policy_version"] == "calculator-capability-policy-v1"
+    assert specification["policy_version"] == "calculator-capability-policy-v2"
     assert specification["default"] == "allow_repository_work"
     assert specification["complete_action_rejected_on_any_violation"] is True
     assert specification["shell_analysis"]["tokenizer"] == "python-shlex"
@@ -187,7 +187,10 @@ def test_policy_specification_is_versioned_and_records_shlex_limitations() -> No
         "prohibited_network_access",
         "prohibited_system_mutation",
         "prohibited_execution_indirection",
+        "prohibited_protected_path_write",
+        "prohibited_harness_path_access",
     }
+    assert specification["task_file_policy"]["version"] == "calculator-task-policy-v1"
 
 
 def test_policy_recovery_has_no_production_parser_match_or_workaround() -> None:
@@ -225,7 +228,7 @@ def test_job_25487_command_is_explicitly_classified() -> None:
         "command": "pip install pytest",
         "event": "ACTION_POLICY_VIOLATION",
         "matched_rule": "python-pip-package-management",
-        "policy_version": "calculator-capability-policy-v1",
+        "policy_version": "calculator-capability-policy-v2",
         "reason": "PACKAGE_MANAGEMENT_PROHIBITED",
     }
 

@@ -195,6 +195,7 @@ def render_cpu_gate_wrapper(
     submitted_script_path: Path | None = None,
     shared_roots: Sequence[Path] = DEFAULT_SHARED_ROOTS,
     job_name: str = "guided-backend-shared-path",
+    time_limit: str = "00:20:00",
 ) -> str:
     """Render the CPU-only wrapper that verifies and preserves its shared driver."""
     validated_driver = validate_runtime_path(driver_path, shared_roots=shared_roots)
@@ -226,6 +227,8 @@ def render_cpu_gate_wrapper(
         for item in validated_strict_inputs
     ):
         raise ValueError("strict runtime input hashes must be lowercase SHA-256")
+    if not re.fullmatch(r"[0-9]{2}:[0-5][0-9]:[0-5][0-9]", time_limit):
+        raise ValueError("time_limit must use HH:MM:SS")
     if not all(
         path.is_absolute()
         for path in (artifact_root, driver_interpreter, digest_interpreter)
@@ -299,7 +302,7 @@ def render_cpu_gate_wrapper(
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=2
 #SBATCH --mem=4G
-#SBATCH --time=00:20:00
+#SBATCH --time={time_limit}
 #SBATCH --no-requeue
 #SBATCH --job-name={job_name}
 #SBATCH --output={artifact_root}/slurm-%j.out

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 import json
 import os
 import shutil
@@ -22,6 +24,59 @@ from cmpilot.repository_manager import (
 
 def _mode(path: Path) -> int:
     return stat.S_IMODE(path.lstat().st_mode)
+
+
+def _external_target_metadata(path: Path) -> tuple[int, ...]:
+    information = path.stat()
+    return (
+        information.st_dev,
+        information.st_ino,
+        information.st_mode,
+        information.st_nlink,
+        information.st_uid,
+        information.st_gid,
+        information.st_size,
+        information.st_mtime_ns,
+        information.st_ctime_ns,
+    )
+
+
+def _unlink_deliberate_unsafe_fixture(
+    link: Path, *, test_directory: Path
+) -> None:
+    expected = test_directory / "unsafe"
+    try:
+        link.relative_to(test_directory)
+    except ValueError as error:
+        raise AssertionError("fixture link is outside its test-owned directory") from error
+    if (
+        not test_directory.is_absolute()
+        or link != expected
+        or link.parent != test_directory
+    ):
+        raise AssertionError("fixture teardown received an unexpected link path")
+    if link.is_symlink():
+        link.unlink()
+    elif os.path.lexists(link):
+        raise AssertionError("unsafe fixture link was replaced by a non-symlink")
+
+
+@contextmanager
+def _deliberate_unsafe_symlink(
+    test_directory: Path, *, target: str
+) -> Iterator[Path]:
+    link = test_directory / "unsafe"
+    if (
+        not test_directory.is_absolute()
+        or link.parent != test_directory
+        or link != test_directory / "unsafe"
+    ):
+        raise AssertionError("unsafe fixture path is not lexically test-owned")
+    link.symlink_to(target)
+    try:
+        yield link
+    finally:
+        _unlink_deliberate_unsafe_fixture(link, test_directory=test_directory)
 
 
 def _make_template(root: Path) -> dict[Path, bytes]:
@@ -157,6 +212,12 @@ def test_safe_relative_symlink_is_preserved(tmp_path: Path) -> None:
     assert copied_link.read_text(encoding="utf-8") == "target\n"
     assert repository_content_digest(destination) == source_digest
 
+    _unlink_deliberate_unsafe_fixture(
+        source / "unsafe", test_directory=source
+    )
+    assert copied_link.is_symlink()
+    assert (source / "nested/link.txt").is_symlink()
+
 
 @pytest.mark.parametrize("target", ["../outside.txt", "/etc/passwd"])
 def test_external_symlink_is_rejected_and_destination_is_cleaned(
@@ -164,17 +225,35 @@ def test_external_symlink_is_rejected_and_destination_is_cleaned(
 ) -> None:
     source = tmp_path / "source"
     source.mkdir()
-    (source / "unsafe").symlink_to(target)
     destination = tmp_path / "working-copy"
     sibling = tmp_path / "preserve-me"
     sibling.write_text("preserved\n", encoding="utf-8")
+    external_target = (
+        Path("/etc/passwd") if Path(target).is_absolute() else tmp_path / "outside.txt"
+    )
+    if not Path(target).is_absolute():
+        external_target.write_text("external target\n", encoding="utf-8")
+    external_before = _external_target_metadata(external_target)
+    unsafe_path = source / "unsafe"
+    rejection_asserted = False
 
-    with pytest.raises(RepositoryCopyError, match="outside"):
-        prepare_working_copy(source, destination=destination)
+    with _deliberate_unsafe_symlink(source, target=target) as unsafe:
+        assert unsafe == unsafe_path
+        assert unsafe.is_symlink()
+        assert os.readlink(unsafe) == target
+        with pytest.raises(RepositoryCopyError, match="outside"):
+            prepare_working_copy(source, destination=destination)
+        rejection_asserted = True
 
-    assert not destination.exists()
-    assert sibling.read_text(encoding="utf-8") == "preserved\n"
-    assert source.is_dir()
+        assert unsafe.is_symlink()
+        assert not destination.exists()
+        assert sibling.read_text(encoding="utf-8") == "preserved\n"
+        assert source.is_dir()
+        assert _external_target_metadata(external_target) == external_before
+
+    assert rejection_asserted is True
+    assert not os.path.lexists(unsafe_path)
+    assert _external_target_metadata(external_target) == external_before
 
 
 def test_unsupported_special_file_fails_and_cleans_only_destination(
@@ -196,14 +275,39 @@ def test_unsupported_special_file_fails_and_cleans_only_destination(
 def test_generated_destination_is_removed_after_copy_failure(tmp_path: Path) -> None:
     source = tmp_path / "source"
     source.mkdir()
-    (source / "unsafe").symlink_to("../outside.txt")
+    unsafe_path = source / "unsafe"
 
-    with pytest.raises(RepositoryCopyError, match="outside"):
-        prepare_working_copy(source, temporary_root=tmp_path)
+    with _deliberate_unsafe_symlink(source, target="../outside.txt") as unsafe:
+        with pytest.raises(RepositoryCopyError, match="outside"):
+            prepare_working_copy(source, temporary_root=tmp_path)
 
-    assert not list(tmp_path.glob("cmpilot-smoke-*"))
-    assert source.is_dir()
-    assert (source / "unsafe").is_symlink()
+        assert not list(tmp_path.glob("cmpilot-smoke-*"))
+        assert source.is_dir()
+        assert unsafe.is_symlink()
+
+    assert not os.path.lexists(unsafe_path)
+
+
+def test_unsafe_fixture_teardown_is_idempotent_after_later_failure(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    unsafe_path = source / "unsafe"
+
+    def fail_after_rejection() -> None:
+        with _deliberate_unsafe_symlink(source, target="../outside.txt") as unsafe:
+            with pytest.raises(RepositoryCopyError, match="outside"):
+                prepare_working_copy(source, destination=tmp_path / "working-copy")
+            assert unsafe.is_symlink()
+            raise AssertionError("simulated later assertion failure")
+
+    with pytest.raises(AssertionError, match="simulated later assertion failure"):
+        fail_after_rejection()
+
+    assert not os.path.lexists(unsafe_path)
+    _unlink_deliberate_unsafe_fixture(unsafe_path, test_directory=source)
+    assert not os.path.lexists(unsafe_path)
 
 
 def test_content_digest_ignores_permissions_and_timestamps(tmp_path: Path) -> None:

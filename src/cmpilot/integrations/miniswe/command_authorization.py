@@ -16,28 +16,41 @@ from dataclasses import asdict, dataclass
 from pathlib import PurePosixPath
 from typing import Any
 
+try:
+    from ...task_file_policy import TaskFilePolicy, calculator_task_policy
+except ImportError:
+    from cmpilot_task_file_policy import (  # type: ignore[no-redef]
+        TaskFilePolicy,
+        calculator_task_policy,
+    )
 
-POLICY_VERSION = "calculator-capability-policy-v1"
+
+POLICY_VERSION = "calculator-capability-policy-v2"
 ACTION_POLICY_VIOLATION = "ACTION_POLICY_VIOLATION"
 REPEATED_POLICY_VIOLATION = "REPEATED_POLICY_VIOLATION"
 PACKAGE_MANAGEMENT_PROHIBITED = "PACKAGE_MANAGEMENT_PROHIBITED"
 NETWORK_ACCESS_PROHIBITED = "NETWORK_ACCESS_PROHIBITED"
 SYSTEM_MUTATION_PROHIBITED = "SYSTEM_MUTATION_PROHIBITED"
 UNSAFE_COMMAND_INDIRECTION = "UNSAFE_COMMAND_INDIRECTION"
+PROTECTED_PATH_WRITE_ATTEMPT = "PROTECTED_PATH_WRITE_ATTEMPT"
+INACCESSIBLE_PATH_ACCESS_ATTEMPT = "INACCESSIBLE_PATH_ACCESS_ATTEMPT"
 
 ALLOWED_REPOSITORY_WORK = "allowed_repository_work"
 PROHIBITED_ENVIRONMENT_MUTATION = "prohibited_environment_mutation"
 PROHIBITED_SYSTEM_MUTATION = "prohibited_system_mutation"
 PROHIBITED_NETWORK_ACCESS = "prohibited_network_access"
 PROHIBITED_EXECUTION_INDIRECTION = "prohibited_execution_indirection"
+PROHIBITED_PROTECTED_PATH_WRITE = "prohibited_protected_path_write"
+PROHIBITED_HARNESS_PATH_ACCESS = "prohibited_harness_path_access"
 
 POLICY_RECOVERY_PROMPT = """The previous command is not permitted by the command-authorization policy.
-Use only existing repository tools and dependencies, and edit only repository files.
+Use only existing repository tools and dependencies, and edit only writable task files.
 Choose one different inspection, edit, build, or test command, then wait for its observation.
 """
 
 _CONTROL_OPERATORS = frozenset({";", "&&", "||", "|", "|&"})
 _REDIRECTION_OPERATORS = frozenset({">", ">>", "<", "<>"})
+_WRITE_REDIRECTION_OPERATORS = frozenset({">", ">>", "<>"})
 _SHELL_EXECUTABLES = frozenset({"bash", "dash", "ksh", "sh", "zsh"})
 _DIRECT_NETWORK_EXECUTABLES = frozenset(
     {
@@ -69,6 +82,9 @@ _SYSTEM_PACKAGE_EXECUTABLES = frozenset(
     }
 )
 _REMOTE_GIT_SUBCOMMANDS = frozenset({"clone", "fetch", "pull", "push"})
+_READ_ONLY_GIT_SUBCOMMANDS = frozenset(
+    {"diff", "grep", "log", "rev-parse", "show", "status"}
+)
 _PACKAGE_OPERATIONS = {
     "pip": frozenset({"cache", "download", "install", "uninstall", "wheel"}),
     "uv-pip": frozenset({"install", "uninstall"}),
@@ -142,6 +158,9 @@ class CommandAuthorizationState:
         environment_attempted = PROHIBITED_ENVIRONMENT_MUTATION in self.prohibited_command_categories
         system_attempted = PROHIBITED_SYSTEM_MUTATION in self.prohibited_command_categories
         network_attempted = PROHIBITED_NETWORK_ACCESS in self.prohibited_command_categories
+        protected_path_attempted = (
+            PROHIBITED_PROTECTED_PATH_WRITE in self.prohibited_command_categories
+        )
         return {
             "command_authorization_status": (
                 "PASS_WITH_BLOCKED_VIOLATIONS"
@@ -157,6 +176,9 @@ class CommandAuthorizationState:
             "environment_mutation_executed": False,
             "network_access_attempted": network_attempted,
             "network_access_executed": False,
+            "protected_path_violation": False,
+            "protected_path_write_attempted": protected_path_attempted,
+            "protected_path_write_executed": False,
         }
 
 
@@ -354,7 +376,295 @@ def _shell_payload(tokens: list[str]) -> tuple[str | None, str | None]:
     return None, "shell-without-literal-c-payload"
 
 
-def _analyze_segment(command: str, tokens: list[str], depth: int) -> AuthorizationDecision:
+def _protected_write_rejection(
+    command: str, matched_rule: str
+) -> AuthorizationDecision:
+    return _rejected(
+        command,
+        category=PROHIBITED_PROTECTED_PATH_WRITE,
+        reason=PROTECTED_PATH_WRITE_ATTEMPT,
+        matched_rule=matched_rule,
+    )
+
+
+def _target_is_allowed(target: str, task_policy: TaskFilePolicy) -> bool:
+    if target in {"-", "/dev/null"}:
+        return True
+    if any(character in target for character in _DYNAMIC_EXECUTABLE_CHARACTERS):
+        return False
+    try:
+        return task_policy.mutation_allowed(target)
+    except ValueError:
+        return False
+
+
+def _target_is_protected(target: str, task_policy: TaskFilePolicy) -> bool:
+    try:
+        return task_policy.path_role(target) in {
+            "readable_protected",
+            "inaccessible_harness",
+        }
+    except ValueError:
+        return True
+
+
+def _literal_path_candidate(token: str) -> str | None:
+    if not token or token in {"-", "/dev/null"}:
+        return None
+    if any(character.isspace() for character in token):
+        return None
+    if token.startswith("-"):
+        if "=" not in token:
+            return None
+        token = token.split("=", 1)[1]
+    return token or None
+
+
+def _inaccessible_path_rule(
+    executable: str,
+    arguments: list[str],
+    task_policy: TaskFilePolicy,
+) -> str | None:
+    for token in arguments:
+        candidate = _literal_path_candidate(token)
+        if candidate is None:
+            continue
+        path = PurePosixPath(candidate)
+        if (
+            path.is_absolute()
+            or candidate == ".."
+            or candidate.startswith("../")
+            or "/../" in candidate
+            or candidate.endswith("/..")
+        ):
+            return "repository-boundary-escape"
+        try:
+            role = task_policy.path_role(candidate)
+        except ValueError:
+            continue
+        if role == "hidden_external_oracle":
+            return "external-oracle-access"
+        if role == "inaccessible_harness":
+            if executable == "git" and (
+                candidate == ".git" or candidate.startswith(".git/")
+            ):
+                continue
+            return "harness-path-access"
+    return None
+
+
+def _inaccessible_path_rejection(
+    command: str, matched_rule: str
+) -> AuthorizationDecision:
+    return _rejected(
+        command,
+        category=PROHIBITED_HARNESS_PATH_ACCESS,
+        reason=INACCESSIBLE_PATH_ACCESS_ATTEMPT,
+        matched_rule=matched_rule,
+    )
+
+
+def _without_redirections(arguments: list[str]) -> list[str]:
+    result: list[str] = []
+    index = 0
+    while index < len(arguments):
+        token = arguments[index]
+        if token in _REDIRECTION_OPERATORS:
+            index += 2
+            continue
+        result.append(token)
+        index += 1
+    return result
+
+
+def _plain_operands(
+    arguments: list[str], *, options_with_values: frozenset[str] = frozenset()
+) -> list[str]:
+    operands: list[str] = []
+    arguments = _without_redirections(arguments)
+    index = 0
+    options_finished = False
+    while index < len(arguments):
+        token = arguments[index]
+        if not options_finished and token == "--":
+            options_finished = True
+            index += 1
+            continue
+        if not options_finished and token in options_with_values:
+            index += 2
+            continue
+        if not options_finished and token.startswith("-") and token != "-":
+            index += 1
+            continue
+        operands.append(token)
+        index += 1
+    return operands
+
+
+def _explicit_protected_literal(
+    arguments: list[str], task_policy: TaskFilePolicy
+) -> bool:
+    protected = (
+        *task_policy.readable_protected_paths,
+        *task_policy.inaccessible_harness_paths,
+    )
+    return any(
+        literal in argument
+        for argument in arguments
+        for literal in protected
+    )
+
+
+def _protected_path_write_rule(
+    executable: str,
+    arguments: list[str],
+    task_policy: TaskFilePolicy,
+) -> str | None:
+    for index, token in enumerate(arguments):
+        if token not in _WRITE_REDIRECTION_OPERATORS:
+            continue
+        if index + 1 >= len(arguments):
+            return "write-redirection-missing-target"
+        if not _target_is_allowed(arguments[index + 1], task_policy):
+            return "write-redirection-target"
+
+    clean = _without_redirections(arguments)
+    if executable == "tee":
+        targets = _plain_operands(clean)
+        if any(not _target_is_allowed(target, task_policy) for target in targets):
+            return "tee-output-target"
+
+    if executable in {"cp", "install"}:
+        target_directory: str | None = None
+        for index, token in enumerate(clean):
+            if token in {"-t", "--target-directory"} and index + 1 < len(clean):
+                target_directory = clean[index + 1]
+            elif token.startswith("--target-directory="):
+                target_directory = token.split("=", 1)[1]
+        operands = _plain_operands(
+            clean, options_with_values=frozenset({"-t", "--target-directory"})
+        )
+        destination = target_directory or (operands[-1] if len(operands) >= 2 else None)
+        if destination is not None and not _target_is_allowed(destination, task_policy):
+            return f"{executable}-destination"
+
+    if executable == "mv":
+        operands = _plain_operands(
+            clean, options_with_values=frozenset({"-t", "--target-directory"})
+        )
+        destination = operands[-1] if len(operands) >= 2 else None
+        if destination is not None and not _target_is_allowed(destination, task_policy):
+            return "mv-destination"
+        if any(_target_is_protected(source, task_policy) for source in operands[:-1]):
+            return "mv-protected-source"
+
+    if executable in {"rm", "unlink", "touch"}:
+        operands = _plain_operands(clean)
+        if any(not _target_is_allowed(target, task_policy) for target in operands):
+            return f"{executable}-target"
+
+    if executable in {"mkdir", "rmdir"}:
+        operands = _plain_operands(clean, options_with_values=frozenset({"-m"}))
+        if any(not _target_is_allowed(target, task_policy) for target in operands):
+            return f"{executable}-target"
+
+    if executable == "ln":
+        operands = _plain_operands(
+            clean,
+            options_with_values=frozenset(
+                {"-S", "--suffix", "-t", "--target-directory"}
+            ),
+        )
+        destination = operands[-1] if len(operands) >= 2 else None
+        if destination is not None and not _target_is_allowed(destination, task_policy):
+            return "ln-destination"
+        if any(_target_is_protected(source, task_policy) for source in operands[:-1]):
+            return "ln-protected-source"
+
+    if executable == "dd":
+        outputs = [
+            token.split("=", 1)[1]
+            for token in clean
+            if token.startswith("of=") and len(token) > 3
+        ]
+        if any(not _target_is_allowed(target, task_policy) for target in outputs):
+            return "dd-output-target"
+
+    if executable == "patch":
+        operands = _plain_operands(
+            clean, options_with_values=frozenset({"-i", "--input", "-o", "--output"})
+        )
+        if any(_target_is_protected(target, task_policy) for target in operands):
+            return "patch-protected-target"
+
+    if executable == "rsync":
+        operands = _plain_operands(clean)
+        if any(
+            operand.startswith("rsync://")
+            or re.match(r"^(?:[^/:]+@)?[^/:]+:", operand)
+            for operand in operands
+        ):
+            return None
+        destination = operands[-1] if len(operands) >= 2 else None
+        if destination is not None and not _target_is_allowed(destination, task_policy):
+            return "rsync-destination"
+
+    if executable == "truncate":
+        operands = _plain_operands(
+            clean,
+            options_with_values=frozenset(
+                {"-o", "--io-blocks", "-r", "--reference", "-s", "--size"}
+            ),
+        )
+        if any(not _target_is_allowed(target, task_policy) for target in operands):
+            return "truncate-target"
+
+    if executable in {"chmod", "chown", "chgrp"}:
+        operands = _plain_operands(
+            clean,
+            options_with_values=frozenset({"--reference", "--from"}),
+        )
+        targets = operands[1:]
+        if any(not _target_is_allowed(target, task_policy) for target in targets):
+            return f"{executable}-target"
+
+    if executable in {"sed", "perl"} and any(
+        token == "-i" or token.startswith("-i") for token in clean
+    ):
+        if any(
+            _target_is_protected(token, task_policy)
+            for token in clean
+            if not token.startswith("-")
+        ):
+            return f"{executable}-in-place-target"
+
+    if executable in {"apply_patch", "ed", "ex"}:
+        operands = _plain_operands(clean)
+        if any(not _target_is_allowed(target, task_policy) for target in operands):
+            return f"{executable}-edit-target"
+
+    if _PYTHON_EXECUTABLE.fullmatch(executable) and _explicit_protected_literal(
+        clean, task_policy
+    ):
+        module = None
+        for index, token in enumerate(clean[:-1]):
+            if token == "-m":
+                module = clean[index + 1].casefold()
+                break
+        safe_test_invocation = module in {"pytest", "unittest"}
+        direct_test_execution = clean and clean[0].endswith("test_calculator.py")
+        if not safe_test_invocation and not direct_test_execution:
+            return "python-explicit-protected-target"
+
+    return None
+
+
+def _analyze_segment(
+    command: str,
+    tokens: list[str],
+    depth: int,
+    task_policy: TaskFilePolicy,
+) -> AuthorizationDecision:
     stripped, wrapper_error = _strip_wrappers(tokens)
     if stripped is None:
         return _unsafe(command, wrapper_error or "opaque-wrapper")
@@ -364,13 +674,28 @@ def _analyze_segment(command: str, tokens: list[str], depth: int) -> Authorizati
     executable = _basename(executable_token)
     arguments = stripped[1:]
 
+    inaccessible_rule = _inaccessible_path_rule(executable, arguments, task_policy)
+    if inaccessible_rule is not None:
+        return _inaccessible_path_rejection(command, inaccessible_rule)
+
+    protected_write_rule = _protected_path_write_rule(
+        executable, arguments, task_policy
+    )
+    if protected_write_rule is not None:
+        return _protected_write_rejection(command, protected_write_rule)
+
     if executable in {"eval", "exec", "source", ".", "xargs"}:
         return _unsafe(command, "opaque-command-execution")
     if executable in _SHELL_EXECUTABLES:
         payload, payload_error = _shell_payload(stripped)
         if payload is None:
             return _unsafe(command, payload_error or "opaque-shell-execution")
-        return authorize_command(payload, _depth=depth + 1, _outer_command=command)
+        return authorize_command(
+            payload,
+            task_policy=task_policy,
+            _depth=depth + 1,
+            _outer_command=command,
+        )
     if executable in {"node", "perl", "php", "python", "python2", "python3", "ruby"} and any(
         argument in {"-c", "-e"} for argument in arguments
     ):
@@ -385,12 +710,18 @@ def _analyze_segment(command: str, tokens: list[str], depth: int) -> Authorizati
             reason=NETWORK_ACCESS_PROHIBITED,
             matched_rule="direct-network-client",
         )
-    if executable == "git" and _git_subcommand(arguments) in _REMOTE_GIT_SUBCOMMANDS:
+    git_subcommand = _git_subcommand(arguments) if executable == "git" else None
+    if git_subcommand in _REMOTE_GIT_SUBCOMMANDS:
         return _rejected(
             command,
             category=PROHIBITED_NETWORK_ACCESS,
             reason=NETWORK_ACCESS_PROHIBITED,
             matched_rule="remote-git-operation",
+        )
+    if git_subcommand is not None and git_subcommand not in _READ_ONLY_GIT_SUBCOMMANDS:
+        return _protected_write_rejection(
+            command,
+            "git-internals-mutation",
         )
     if executable == "rsync" and any(
         argument.startswith("rsync://")
@@ -464,10 +795,12 @@ def _analyze_segment(command: str, tokens: list[str], depth: int) -> Authorizati
 def authorize_command(
     command: str,
     *,
+    task_policy: TaskFilePolicy | None = None,
     _depth: int = 0,
     _outer_command: str | None = None,
 ) -> AuthorizationDecision:
     """Authorize the complete action or reject it without rewriting any segment."""
+    task_policy = task_policy or calculator_task_policy()
     original = _outer_command or command
     normalized = _normalize(command)
     if not normalized:
@@ -502,7 +835,7 @@ def authorize_command(
     segments.append(current)
 
     for segment in segments:
-        decision = _analyze_segment(original, segment, _depth)
+        decision = _analyze_segment(original, segment, _depth, task_policy)
         if not decision.authorized:
             return decision
     return _allowed(original)
@@ -527,6 +860,8 @@ def policy_specification() -> dict[str, Any]:
             PROHIBITED_NETWORK_ACCESS,
             PROHIBITED_SYSTEM_MUTATION,
             PROHIBITED_EXECUTION_INDIRECTION,
+            PROHIBITED_PROTECTED_PATH_WRITE,
+            PROHIBITED_HARNESS_PATH_ACCESS,
         ],
         "event": ACTION_POLICY_VIOLATION,
         "repeated_violation_termination": REPEATED_POLICY_VIOLATION,
@@ -536,6 +871,7 @@ def policy_specification() -> dict[str, Any]:
             "opaque_constructs_fail_closed": True,
             "literal_shell_c_payloads_recursively_inspected": True,
         },
+        "task_file_policy": calculator_task_policy().as_dict(),
         "rules": {
             "package_management": sorted(
                 [
@@ -566,6 +902,33 @@ def policy_specification() -> dict[str, Any]:
                 "opaque-command-execution",
                 "opaque-interpreter-program",
                 "unsupported-shell-control-operator",
+            ],
+            "protected_path_writes": [
+                "write-redirection-target",
+                "tee-output-target",
+                "cp-destination",
+                "mv-destination",
+                "mv-protected-source",
+                "rm-target",
+                "unlink-target",
+                "touch-target",
+                "truncate-target",
+                "chmod-target",
+                "chown-target",
+                "sed-in-place-target",
+                "perl-in-place-target",
+                "ln-destination",
+                "ln-protected-source",
+                "dd-output-target",
+                "patch-protected-target",
+                "rsync-destination",
+                "mkdir-target",
+                "rmdir-target",
+            ],
+            "inaccessible_paths": [
+                "repository-boundary-escape",
+                "external-oracle-access",
+                "harness-path-access",
             ],
         },
     }

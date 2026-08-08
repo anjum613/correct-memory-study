@@ -213,7 +213,7 @@ def test_secrets_are_not_written_and_max_tokens_is_not_a_secret(tmp_path: Path) 
 
 def test_public_command_authorization_policy_metadata_is_not_a_credential() -> None:
     assert_no_sensitive_keys(
-        {"command_authorization_policy": {"policy_version": "calculator-capability-policy-v1"}}
+        {"command_authorization_policy": {"policy_version": "calculator-capability-policy-v2"}}
     )
 
 

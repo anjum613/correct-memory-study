@@ -10,6 +10,7 @@ from cmpilot.mini_swe_adapter import (
     ADAPTER_SOURCE,
     EXPECTED_VERSION,
     RUNTIME_ACTION_PROTOCOL_MODULE,
+    RUNTIME_TASK_FILE_POLICY_MODULE,
     RUNTIME_HARDENED_AGENT_MODULE,
     METADATA_VERSION_QUERY,
     RUNTIME_CONFIG_MODULE,
@@ -116,6 +117,7 @@ def test_write_adapter_preserves_the_canonical_runtime_helper(tmp_path: Path) ->
     assert helper.is_file()
     for name in (
         RUNTIME_ACTION_PROTOCOL_MODULE,
+        RUNTIME_TASK_FILE_POLICY_MODULE,
         RUNTIME_HARDENED_AGENT_MODULE,
         RUNTIME_MODEL_MODULE,
         RUNTIME_TRANSPORT_MODULE,

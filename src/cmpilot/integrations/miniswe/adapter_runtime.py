@@ -28,6 +28,7 @@ from cmpilot_action_protocol import (
 )
 from cmpilot_command_authorization import policy_specification
 from cmpilot_hardened_agent import HardenedDefaultAgent
+from cmpilot_task_file_policy import calculator_task_policy
 from cmpilot_mini_swe_config import (
     MiniSWEEndpointSettings,
     assert_no_sensitive_keys,
@@ -99,6 +100,12 @@ Path(os.environ["CMPILOT_COMMAND_POLICY_ARTIFACT"]).write_text(
     encoding="utf-8",
 )
 emit_event("command_authorization_policy_loaded", policy_version=command_policy["policy_version"])
+task_file_policy = calculator_task_policy()
+Path(os.environ["CMPILOT_TASK_POLICY_ARTIFACT"]).write_text(
+    json.dumps(task_file_policy.as_dict(), indent=2, sort_keys=True) + "\n",
+    encoding="utf-8",
+)
+emit_event("task_file_policy_loaded", task_policy_version=task_file_policy.version)
 
 repository = Path(os.environ["CMPILOT_REPOSITORY"])
 task_file = Path(os.environ["CMPILOT_TASK_FILE"])
@@ -127,6 +134,7 @@ artifact_metadata = {
     "agent_config_yaml": Path(os.environ["CMPILOT_AGENT_CONFIG_ARTIFACT"]),
     "agent_config_json": Path(os.environ["CMPILOT_AGENT_CONFIG_JSON_ARTIFACT"]),
     "command_authorization_policy": Path(os.environ["CMPILOT_COMMAND_POLICY_ARTIFACT"]),
+    "task_file_policy": Path(os.environ["CMPILOT_TASK_POLICY_ARTIFACT"]),
 }
 
 base_config = yaml.safe_load(
@@ -245,6 +253,7 @@ agent = HardenedDefaultAgent(
     environment,
     repository=repository,
     event_sink=emit_event,
+    task_policy=task_file_policy,
     **mini_config["agent"],
 )
 emit_event("agent_initialized")

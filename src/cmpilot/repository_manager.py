@@ -13,6 +13,10 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .task_file_policy import TaskFilePolicy
 
 
 REPOSITORY_COPY_POLICY = "isolated-repository-copy-v1"
@@ -49,6 +53,7 @@ def prepare_working_copy(
     *,
     temporary_root: Path | None = None,
     destination: Path | None = None,
+    task_policy: TaskFilePolicy | None = None,
 ) -> tuple[Path, str]:
     """Copy a template into a fresh repository and create its initial commit."""
     if not template.is_dir():
@@ -88,7 +93,14 @@ def prepare_working_copy(
         ("commit", "-m", "Initial smoke-test repository"),
     ):
         git(working_copy, *arguments, check=True)
-    return working_copy, git(working_copy, "rev-parse", "HEAD", check=True).stdout.strip()
+    initial_commit = git(
+        working_copy, "rev-parse", "HEAD", check=True
+    ).stdout.strip()
+    if task_policy is not None:
+        from .task_file_policy import apply_task_file_permissions
+
+        apply_task_file_permissions(working_copy, task_policy)
+    return working_copy, initial_commit
 
 
 def copy_repository_tree(source: Path, destination: Path) -> RepositoryContentDigest:
