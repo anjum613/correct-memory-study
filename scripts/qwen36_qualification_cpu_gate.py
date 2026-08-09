@@ -16,6 +16,7 @@ from typing import Any, Sequence
 
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "src"))
 
 from cmpilot.multiturn_preflight import (  # noqa: E402

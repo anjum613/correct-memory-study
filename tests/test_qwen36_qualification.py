@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import subprocess
+import sys
 
 import pytest
 
@@ -257,3 +259,17 @@ def test_final_freeze_validates_when_present() -> None:
 
     assert result["pass"] is True
     assert len(result["sha256"]) == 64
+
+
+def test_post_freeze_cpu_gate_starts_with_repository_imports() -> None:
+    result = subprocess.run(
+        [sys.executable, "scripts/qwen36_qualification_cpu_gate.py", "--help"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "post-freeze CPU gate" in result.stdout
