@@ -1,5 +1,5 @@
 #!/usr/bin/bash
-#SBATCH --job-name=qwen32b-qnm-p01
+#SBATCH --job-name=qwen32b-qnm-p01-r1
 #SBATCH --partition=gpu
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -8,8 +8,8 @@
 #SBATCH --gres=gpu:a100:2
 #SBATCH --time=03:00:00
 #SBATCH --no-requeue
-#SBATCH --output=/home/s224049759/slurm-logs/qwen32b-qnm-p01-%j.out
-#SBATCH --error=/home/s224049759/slurm-logs/qwen32b-qnm-p01-%j.err
+#SBATCH --output=/home/s224049759/slurm-logs/qwen32b-qnm-p01-r1-%j.out
+#SBATCH --error=/home/s224049759/slurm-logs/qwen32b-qnm-p01-r1-%j.err
 
 set -euo pipefail
 
@@ -20,14 +20,16 @@ VLLM_PY=/home/s224049759/environments/vllm-smoke/bin/python
 MODEL=/home/s224049759/model-cache/huggingface/hub/models--Qwen--Qwen2.5-Coder-32B-Instruct/snapshots/381fc969f78efac66bc87ff7ddeadb7e73c218a7
 MODEL_CACHE=/home/s224049759/model-cache/huggingface
 JOB_25887=/home/s224049759/run-artifacts/qwen32b-calculator/25887
-CPU_GATE=/home/s224049759/run-artifacts/qwen32b-no-memory-qualification/v1/cpu-preflight/cpu-preflight-result.json
+CPU_GATE=/home/s224049759/run-artifacts/qwen32b-no-memory-qualification/v1/cpu-preflight-ipc-fix-25908/cpu-preflight-result.json
 ARTIFACT_ROOT=/home/s224049759/run-artifacts/qwen32b-no-memory-qualification/v1/tasks/qnm-p01-interval-merge/jobs
 ARTIFACT_DIR="$ARTIFACT_ROOT/$SLURM_JOB_ID"
 RUN_ARTIFACT="$ARTIFACT_DIR/run"
-RUNTIME_SCRATCH="$ARTIFACT_DIR/runtime-scratch"
+RUNTIME_SCRATCH="/tmp/cmq-$SLURM_JOB_ID"
 SUITE="$PROJECT/qualification/qwen32b-v1/suite-manifest.json"
 TASK="$PROJECT/qualification/qwen32b-v1/tasks/qnm-p01-interval-merge.json"
 FREEZE="$PROJECT/qualification/qwen32b-v1/freeze-manifest.json"
+TECHNICAL_RERUN_OF=25908
+TECHNICAL_RERUN_NUMBER=1
 PORT=49784
 BASE_URL="http://127.0.0.1:$PORT"
 SERVER_PID=
@@ -55,34 +57,10 @@ cleanup_server() {
 }
 
 cleanup_scratch() {
-    "$CMPILOT_PY" - "$ARTIFACT_DIR" "$RUNTIME_SCRATCH" <<'PY'
-import json
-from pathlib import Path
-import shutil
-import sys
-
-artifact = Path(sys.argv[1]).resolve(strict=True)
-scratch = Path(sys.argv[2]).resolve(strict=False)
-scratch.relative_to(artifact)
-symlinks = [
-    str(path.relative_to(scratch))
-    for path in scratch.rglob("*")
-    if path.is_symlink()
-] if scratch.is_dir() else []
-if symlinks:
-    raise SystemExit(f"runtime scratch contains symlinks: {symlinks}")
-if scratch.exists():
-    shutil.rmtree(scratch)
-record = {
-    "pass": not scratch.exists(),
-    "scratch": str(scratch),
-    "scratch_exists_after": scratch.exists(),
-    "symlinks": symlinks,
-}
-(artifact / "runtime-scratch-cleanup.json").write_text(
-    json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-)
-PY
+    "$CMPILOT_PY" "$PROJECT/scripts/qualification_runtime_path.py" cleanup \
+        --job-id "$SLURM_JOB_ID" \
+        --runtime-path "$RUNTIME_SCRATCH" \
+        --record "$ARTIFACT_DIR/runtime-scratch-cleanup.json"
 }
 
 on_exit() {
@@ -124,6 +102,8 @@ test ! -s "$ARTIFACT_DIR/project-status.txt"
 git -C "$PROJECT" rev-list -n 1 qwen32b-qualification-v1 > "$ARTIFACT_DIR/freeze-tag-target.txt"
 test "$(sed -n '1p' "$ARTIFACT_DIR/freeze-tag-target.txt")" = ba039a0eaddc358d6b7174260c3b3c36169c44c0
 sha256sum "$0" "$SUITE" "$TASK" "$FREEZE" > "$ARTIFACT_DIR/runtime-input-hashes.txt"
+printf '%s\n' "$TECHNICAL_RERUN_OF" > "$ARTIFACT_DIR/technical-rerun-of.txt"
+printf '%s\n' "$TECHNICAL_RERUN_NUMBER" > "$ARTIFACT_DIR/technical-rerun-number.txt"
 printf '%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$ARTIFACT_DIR/job-started-utc.txt"
 hostname > "$ARTIFACT_DIR/hostname.txt"
 env | grep '^SLURM_' | LC_ALL=C sort > "$ARTIFACT_DIR/slurm-environment.txt"
@@ -140,8 +120,18 @@ export PYTHONNOUSERSITE=1
 export PYTHONDONTWRITEBYTECODE=1
 export NO_PROXY=127.0.0.1,localhost
 export no_proxy=127.0.0.1,localhost
+"$CMPILOT_PY" "$PROJECT/scripts/qualification_runtime_path.py" validate \
+    --job-id "$SLURM_JOB_ID" \
+    --task-id qnm-p01-interval-merge \
+    --persistent-artifact-root "$ARTIFACT_ROOT" \
+    --runtime-path "$RUNTIME_SCRATCH" \
+    --record "$ARTIFACT_DIR/runtime-ipc-path-budget.json"
+"$CMPILOT_PY" "$PROJECT/scripts/qualification_runtime_path.py" prepare \
+    --job-id "$SLURM_JOB_ID" \
+    --runtime-path "$RUNTIME_SCRATCH" \
+    --record "$ARTIFACT_DIR/runtime-scratch-preparation.json"
 export TMPDIR="$RUNTIME_SCRATCH"
-mkdir -p "$TMPDIR"
+export VLLM_RPC_BASE_PATH="$RUNTIME_SCRATCH"
 
 "$VLLM_PY" "$PROJECT/scripts/environment_fingerprint.py" capture \
     --inventory "$ARTIFACT_DIR/environment-inventory.json" \

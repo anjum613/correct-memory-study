@@ -47,6 +47,9 @@ from cmpilot.repository_manager import (  # noqa: E402
     git,
     repository_mode_inventory,
 )
+from cmpilot.qualification_runtime_paths import (  # noqa: E402
+    suite_runtime_path_record,
+)
 
 
 DEFAULT_OUTPUT = SHARED_ARTIFACT_ROOT / "cpu-preflight"
@@ -357,16 +360,32 @@ def main(argv: Sequence[str] | None = None) -> int:
         project = ROOT.resolve(strict=True)
         suite = load_suite_manifest(arguments.suite_manifest)
         task_records = []
+        frozen_tasks = []
         for suite_task in suite["tasks"]:
             path = project / suite_task["manifest_path"]
             manifest_hash_ok = sha256_file(path) == suite_task["manifest_sha256"]
             task = load_json(path)
+            frozen_tasks.append(task)
             record = _task_gate(project, task, output)
             record["suite_manifest_hash_match"] = manifest_hash_ok
             record["pass"] = record["pass"] and manifest_hash_ok
             task_records.append(record)
         result["tasks"] = task_records
         result["checks"]["all_task_gates"] = all(row["pass"] for row in task_records)
+
+        runtime_paths = suite_runtime_path_record(
+            frozen_tasks,
+            job_ids=("1", "25908", "99999999999999999999"),
+        )
+        legacy_paths_rejected = all(
+            not row["passes_safe_maximum"]
+            for row in runtime_paths["legacy_paths"]
+        )
+        runtime_paths["legacy_paths_rejected"] = legacy_paths_rejected
+        runtime_paths["pass"] = runtime_paths["pass"] and legacy_paths_rejected
+        write_canonical_json(output / "runtime-ipc-path-budget.json", runtime_paths)
+        result["checks"]["runtime_ipc_path_budget"] = runtime_paths["pass"]
+        result["runtime_ipc_path_budget"] = runtime_paths
 
         freeze = _verify_freeze(project, suite)
         write_canonical_json(output / "freeze-verification.json", freeze)
