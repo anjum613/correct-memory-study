@@ -49,7 +49,7 @@ from cmpilot.qualification_runtime_paths import runtime_path_record  # noqa: E40
 
 SQUEUE = Path("/slurm/bin/squeue")
 SACCT = Path("/slurm/bin/sacct")
-CPU_GATE = QWEN36_ARTIFACT_ROOT / "cpu-preflight-qualification-freeze"
+CPU_GATE = QWEN36_ARTIFACT_ROOT / "cpu-preflight-qualification-freeze-v2"
 
 
 def run(argv: tuple[str, ...], *, timeout: int = 180) -> subprocess.CompletedProcess[str]:

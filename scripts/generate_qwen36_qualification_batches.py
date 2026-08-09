@@ -28,7 +28,7 @@ OUTPUTS = {
 }
 CPU_GATE = (
     "/home/s224049759/run-artifacts/qwen36-no-memory-qualification/v1/"
-    "cpu-preflight-qualification-freeze/cpu-preflight-result.json"
+    "cpu-preflight-qualification-freeze-v2/cpu-preflight-result.json"
 )
 
 

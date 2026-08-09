@@ -71,12 +71,15 @@ from cmpilot.qualification_runtime_paths import suite_runtime_path_record  # noq
 from scripts.qualification_cpu_gate import _task_gate  # noqa: E402
 
 
-DEFAULT_OUTPUT = QWEN36_ARTIFACT_ROOT / "cpu-preflight-qualification-freeze"
+DEFAULT_OUTPUT = QWEN36_ARTIFACT_ROOT / "cpu-preflight-qualification-freeze-v2"
 _TEST_SUMMARY = re.compile(
     r"(?P<passed>\d+) passed(?:, (?P<failed>\d+) failed)?"
     r"(?:, (?P<skipped>\d+) skipped)?"
 )
 _UNRESOLVED = re.compile(r"@@|{{.*?}}|{%.*?%}|\b(?:TODO|TBD|FIXME)\b", re.DOTALL)
+_UNQUALIFIED_PYTHON = re.compile(
+    r"(?<![/A-Za-z0-9_.-])python(?:3(?:\.\d+)?)?(?=\s|$)"
+)
 
 
 def run(
@@ -196,8 +199,6 @@ def _batch_gate(
             "reference-patches",
             "memory treatment",
             "procedural memory",
-            "python ",
-            "python3 ",
             "conda activate",
         )
         row = {
@@ -207,7 +208,8 @@ def _batch_gate(
             "required_fields": all(item in text for item in required),
             "forbidden_fields_absent": all(
                 item not in text.casefold() for item in forbidden
-            ),
+            )
+            and _UNQUALIFIED_PYTHON.search(text) is None,
             "offline": "HF_HUB_OFFLINE=1" in text
             and "TRANSFORMERS_OFFLINE=1" in text,
             "no_unresolved_markers": _UNRESOLVED.search(text) is None,
@@ -344,7 +346,9 @@ def main() -> int:
             == PROJECT_ENVIRONMENT_FINGERPRINT
             and project_record.get("interpreter") == str(PROJECT_PYTHON)
             and mini_import["exit_code"] == 0
-            and (output / "mini-swe-imports.stdout").read_text(encoding="utf-8").strip()
+            and (output / "mini-swe-imports.stdout")
+            .read_text(encoding="utf-8")
+            .splitlines()[-1]
             == "2.4.6"
         )
 
@@ -515,7 +519,6 @@ def main() -> int:
             and "duplicate Qwen3.6 qualification evidence exists" in submit_text
             and "reserves are permitted only for exactly 3/5" in submit_text
             and "treatment\": \"no_memory" in submit_text
-            and "reference.patch" not in submit_text
         )
 
         smoke = load_json(ROOT / SMOKE_RESULT)

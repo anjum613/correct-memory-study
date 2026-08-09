@@ -216,6 +216,22 @@ def test_all_seven_generated_batches_share_the_frozen_scientific_settings() -> N
         assert "qwen36_model_load_request_smoke" not in batch
 
 
+def test_tracked_batches_exactly_match_the_frozen_generator() -> None:
+    freeze_sha256 = sha256_file(ROOT / QUALIFICATION_FREEZE)
+    seeds = validate_seed_schedule(ROOT / SEED_SCHEDULE)["seeds"]
+
+    for task_id in ALL_TASKS:
+        path = ROOT / "slurm" / f"qwen36_{task_id.replace('-', '_')}.sbatch"
+        assert path.read_text(encoding="utf-8") == render(
+            task_id,
+            seeds[task_id],
+            freeze_sha256,
+        )
+        assert "cpu-preflight-qualification-freeze-v2" in path.read_text(
+            encoding="utf-8"
+        )
+
+
 def test_candidate_and_suite_identity_remain_unchanged() -> None:
     assert sha256_file(ROOT / "qualification/qwen36-v1/candidate-freeze-manifest.json") == (
         CANDIDATE_MANIFEST_SHA256
