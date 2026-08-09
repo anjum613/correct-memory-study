@@ -12,6 +12,9 @@ BATCH = ROOT / "slurm/qwen36_model_load_request_smoke.sbatch"
 TECHNICAL_INVALID = (
     ROOT / "qualification/qwen36-v1/technical-invalid-smoke-25933.json"
 )
+TECHNICAL_INVALID_25938 = (
+    ROOT / "qualification/qwen36-v1/technical-invalid-smoke-25938.json"
+)
 
 
 def test_batch_requests_exactly_two_a100s_and_conservative_host_resources() -> None:
@@ -39,6 +42,28 @@ def test_job_25933_is_preserved_as_unscored_technical_invalid_evidence() -> None
     assert record["exact_failing_command"] == "/usr/bin/nvidia-smi -q -d MIG"
     assert record["model_requests"] == 0
     assert record["model_load_attempted"] is False
+    assert record["qualification_scored"] is False
+
+
+def test_job_25938_is_preserved_as_unscored_technical_invalid_evidence() -> None:
+    import json
+
+    record = json.loads(TECHNICAL_INVALID_25938.read_text(encoding="utf-8"))
+
+    assert record["job"]["slurm_job_id"] == "25938"
+    assert record["technical_validity"] == "FAIL"
+    assert (
+        record["technical_failure_class"]
+        == "PRE_HEALTHCHECK_SMOKE_CLIENT_IMPORT_FAILURE"
+    )
+    assert (
+        record["technical_failure_detail"]
+        == "WRONG_PYTHON_INTERPRETER_MISSING_PYDANTIC"
+    )
+    assert record["technical_parent"] == "25933"
+    assert record["model_requests"] == 0
+    assert record["http_requests"] == 0
+    assert record["model_load_success"] is False
     assert record["qualification_scored"] is False
 
 
@@ -175,20 +200,23 @@ def test_technical_rerun_cpu_gate_uses_a_new_preservation_path() -> None:
     preflight = (ROOT / "scripts/qwen36_cpu_preflight.py").read_text(encoding="utf-8")
     submission = (ROOT / "scripts/submit_qwen36_smoke.py").read_text(encoding="utf-8")
 
-    assert 'ARTIFACT_ROOT / "cpu-preflight-v3"' in preflight
-    assert "cpu-preflight-v3/cpu-preflight-result.json" in batch
-    assert 'ARTIFACT_ROOT / "cpu-preflight-v3/cpu-preflight-result.json"' in submission
+    assert 'ARTIFACT_ROOT / "cpu-preflight-v4"' in preflight
+    assert "cpu-preflight-v4/cpu-preflight-result.json" in batch
+    assert 'ARTIFACT_ROOT / "cpu-preflight-v4/cpu-preflight-result.json"' in submission
 
 
-def test_smoke_is_explicitly_the_only_technical_rerun_of_job_25933() -> None:
+def test_smoke_is_explicitly_the_only_technical_rerun_of_job_25938() -> None:
     batch = BATCH.read_text(encoding="utf-8")
     submission = (ROOT / "scripts/submit_qwen36_smoke.py").read_text(
         encoding="utf-8"
     )
 
-    assert "TECHNICAL_RERUN_OF=25933" in batch
+    assert "TECHNICAL_RERUN_OF=25938" in batch
     assert "TECHNICAL_RERUN_NUMBER=1" in batch
-    assert 'TECHNICAL_RERUN_OF = "25933"' in submission
+    assert "TECHNICAL_ROOT_SMOKE=25933" in batch
+    assert 'TECHNICAL_RERUN_OF = "25938"' in submission
     assert "TECHNICAL_RERUN_NUMBER = 1" in submission
+    assert 'TECHNICAL_ROOT_SMOKE = "25933"' in submission
     assert '"technical_rerun_of": TECHNICAL_RERUN_OF' in submission
     assert '"technical_rerun_number": TECHNICAL_RERUN_NUMBER' in submission
+    assert '"technical_root_smoke": TECHNICAL_ROOT_SMOKE' in submission

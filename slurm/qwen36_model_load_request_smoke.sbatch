@@ -27,12 +27,14 @@ STAGING_MANIFEST="$NAMESPACE/model-staging-manifest.json"
 SUITE_REFERENCE="$NAMESPACE/suite-reference.json"
 EXPECTED_ENVIRONMENT="$NAMESPACE/environment-fingerprint.json"
 EXPECTED_CONTENT="$NAMESPACE/environment-content-digest.json"
-CPU_GATE=/home/s224049759/run-artifacts/qwen36-no-memory-qualification/v1/cpu-preflight-v3/cpu-preflight-result.json
+INTERPRETER_CONTRACT="$NAMESPACE/smoke-interpreter-contract.json"
+CPU_GATE=/home/s224049759/run-artifacts/qwen36-no-memory-qualification/v1/cpu-preflight-v4/cpu-preflight-result.json
 ARTIFACT_ROOT=/home/s224049759/run-artifacts/qwen36-no-memory-qualification/v1/smoke/jobs
 ARTIFACT_DIR="$ARTIFACT_ROOT/$SLURM_JOB_ID"
 RUNTIME_SCRATCH="/tmp/cmq-$SLURM_JOB_ID"
-TECHNICAL_RERUN_OF=25933
+TECHNICAL_RERUN_OF=25938
 TECHNICAL_RERUN_NUMBER=1
+TECHNICAL_ROOT_SMOKE=25933
 PORT=49786
 BASE_URL="http://127.0.0.1:$PORT/v1"
 SERVER_PID=
@@ -100,22 +102,26 @@ test -f "$STAGING_MANIFEST"
 test -f "$SUITE_REFERENCE"
 test -f "$EXPECTED_ENVIRONMENT"
 test -f "$EXPECTED_CONTENT"
+test -f "$INTERPRETER_CONTRACT"
 test -f "$CPU_GATE"
 test -f "$PROJECT/scripts/capture_gpu_diagnostic.py"
 
-"$CMPILOT_PY" - "$CPU_GATE" "$CANDIDATE_MANIFEST" <<'PY'
+"$CMPILOT_PY" - "$CPU_GATE" "$CANDIDATE_MANIFEST" "$INTERPRETER_CONTRACT" <<'PY'
 import hashlib
 import json
 import sys
 from pathlib import Path
 
-gate_path, candidate_path = map(Path, sys.argv[1:])
+gate_path, candidate_path, contract_path = map(Path, sys.argv[1:])
 gate = json.loads(gate_path.read_text(encoding="utf-8"))
 candidate_sha = hashlib.sha256(candidate_path.read_bytes()).hexdigest()
+contract_sha = hashlib.sha256(contract_path.read_bytes()).hexdigest()
 if gate.get("overall") != "PASS" or not all(gate.get("checks", {}).values()):
     raise SystemExit("mandatory Qwen3.6 CPU gate is not an all-check PASS")
 if gate.get("candidate_freeze_manifest_sha256") != candidate_sha:
     raise SystemExit("candidate freeze manifest changed after CPU validation")
+if gate.get("smoke_interpreter_contract_sha256") != contract_sha:
+    raise SystemExit("smoke interpreter contract changed after CPU validation")
 PY
 
 git -C "$PROJECT" rev-parse HEAD > "$ARTIFACT_DIR/project-commit.txt"
@@ -126,12 +132,12 @@ git -C "$PROJECT" rev-list -n 1 qwen32b-qualification-v1 \
 test "$(sed -n '1p' "$ARTIFACT_DIR/qwen32b-freeze-tag-target.txt")" \
     = ba039a0eaddc358d6b7174260c3b3c36169c44c0
 sha256sum "$0" "$CANDIDATE_MANIFEST" "$STAGING_MANIFEST" "$SUITE_REFERENCE" \
-    "$EXPECTED_ENVIRONMENT" "$EXPECTED_CONTENT" "$CPU_GATE" \
+    "$EXPECTED_ENVIRONMENT" "$EXPECTED_CONTENT" "$INTERPRETER_CONTRACT" "$CPU_GATE" \
     > "$ARTIFACT_DIR/runtime-input-hashes.txt"
 printf '%s\n' "$MODEL_ID" > "$ARTIFACT_DIR/model-id.txt"
 printf '%s\n' "$MODEL_REVISION" > "$ARTIFACT_DIR/model-revision.txt"
-printf '{"schema":"qwen36-technical-rerun-v1","technical_rerun_number":%s,"technical_rerun_of":"%s"}\n' \
-    "$TECHNICAL_RERUN_NUMBER" "$TECHNICAL_RERUN_OF" \
+printf '{"schema":"qwen36-technical-rerun-v1","technical_rerun_number":%s,"technical_rerun_of":"%s","technical_root_smoke":"%s"}\n' \
+    "$TECHNICAL_RERUN_NUMBER" "$TECHNICAL_RERUN_OF" "$TECHNICAL_ROOT_SMOKE" \
     > "$ARTIFACT_DIR/technical-rerun.json"
 date -u +%Y-%m-%dT%H:%M:%SZ > "$ARTIFACT_DIR/job-started-utc.txt"
 hostname > "$ARTIFACT_DIR/hostname.txt"
@@ -239,7 +245,7 @@ setsid "$VLLM_PY" -m vllm.entrypoints.openai.api_server \
 SERVER_PID=$!
 printf '%s\n' "$SERVER_PID" > "$ARTIFACT_DIR/server.pid"
 
-"$CMPILOT_PY" "$PROJECT/scripts/qwen36_smoke_client.py" \
+"$VLLM_PY" "$PROJECT/scripts/qwen36_smoke_client.py" \
     --artifact-directory "$ARTIFACT_DIR" \
     --base-url "$BASE_URL" \
     --server-pid "$SERVER_PID" \

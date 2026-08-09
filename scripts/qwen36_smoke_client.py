@@ -20,10 +20,10 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from cmpilot.integrations.miniswe.openai_transport import (  # noqa: E402
+    MessageBoundaryError,
     OpenAIChatTransport,
     normalize_message,
 )
-from cmpilot.integrations.miniswe.vllm_text_model import _response_parts  # noqa: E402
 from cmpilot.qwen36_candidate import MODEL_ID, write_canonical_json  # noqa: E402
 
 
@@ -38,6 +38,44 @@ MESSAGES = [
 
 def timestamp() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def _type_name(value: object) -> str:
+    value_type = type(value)
+    return f"{value_type.__module__}.{value_type.__qualname__}"
+
+
+def response_parts(response: dict[str, object]) -> tuple[dict[str, object], str, str]:
+    """Apply the frozen adapter's response boundary without importing mini-SWE."""
+    choices = response.get("choices")
+    if not isinstance(choices, list) or not choices:
+        raise MessageBoundaryError("$.response.choices: expected a non-empty list")
+    choice = choices[0]
+    if not isinstance(choice, dict):
+        raise MessageBoundaryError(
+            f"$.response.choices[0]: expected dictionary, found {_type_name(choice)}"
+        )
+    message = choice.get("message")
+    if not isinstance(message, dict):
+        raise MessageBoundaryError(
+            "$.response.choices[0].message: expected dictionary, "
+            f"found {_type_name(message)}"
+        )
+    finish_reason = choice.get("finish_reason", "")
+    if finish_reason is None:
+        finish_reason = ""
+    if not isinstance(finish_reason, str):
+        raise MessageBoundaryError(
+            "$.response.choices[0].finish_reason: expected builtins.str, "
+            f"found {_type_name(finish_reason)}"
+        )
+    canonical = normalize_message(message, "$.response.choices[0].message").value
+    if canonical["role"] != "assistant":
+        raise MessageBoundaryError(
+            "$.response.choices[0].message.role: expected 'assistant', "
+            f"found {canonical['role']!r}"
+        )
+    return canonical, canonical["content"], finish_reason
 
 
 def get(url: str, *, timeout: float = 5) -> tuple[int, bytes, dict[str, str]]:
@@ -164,7 +202,7 @@ def main() -> int:
         )
         latency = time.perf_counter() - request_started
         result["completed_model_requests"] = 1
-        canonical, content, finish_reason = _response_parts(completion.body)
+        canonical, content, finish_reason = response_parts(completion.body)
         normalized_response = normalize_message(
             completion.body["choices"][0]["message"],
             "$.response.choices[0].message",

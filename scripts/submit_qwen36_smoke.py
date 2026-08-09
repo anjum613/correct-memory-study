@@ -32,10 +32,11 @@ from cmpilot.qwen36_candidate import (  # noqa: E402
 
 
 JOB_NAME = "qwen36-load-smoke-v1"
-TECHNICAL_RERUN_OF = "25933"
+TECHNICAL_RERUN_OF = "25938"
 TECHNICAL_RERUN_NUMBER = 1
+TECHNICAL_ROOT_SMOKE = "25933"
 DEFAULT_EVIDENCE = ARTIFACT_ROOT / (
-    "submissions/model-load-request-smoke-v1-technical-rerun-1-of-25933"
+    "submissions/model-load-request-smoke-v1-technical-rerun-1-of-25938"
 )
 
 
@@ -54,12 +55,17 @@ def main() -> int:
     parser.add_argument(
         "--cpu-gate",
         type=Path,
-        default=ARTIFACT_ROOT / "cpu-preflight-v3/cpu-preflight-result.json",
+        default=ARTIFACT_ROOT / "cpu-preflight-v4/cpu-preflight-result.json",
     )
     parser.add_argument(
         "--candidate-manifest",
         type=Path,
         default=ROOT / QUALIFICATION_NAMESPACE / "candidate-freeze-manifest.json",
+    )
+    parser.add_argument(
+        "--interpreter-contract",
+        type=Path,
+        default=ROOT / QUALIFICATION_NAMESPACE / "smoke-interpreter-contract.json",
     )
     parser.add_argument(
         "--script",
@@ -72,13 +78,17 @@ def main() -> int:
 
     cpu_gate = arguments.cpu_gate.resolve(strict=True)
     candidate = arguments.candidate_manifest.resolve(strict=True)
+    interpreter_contract = arguments.interpreter_contract.resolve(strict=True)
     batch = arguments.script.resolve(strict=True)
     cpu = json.loads(cpu_gate.read_text(encoding="utf-8"))
     candidate_sha = sha256_file(candidate)
+    contract_sha = sha256_file(interpreter_contract)
     if cpu.get("overall") != "PASS" or not all(cpu.get("checks", {}).values()):
         raise RuntimeError("mandatory Qwen3.6 CPU preflight is not an all-check PASS")
     if cpu.get("candidate_freeze_manifest_sha256") != candidate_sha:
         raise RuntimeError("candidate manifest changed after CPU preflight")
+    if cpu.get("smoke_interpreter_contract_sha256") != contract_sha:
+        raise RuntimeError("interpreter contract changed after CPU preflight")
     if sha256_file(ROOT / QWEN25_RESULT) != QWEN25_RESULT_SHA256:
         raise RuntimeError("historical Qwen2.5 result changed")
 
@@ -158,9 +168,11 @@ def main() -> int:
         "slurm_job_id": job_id,
         "source_batch_script_path": str(batch),
         "source_batch_script_sha256": sha256_file(batch),
+        "smoke_interpreter_contract_sha256": contract_sha,
         "submitted_at_utc": datetime.now(UTC).isoformat(),
         "technical_rerun_number": TECHNICAL_RERUN_NUMBER,
         "technical_rerun_of": TECHNICAL_RERUN_OF,
+        "technical_root_smoke": TECHNICAL_ROOT_SMOKE,
         "treatment": "no_memory",
     }
     write_canonical_json(

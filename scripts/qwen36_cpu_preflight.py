@@ -45,8 +45,11 @@ from cmpilot.qwen36_candidate import (  # noqa: E402
 
 CMPILOT_PYTHON = Path("/home/s224049759/environments/cmpilot-conda/bin/python")
 VLLM_PYTHON = ENVIRONMENT_PATH / "bin/python"
-DEFAULT_OUTPUT = ARTIFACT_ROOT / "cpu-preflight-v3"
+DEFAULT_OUTPUT = ARTIFACT_ROOT / "cpu-preflight-v4"
 _UNRESOLVED = re.compile(r"{{.*?}}|{%.*?%}|\b(?:TODO|TBD|FIXME)\b", re.DOTALL)
+_UNQUALIFIED_PYTHON = re.compile(
+    r"(?<![/A-Za-z0-9_.-])python(?:3(?:\.\d+)?)?(?=\s|$)"
+)
 _TEST_SUMMARY = re.compile(
     r"(?P<passed>\d+) passed(?:, (?P<failed>\d+) failed)?(?:, (?P<skipped>\d+) skipped)?"
 )
@@ -147,6 +150,7 @@ def main() -> int:
             "candidate": namespace / "candidate-freeze-manifest.json",
             "config": namespace / "qualification-config.json",
             "gpu_diagnostic": ROOT / "scripts/capture_gpu_diagnostic.py",
+            "interpreter_contract": namespace / "smoke-interpreter-contract.json",
             "environment_content": namespace / "environment-content-digest.json",
             "environment_fingerprint": namespace / "environment-fingerprint.json",
             "metadata": namespace / "model-metadata.json",
@@ -220,6 +224,91 @@ def main() -> int:
         )
         result["environment_verification"] = environment_result
 
+        contract = load_json(paths["interpreter_contract"])
+        project_fingerprint = run(
+            (
+                str(CMPILOT_PYTHON),
+                str(ROOT / "scripts/environment_fingerprint.py"),
+                "capture",
+                "--inventory",
+                str(output / "project-environment-inventory.json"),
+                "--record",
+                str(output / "project-environment-fingerprint.json"),
+            ),
+            cwd=ROOT,
+            prefix=output / "project-environment-fingerprint-command",
+        )
+        project_environment = load_json(output / "project-environment-fingerprint.json")
+        client_import = run(
+            (
+                str(VLLM_PYTHON),
+                str(ROOT / "scripts/qwen36_smoke_client.py"),
+                "--help",
+            ),
+            cwd=ROOT,
+            prefix=output / "smoke-client-import",
+        )
+        project_dependency_probe = run(
+            (
+                str(CMPILOT_PYTHON),
+                "-c",
+                "import importlib.util; "
+                "raise SystemExit(0 if importlib.util.find_spec('pydantic') is None else 1)",
+            ),
+            cwd=ROOT,
+            prefix=output / "project-pydantic-absence",
+        )
+        qwen_dependency_probe = run(
+            (
+                str(VLLM_PYTHON),
+                "-c",
+                "import pydantic, torch, transformers, vllm",
+            ),
+            cwd=ROOT,
+            prefix=output / "qwen36-runtime-imports",
+        )
+        batch_text = paths["batch"].read_text(encoding="utf-8")
+        helpers = {row["script"]: row for row in contract.get("helpers", [])}
+        project_contract = contract.get("interpreters", {}).get("project_harness", {})
+        qwen_contract = contract.get("interpreters", {}).get("qwen36_runtime", {})
+        result["checks"]["smoke_interpreter_contract"] = (
+            contract.get("schema") == "qwen36-smoke-interpreter-contract-v1"
+            and project_fingerprint["exit_code"] == 0
+            and project_environment.get("canonical_inventory_sha256")
+            == project_contract.get("environment_fingerprint")
+            and project_environment.get("interpreter") == str(CMPILOT_PYTHON)
+            and qwen_contract.get("environment_fingerprint")
+            == "fe63e366ca33bc2392eb173281764bdb8bd543ed3ce8d36c3b3fe6727df80bab"
+            and qwen_contract.get("content_digest")
+            == "b36b9c47b130dba7c2a0ae60161029d3f5b0b522e8bd0f5b0f0749bae86b3a74"
+            and qwen_contract.get("executable") == str(VLLM_PYTHON)
+            and client_import["exit_code"] == 0
+            and project_dependency_probe["exit_code"] == 0
+            and qwen_dependency_probe["exit_code"] == 0
+            and helpers.get("scripts/qwen36_smoke_client.py", {}).get(
+                "intended_interpreter_role"
+            )
+            == "qwen36_runtime"
+            and batch_text.count(
+                '"$VLLM_PY" "$PROJECT/scripts/qwen36_smoke_client.py"'
+            )
+            == 1
+            and '"$CMPILOT_PY" "$PROJECT/scripts/qwen36_smoke_client.py"'
+            not in batch_text
+            and _UNQUALIFIED_PYTHON.search(batch_text) is None
+            and "conda activate" not in batch_text
+        )
+        result["smoke_interpreter_contract_sha256"] = sha256_file(
+            paths["interpreter_contract"]
+        )
+        result["interpreter_contract"] = {
+            "path": str(paths["interpreter_contract"]),
+            "project_environment": project_environment,
+            "qwen36_client_import_exit_code": client_import["exit_code"],
+            "qwen36_runtime_import_exit_code": qwen_dependency_probe["exit_code"],
+            "sha256": result["smoke_interpreter_contract_sha256"],
+        }
+
         compatibility = run(
             (
                 str(VLLM_PYTHON),
@@ -292,6 +381,7 @@ def main() -> int:
                 "tests/test_qwen36_candidate.py",
                 "tests/test_qwen36_smoke_infrastructure.py",
                 "tests/test_qwen36_gpu_diagnostic.py",
+                "tests/test_qwen36_interpreter_contract.py",
                 "tests/test_openai_transport.py",
             ),
             cwd=ROOT,
@@ -373,6 +463,7 @@ def main() -> int:
             paths["candidate"],
             paths["config"],
             paths["gpu_diagnostic"],
+            paths["interpreter_contract"],
             paths["suite_reference"],
             ROOT / "scripts/qwen36_smoke_client.py",
             ROOT / "scripts/submit_qwen36_smoke.py",
