@@ -45,7 +45,7 @@ from cmpilot.qwen36_candidate import (  # noqa: E402
 
 CMPILOT_PYTHON = Path("/home/s224049759/environments/cmpilot-conda/bin/python")
 VLLM_PYTHON = ENVIRONMENT_PATH / "bin/python"
-DEFAULT_OUTPUT = ARTIFACT_ROOT / "cpu-preflight-v2"
+DEFAULT_OUTPUT = ARTIFACT_ROOT / "cpu-preflight-v3"
 _UNRESOLVED = re.compile(r"{{.*?}}|{%.*?%}|\b(?:TODO|TBD|FIXME)\b", re.DOTALL)
 _TEST_SUMMARY = re.compile(
     r"(?P<passed>\d+) passed(?:, (?P<failed>\d+) failed)?(?:, (?P<skipped>\d+) skipped)?"
@@ -146,6 +146,7 @@ def main() -> int:
             "batch": ROOT / "slurm/qwen36_model_load_request_smoke.sbatch",
             "candidate": namespace / "candidate-freeze-manifest.json",
             "config": namespace / "qualification-config.json",
+            "gpu_diagnostic": ROOT / "scripts/capture_gpu_diagnostic.py",
             "environment_content": namespace / "environment-content-digest.json",
             "environment_fingerprint": namespace / "environment-fingerprint.json",
             "metadata": namespace / "model-metadata.json",
@@ -290,6 +291,7 @@ def main() -> int:
                 "no:cacheprovider",
                 "tests/test_qwen36_candidate.py",
                 "tests/test_qwen36_smoke_infrastructure.py",
+                "tests/test_qwen36_gpu_diagnostic.py",
                 "tests/test_openai_transport.py",
             ),
             cwd=ROOT,
@@ -357,11 +359,20 @@ def main() -> int:
             "batch_script": str(paths["batch"]),
             "batch_script_sha256": sha256_file(paths["batch"]),
         }
+        result["checks"]["gpu_diagnostic_policy"] = (
+            "/usr/bin/nvidia-smi -q -d MIG" not in script
+            and "--query-gpu=index,name,pci.bus_id,mig.mode.current" in script
+            and script.count("--policy informational") == 1
+            and 'nvidia-smi > "$ARTIFACT_DIR/nvidia-smi-initial.txt"' in script
+            and 'nvidia-smi -L > "$ARTIFACT_DIR/nvidia-smi-list.txt"' in script
+            and "scripts/capture_gpu_diagnostic.py" in script
+        )
 
         text_inputs = [
             paths["batch"],
             paths["candidate"],
             paths["config"],
+            paths["gpu_diagnostic"],
             paths["suite_reference"],
             ROOT / "scripts/qwen36_smoke_client.py",
             ROOT / "scripts/submit_qwen36_smoke.py",

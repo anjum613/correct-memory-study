@@ -32,7 +32,11 @@ from cmpilot.qwen36_candidate import (  # noqa: E402
 
 
 JOB_NAME = "qwen36-load-smoke-v1"
-DEFAULT_EVIDENCE = ARTIFACT_ROOT / "submissions/model-load-request-smoke-v1"
+TECHNICAL_RERUN_OF = "25933"
+TECHNICAL_RERUN_NUMBER = 1
+DEFAULT_EVIDENCE = ARTIFACT_ROOT / (
+    "submissions/model-load-request-smoke-v1-technical-rerun-1-of-25933"
+)
 
 
 def command(argv: tuple[str, ...]) -> subprocess.CompletedProcess[str]:
@@ -50,7 +54,7 @@ def main() -> int:
     parser.add_argument(
         "--cpu-gate",
         type=Path,
-        default=ARTIFACT_ROOT / "cpu-preflight-v2/cpu-preflight-result.json",
+        default=ARTIFACT_ROOT / "cpu-preflight-v3/cpu-preflight-result.json",
     )
     parser.add_argument(
         "--candidate-manifest",
@@ -155,6 +159,8 @@ def main() -> int:
         "source_batch_script_path": str(batch),
         "source_batch_script_sha256": sha256_file(batch),
         "submitted_at_utc": datetime.now(UTC).isoformat(),
+        "technical_rerun_number": TECHNICAL_RERUN_NUMBER,
+        "technical_rerun_of": TECHNICAL_RERUN_OF,
         "treatment": "no_memory",
     }
     write_canonical_json(

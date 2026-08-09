@@ -27,10 +27,12 @@ STAGING_MANIFEST="$NAMESPACE/model-staging-manifest.json"
 SUITE_REFERENCE="$NAMESPACE/suite-reference.json"
 EXPECTED_ENVIRONMENT="$NAMESPACE/environment-fingerprint.json"
 EXPECTED_CONTENT="$NAMESPACE/environment-content-digest.json"
-CPU_GATE=/home/s224049759/run-artifacts/qwen36-no-memory-qualification/v1/cpu-preflight-v2/cpu-preflight-result.json
+CPU_GATE=/home/s224049759/run-artifacts/qwen36-no-memory-qualification/v1/cpu-preflight-v3/cpu-preflight-result.json
 ARTIFACT_ROOT=/home/s224049759/run-artifacts/qwen36-no-memory-qualification/v1/smoke/jobs
 ARTIFACT_DIR="$ARTIFACT_ROOT/$SLURM_JOB_ID"
 RUNTIME_SCRATCH="/tmp/cmq-$SLURM_JOB_ID"
+TECHNICAL_RERUN_OF=25933
+TECHNICAL_RERUN_NUMBER=1
 PORT=49786
 BASE_URL="http://127.0.0.1:$PORT/v1"
 SERVER_PID=
@@ -99,6 +101,7 @@ test -f "$SUITE_REFERENCE"
 test -f "$EXPECTED_ENVIRONMENT"
 test -f "$EXPECTED_CONTENT"
 test -f "$CPU_GATE"
+test -f "$PROJECT/scripts/capture_gpu_diagnostic.py"
 
 "$CMPILOT_PY" - "$CPU_GATE" "$CANDIDATE_MANIFEST" <<'PY'
 import hashlib
@@ -127,6 +130,9 @@ sha256sum "$0" "$CANDIDATE_MANIFEST" "$STAGING_MANIFEST" "$SUITE_REFERENCE" \
     > "$ARTIFACT_DIR/runtime-input-hashes.txt"
 printf '%s\n' "$MODEL_ID" > "$ARTIFACT_DIR/model-id.txt"
 printf '%s\n' "$MODEL_REVISION" > "$ARTIFACT_DIR/model-revision.txt"
+printf '{"schema":"qwen36-technical-rerun-v1","technical_rerun_number":%s,"technical_rerun_of":"%s"}\n' \
+    "$TECHNICAL_RERUN_NUMBER" "$TECHNICAL_RERUN_OF" \
+    > "$ARTIFACT_DIR/technical-rerun.json"
 date -u +%Y-%m-%dT%H:%M:%SZ > "$ARTIFACT_DIR/job-started-utc.txt"
 hostname > "$ARTIFACT_DIR/hostname.txt"
 env | awk -F= '$1 ~ /^SLURM_/ {print}' | LC_ALL=C sort \
@@ -171,7 +177,13 @@ printf 'TMPDIR=%s\nTEMP=%s\nTMP=%s\nVLLM_RPC_BASE_PATH=%s\n' \
 /usr/bin/nvidia-smi > "$ARTIFACT_DIR/nvidia-smi-initial.txt"
 /usr/bin/nvidia-smi -L > "$ARTIFACT_DIR/nvidia-smi-list.txt"
 /usr/bin/nvidia-smi topo -m > "$ARTIFACT_DIR/nvidia-smi-topology.txt"
-/usr/bin/nvidia-smi -q -d MIG > "$ARTIFACT_DIR/nvidia-smi-mig.txt"
+"$CMPILOT_PY" "$PROJECT/scripts/capture_gpu_diagnostic.py" \
+    --artifact-directory "$ARTIFACT_DIR" \
+    --name nvidia-smi-mig \
+    --policy informational \
+    -- /usr/bin/nvidia-smi \
+    --query-gpu=index,name,pci.bus_id,mig.mode.current \
+    --format=csv
 /usr/bin/nvidia-smi --query-gpu=index,name,uuid,memory.total \
     --format=csv,noheader,nounits > "$ARTIFACT_DIR/gpu-allocation.csv"
 "$TORCHRUN" --standalone --nnodes=1 --nproc-per-node=2 \
