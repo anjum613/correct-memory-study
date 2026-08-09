@@ -1,5 +1,5 @@
 #!/usr/bin/bash
-#SBATCH --job-name=qwen36-p02-shipment-summary
+#SBATCH --job-name=qwen36-p01-interval-merge-tr1
 #SBATCH --partition=gpu
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -8,8 +8,8 @@
 #SBATCH --gres=gpu:a100:2
 #SBATCH --time=03:00:00
 #SBATCH --no-requeue
-#SBATCH --output=/home/s224049759/slurm-logs/qwen36-p02-shipment-summary-%j.out
-#SBATCH --error=/home/s224049759/slurm-logs/qwen36-p02-shipment-summary-%j.err
+#SBATCH --output=/home/s224049759/slurm-logs/qwen36-p01-interval-merge-tr1-%j.out
+#SBATCH --error=/home/s224049759/slurm-logs/qwen36-p01-interval-merge-tr1-%j.err
 
 set -euo pipefail
 
@@ -21,10 +21,13 @@ MODEL_ID=Qwen/Qwen3.6-27B
 MODEL_REVISION=6a9e13bd6fc8f0983b9b99948120bc37f49c13e9
 MODEL=/home/s224049759/model-cache/huggingface/hub/models--Qwen--Qwen3.6-27B/snapshots/$MODEL_REVISION
 MODEL_CACHE=/home/s224049759/model-cache/huggingface
-TASK_ID=qnm-p02-shipment-summary
-TASK_SEED=1920009210
+TASK_ID=qnm-p01-interval-merge
+TASK_SEED=1602021252
 TASK_ROLE=primary
-
+TECHNICAL_RERUN_OF=25953
+TECHNICAL_RERUN_NUMBER=1
+QUALIFICATION_TASK_ID=qnm-p01-interval-merge
+QUALIFICATION_SEED=1602021252
 SUITE=$PROJECT/qualification/qwen32b-v1/suite-manifest.json
 SUITE_REFERENCE=$PROJECT/qualification/qwen36-v1/suite-reference.json
 TASK=$PROJECT/qualification/qwen32b-v1/tasks/$TASK_ID.json
@@ -134,7 +137,10 @@ sha256sum "$0" "$SUITE" "$SUITE_REFERENCE" "$TASK" "$FREEZE" \
 printf '%s\n' "$TASK_ID" > "$ARTIFACT_DIR/task-id.txt"
 printf '%s\n' "$TASK_ROLE" > "$ARTIFACT_DIR/task-role.txt"
 printf '%s\n' "$TASK_SEED" > "$ARTIFACT_DIR/task-seed.txt"
-
+printf '%s\n' "$TECHNICAL_RERUN_OF" > "$ARTIFACT_DIR/technical-rerun-of.txt"
+printf '%s\n' "$TECHNICAL_RERUN_NUMBER" > "$ARTIFACT_DIR/technical-rerun-number.txt"
+printf '%s\n' "$QUALIFICATION_TASK_ID" > "$ARTIFACT_DIR/qualification-task-id.txt"
+printf '%s\n' "$QUALIFICATION_SEED" > "$ARTIFACT_DIR/qualification-seed.txt"
 printf '%s\n' "$MODEL_ID" > "$ARTIFACT_DIR/model-id.txt"
 printf '%s\n' "$MODEL_REVISION" > "$ARTIFACT_DIR/model-revision.txt"
 printf '%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$ARTIFACT_DIR/job-started-utc.txt"

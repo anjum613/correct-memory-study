@@ -210,6 +210,11 @@ def test_all_seven_generated_batches_share_the_frozen_scientific_settings() -> N
         assert "--reasoning-parser qwen3" in batch
         assert "--language-model-only" in batch
         assert 'RUNTIME_SCRATCH=/tmp/cmq-$SLURM_JOB_ID' in batch
+        assert "MAX_SERVER_BIND_ATTEMPTS=4" in batch
+        assert "qwen36_server_port.py" in batch
+        assert 'BASE_URL=http://127.0.0.1:$PORT' in batch
+        assert "PORT=49786" not in batch
+        assert "probe.bind" not in batch
         assert "run_qualification_task.py" in batch
         assert "reference-patches" not in batch
         assert "memory treatment" not in batch.casefold()
@@ -227,7 +232,7 @@ def test_tracked_batches_exactly_match_the_frozen_generator() -> None:
             seeds[task_id],
             freeze_sha256,
         )
-        assert "cpu-preflight-qualification-freeze-v2" in path.read_text(
+        assert "cpu-preflight-qualification-port-fix-25953" in path.read_text(
             encoding="utf-8"
         )
 

@@ -69,9 +69,18 @@ from cmpilot.qwen36_qualification import (  # noqa: E402
 from cmpilot.qualification import artifact_manifest  # noqa: E402
 from cmpilot.qualification_runtime_paths import suite_runtime_path_record  # noqa: E402
 from scripts.qualification_cpu_gate import _task_gate  # noqa: E402
+from scripts.qwen36_server_port import (  # noqa: E402
+    LOOPBACK_HOST,
+    MAX_BIND_ATTEMPTS,
+    PORT_COUNT,
+    SELECTION_METHOD,
+    candidate_schedule,
+    inspect_vllm_019_port_contract,
+    is_explicit_pre_model_address_in_use,
+)
 
 
-DEFAULT_OUTPUT = QWEN36_ARTIFACT_ROOT / "cpu-preflight-qualification-freeze-v2"
+DEFAULT_OUTPUT = QWEN36_ARTIFACT_ROOT / "cpu-preflight-qualification-port-fix-25953"
 _TEST_SUMMARY = re.compile(
     r"(?P<passed>\d+) passed(?:, (?P<failed>\d+) failed)?"
     r"(?:, (?P<skipped>\d+) skipped)?"
@@ -191,6 +200,14 @@ def _batch_gate(
             'CMPILOT_PY=/home/s224049759/environments/cmpilot-conda/bin/python',
             'MINI_PY=/home/s224049759/environments/mini-swe-agent-smoke/bin/python',
             'VLLM_PY=/home/s224049759/environments/qwen36-vllm-v1/bin/python',
+            "PORT_HELPER=$PROJECT/scripts/qwen36_server_port.py",
+            "MAX_SERVER_BIND_ATTEMPTS=4",
+            'BASE_URL=http://127.0.0.1:$PORT',
+            "classify-bind-failure",
+            "EADDRINUSE_RETRY",
+            'PORT_LOCK_ROOT=/tmp/cmq-qwen36-$UID-ports',
+            "/usr/bin/flock --exclusive --nonblock",
+            "ACTIVE_ENDPOINT_CLAIM_RETRY",
         )
         forbidden = (
             "pip install",
@@ -200,6 +217,8 @@ def _batch_gate(
             "memory treatment",
             "procedural memory",
             "conda activate",
+            "PORT=49786",
+            "probe.bind",
         )
         row = {
             "path": str(path),
@@ -216,12 +235,74 @@ def _batch_gate(
             "scientific_runner": "run_qualification_task.py" in text,
             "fresh_job_artifacts": "$TASK_ID/jobs" in text
             and "$SLURM_JOB_ID" in text,
+            "dynamic_loopback_endpoint": (
+                "--host 127.0.0.1" in text
+                and "--port \"$PORT\"" in text
+                and '"$BASE_URL/health"' in text
+                and '"$BASE_URL/v1/models"' in text
+                and '"$BASE_URL/v1"' in text
+                and "PORT=49786" not in text
+                and "probe.bind" not in text
+            ),
+            "bounded_exact_bind_retry": (
+                'seq 1 "$MAX_SERVER_BIND_ATTEMPTS"' in text
+                and "classify-bind-failure" in text
+                and "EADDRINUSE_RETRY" in text
+                and "FATAL_SERVER_EXIT" in text
+                and "HEALTH_TIMEOUT" in text
+                and "ACTIVE_ENDPOINT_CLAIM_RETRY" in text
+                and "release_port_claim" in text
+            ),
         }
         row["pass"] = syntax["exit_code"] == 0 and all(
             value for key, value in row.items() if isinstance(value, bool)
         )
         rows.append(row)
-    return {"pass": all(row["pass"] for row in rows), "rows": rows}
+    rerun_path = ROOT / "slurm/qwen36_qnm_p01_interval_merge_technical_rerun_1.sbatch"
+    rerun_text = rerun_path.read_text(encoding="utf-8")
+    rerun_syntax = run(
+        ("/usr/bin/bash", "-n", str(rerun_path)),
+        cwd=ROOT,
+        prefix=output / "batch-syntax" / "qnm-p01-technical-rerun-1",
+    )
+    rerun = {
+        "path": str(rerun_path),
+        "sha256": sha256_file(rerun_path),
+        "syntax_exit_code": rerun_syntax["exit_code"],
+        "lineage": (
+            "TECHNICAL_RERUN_OF=25953" in rerun_text
+            and "TECHNICAL_RERUN_NUMBER=1" in rerun_text
+            and "QUALIFICATION_TASK_ID=qnm-p01-interval-merge" in rerun_text
+            and "QUALIFICATION_SEED=1602021252" in rerun_text
+        ),
+        "dynamic_port": (
+            "PORT=49786" not in rerun_text
+            and "probe.bind" not in rerun_text
+            and "MAX_SERVER_BIND_ATTEMPTS=4" in rerun_text
+            and "classify-bind-failure" in rerun_text
+            and "/usr/bin/flock --exclusive --nonblock" in rerun_text
+        ),
+        "same_scientific_configuration": all(
+            item in rerun_text
+            for item in (
+                "TASK_SEED=1602021252",
+                "--dtype bfloat16",
+                "--tensor-parallel-size 2",
+                "--max-model-len 32768",
+                "--gpu-memory-utilization 0.90",
+                "--reasoning-parser qwen3",
+                "--language-model-only",
+            )
+        ),
+    }
+    rerun["pass"] = rerun_syntax["exit_code"] == 0 and all(
+        value for value in rerun.values() if isinstance(value, bool)
+    )
+    return {
+        "pass": all(row["pass"] for row in rows) and rerun["pass"],
+        "rows": rows,
+        "technical_rerun": rerun,
+    }
 
 
 def main() -> int:
@@ -265,6 +346,38 @@ def main() -> int:
             qwen25_sha == QWEN25_RESULT_SHA256
             and tag.returncode == 0
             and tag.stdout.strip() == FROZEN_TAG_TARGET
+        )
+
+        technical_invalid_path = (
+            ROOT / "qualification/qwen36-v1/technical-invalid-qualification-25953.json"
+        )
+        technical_invalid = load_json(technical_invalid_path)
+        technical_stderr_path = (
+            QWEN36_ARTIFACT_ROOT
+            / "tasks/qnm-p01-interval-merge/jobs/25953/server.stderr"
+        )
+        technical_stderr = technical_stderr_path.read_text(
+            encoding="utf-8", errors="replace"
+        )
+        result["technical_invalid_25953"] = {
+            "path": str(technical_invalid_path),
+            "sha256": sha256_file(technical_invalid_path),
+            "stderr_path": str(technical_stderr_path),
+            "stderr_recognized_as_exact_pre_model_eaddrinuse": (
+                is_explicit_pre_model_address_in_use(technical_stderr, 1)
+            ),
+        }
+        result["checks"]["job_25953_preserved_as_technical_invalid"] = bool(
+            technical_invalid.get("slurm_job_id") == "25953"
+            and technical_invalid.get("task_id") == "qnm-p01-interval-merge"
+            and technical_invalid.get("seed") == 1602021252
+            and technical_invalid.get("technical_validity") == "FAIL"
+            and technical_invalid.get("technical_failure_class")
+            == "PRE_MODEL_LOAD_SERVER_BIND_FAILURE"
+            and technical_invalid.get("technical_failure_detail")
+            == "FIXED_PORT_ADDRESS_ALREADY_IN_USE"
+            and technical_invalid.get("repository_competence") == "NOT_SCORED"
+            and is_explicit_pre_model_address_in_use(technical_stderr, 1)
         )
 
         metadata = load_json(ROOT / "qualification/qwen36-v1/model-metadata.json")
@@ -472,6 +585,7 @@ def main() -> int:
                 "tests/test_qwen36_interpreter_contract.py",
                 "tests/test_qwen36_smoke_infrastructure.py",
                 "tests/test_qwen36_qualification.py",
+                "tests/test_qwen36_dynamic_port.py",
                 "tests/test_openai_transport.py",
                 "tests/test_mini_swe_config.py",
                 "tests/test_multiturn_preflight.py",
@@ -504,6 +618,67 @@ def main() -> int:
         )
         result["runtime_ipc_path_budget"] = runtime
         result["checks"]["runtime_ipc_path_budget"] = runtime["pass"] is True
+
+        environment_root = QWEN36_PYTHON.parent.parent
+        api_server_paths = sorted(
+            {
+                path.resolve()
+                for path in environment_root.glob(
+                "lib/python*/site-packages/vllm/entrypoints/openai/api_server.py"
+                )
+            }
+        )
+        argparse_paths = sorted(
+            {
+                path.resolve()
+                for path in environment_root.glob(
+                "lib/python*/site-packages/vllm/utils/argparse_utils.py"
+                )
+            }
+        )
+        if len(api_server_paths) != 1 or len(argparse_paths) != 1:
+            raise RuntimeError("could not resolve the unique installed vLLM port sources")
+        vllm_port_contract = inspect_vllm_019_port_contract(
+            api_server_paths[0], argparse_paths[0]
+        )
+        simulated_job_ids = tuple(str(300_000 + index) for index in range(len(ALL_TASKS)))
+        simulated_schedules = {
+            job_id: list(candidate_schedule(job_id)) for job_id in simulated_job_ids
+        }
+        first_ports = [ports[0] for ports in simulated_schedules.values()]
+        collision_job_a = "25953"
+        collision_job_b = str(int(collision_job_a) + PORT_COUNT)
+        collision_schedule_a = candidate_schedule(collision_job_a)
+        collision_schedule_b = candidate_schedule(collision_job_b)
+        server_port_policy = {
+            "engineered_collision": {
+                "job_a": collision_job_a,
+                "job_b": collision_job_b,
+                "same_first_candidate": (
+                    collision_schedule_a[0] == collision_schedule_b[0]
+                ),
+                "job_b_retry_is_distinct": (
+                    collision_schedule_b[1] != collision_schedule_a[0]
+                ),
+            },
+            "host": LOOPBACK_HOST,
+            "max_bind_attempts": MAX_BIND_ATTEMPTS,
+            "normal_first_candidates_unique": len(first_ports) == len(set(first_ports)),
+            "selection_method": SELECTION_METHOD,
+            "simulated_job_schedules": simulated_schedules,
+            "vllm_019_contract": vllm_port_contract,
+        }
+        write_canonical_json(output / "dynamic-server-port-validation.json", server_port_policy)
+        result["dynamic_server_port_policy"] = server_port_policy
+        result["checks"]["dynamic_server_port_policy"] = bool(
+            vllm_port_contract["pass"]
+            and LOOPBACK_HOST == "127.0.0.1"
+            and MAX_BIND_ATTEMPTS == 4
+            and server_port_policy["normal_first_candidates_unique"]
+            and server_port_policy["engineered_collision"]["same_first_candidate"]
+            and server_port_policy["engineered_collision"]["job_b_retry_is_distinct"]
+            and all(len(set(ports)) == MAX_BIND_ATTEMPTS for ports in simulated_schedules.values())
+        )
 
         batches = _batch_gate(output, freeze_sha256=freeze["sha256"], seeds=seeds)
         result["batches"] = batches

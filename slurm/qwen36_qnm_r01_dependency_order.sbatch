@@ -24,20 +24,26 @@ MODEL_CACHE=/home/s224049759/model-cache/huggingface
 TASK_ID=qnm-r01-dependency-order
 TASK_SEED=166980876
 TASK_ROLE=reserve
+
 SUITE=$PROJECT/qualification/qwen32b-v1/suite-manifest.json
 SUITE_REFERENCE=$PROJECT/qualification/qwen36-v1/suite-reference.json
 TASK=$PROJECT/qualification/qwen32b-v1/tasks/$TASK_ID.json
 FREEZE=$PROJECT/qualification/qwen36-v1/qualification-freeze-manifest.json
 EXPECTED_FREEZE_SHA256=7c8e22bcdd6d2e264ed205310b584df3643e5499e01e354b71779fc3fdcfca91
-CPU_GATE=/home/s224049759/run-artifacts/qwen36-no-memory-qualification/v1/cpu-preflight-qualification-freeze-v2/cpu-preflight-result.json
+CPU_GATE=/home/s224049759/run-artifacts/qwen36-no-memory-qualification/v1/cpu-preflight-qualification-port-fix-25953/cpu-preflight-result.json
 ENV_FINGERPRINT=$PROJECT/qualification/qwen36-v1/environment-fingerprint.json
 ENV_CONTENT=$PROJECT/qualification/qwen36-v1/environment-content-digest.json
 ARTIFACT_ROOT=/home/s224049759/run-artifacts/qwen36-no-memory-qualification/v1/tasks/$TASK_ID/jobs
 ARTIFACT_DIR=$ARTIFACT_ROOT/$SLURM_JOB_ID
 RUN_ARTIFACT=$ARTIFACT_DIR/run
 RUNTIME_SCRATCH=/tmp/cmq-$SLURM_JOB_ID
-PORT=49786
-BASE_URL=http://127.0.0.1:$PORT
+PORT_HELPER=$PROJECT/scripts/qwen36_server_port.py
+MAX_SERVER_BIND_ATTEMPTS=4
+PORT_LOCK_ROOT=/tmp/cmq-qwen36-$UID-ports
+PORT=
+BASE_URL=
+PORT_LOCK_FD=
+PORT_LOCK_FILE=
 SERVER_PID=
 
 mkdir -p "$ARTIFACT_DIR"
@@ -58,6 +64,19 @@ cleanup_server() {
     return "$cleanup_status"
 }
 
+release_port_claim() {
+    local release_status=0
+    if [ -n "$PORT_LOCK_FD" ]; then
+        if [ -n "$PORT_LOCK_FILE" ]; then
+            /usr/bin/rm -f -- "$PORT_LOCK_FILE" || release_status=1
+        fi
+        exec {PORT_LOCK_FD}>&- || release_status=1
+    fi
+    PORT_LOCK_FD=
+    PORT_LOCK_FILE=
+    return "$release_status"
+}
+
 cleanup_scratch() {
     "$CMPILOT_PY" "$PROJECT/scripts/qualification_runtime_path.py" cleanup \
         --job-id "$SLURM_JOB_ID" \
@@ -69,6 +88,7 @@ on_exit() {
     local status=$?
     set +e
     cleanup_server || status=1
+    release_port_claim || status=1
     cleanup_scratch || status=1
     /usr/bin/nvidia-smi > "$ARTIFACT_DIR/nvidia-smi-final.txt" 2>&1 || status=1
     printf '%s\n' "$status" > "$ARTIFACT_DIR/job-exit-code.txt"
@@ -109,10 +129,12 @@ test "$(sed -n '1p' "$ARTIFACT_DIR/qwen32b-freeze-tag-target.txt")" = ba039a0ead
 sha256sum "$0" "$SUITE" "$SUITE_REFERENCE" "$TASK" "$FREEZE" \
     "$PROJECT/qualification/qwen36-v1/qualification-agent-config.json" \
     "$PROJECT/qualification/qwen36-v1/qualification-seeds.json" \
+    "$PORT_HELPER" \
     > "$ARTIFACT_DIR/runtime-input-hashes.txt"
 printf '%s\n' "$TASK_ID" > "$ARTIFACT_DIR/task-id.txt"
 printf '%s\n' "$TASK_ROLE" > "$ARTIFACT_DIR/task-role.txt"
 printf '%s\n' "$TASK_SEED" > "$ARTIFACT_DIR/task-seed.txt"
+
 printf '%s\n' "$MODEL_ID" > "$ARTIFACT_DIR/model-id.txt"
 printf '%s\n' "$MODEL_REVISION" > "$ARTIFACT_DIR/model-revision.txt"
 printf '%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$ARTIFACT_DIR/job-started-utc.txt"
@@ -157,53 +179,128 @@ printf 'TMPDIR=%s\nTEMP=%s\nTMP=%s\nVLLM_RPC_BASE_PATH=%s\n' \
     > "$ARTIFACT_DIR/environment-verification.stdout" \
     2> "$ARTIFACT_DIR/environment-verification.stderr"
 
-"$CMPILOT_PY" - "$PORT" <<'PY'
-import socket
-import sys
-with socket.socket() as probe:
-    probe.bind(("127.0.0.1", int(sys.argv[1])))
-PY
+"$CMPILOT_PY" "$PORT_HELPER" schedule \
+    --job-id "$SLURM_JOB_ID" \
+    --record "$ARTIFACT_DIR/server-port-schedule.json" \
+    > "$ARTIFACT_DIR/server-port-helper.stdout"
+: > "$ARTIFACT_DIR/server-port-attempts.jsonl"
+/usr/bin/install -d -m 700 "$PORT_LOCK_ROOT"
 
-printf '%q ' "$VLLM_PY" -m vllm.entrypoints.openai.api_server \
-    --host 127.0.0.1 --port "$PORT" --model "$MODEL" --tokenizer "$MODEL" \
-    --served-model-name "$MODEL_ID" --dtype bfloat16 --tensor-parallel-size 2 \
-    --max-model-len 32768 --max-num-seqs 1 --gpu-memory-utilization 0.90 \
-    --seed "$TASK_SEED" --enforce-eager --reasoning-parser qwen3 \
-    --language-model-only --generation-config vllm \
-    > "$ARTIFACT_DIR/server-command.txt"
-printf '\n' >> "$ARTIFACT_DIR/server-command.txt"
+server_selected=0
+for attempt in $(seq 1 "$MAX_SERVER_BIND_ATTEMPTS"); do
+    PORT=$("$CMPILOT_PY" "$PORT_HELPER" candidate \
+        --job-id "$SLURM_JOB_ID" --attempt "$attempt")
+    BASE_URL=http://127.0.0.1:$PORT
+    PORT_LOCK_FILE=$PORT_LOCK_ROOT/$PORT.lock
+    exec {candidate_lock_fd}> "$PORT_LOCK_FILE"
+    if ! /usr/bin/flock --exclusive --nonblock "$candidate_lock_fd"; then
+        exec {candidate_lock_fd}>&-
+        PORT_LOCK_FILE=
+        "$CMPILOT_PY" "$PORT_HELPER" record-attempt \
+            --record "$ARTIFACT_DIR/server-port-attempts.jsonl" \
+            --job-id "$SLURM_JOB_ID" --attempt "$attempt" --port "$PORT" \
+            --outcome ACTIVE_ENDPOINT_CLAIM_RETRY \
+            >> "$ARTIFACT_DIR/server-port-helper.stdout"
+        continue
+    fi
+    PORT_LOCK_FD=$candidate_lock_fd
+    printf '%q ' "$VLLM_PY" -m vllm.entrypoints.openai.api_server \
+        --host 127.0.0.1 --port "$PORT" --model "$MODEL" --tokenizer "$MODEL" \
+        --served-model-name "$MODEL_ID" --dtype bfloat16 --tensor-parallel-size 2 \
+        --max-model-len 32768 --max-num-seqs 1 --gpu-memory-utilization 0.90 \
+        --seed "$TASK_SEED" --enforce-eager --reasoning-parser qwen3 \
+        --language-model-only --generation-config vllm \
+        > "$ARTIFACT_DIR/server-command.txt"
+    printf '\n' >> "$ARTIFACT_DIR/server-command.txt"
 
-setsid "$VLLM_PY" -m vllm.entrypoints.openai.api_server \
-    --host 127.0.0.1 \
-    --port "$PORT" \
-    --model "$MODEL" \
-    --tokenizer "$MODEL" \
-    --served-model-name "$MODEL_ID" \
-    --dtype bfloat16 \
-    --tensor-parallel-size 2 \
-    --max-model-len 32768 \
-    --max-num-seqs 1 \
-    --gpu-memory-utilization 0.90 \
-    --seed "$TASK_SEED" \
-    --enforce-eager \
-    --reasoning-parser qwen3 \
-    --language-model-only \
-    --generation-config vllm \
-    > "$ARTIFACT_DIR/server.stdout" \
-    2> "$ARTIFACT_DIR/server.stderr" &
-SERVER_PID=$!
-printf '%s\n' "$SERVER_PID" > "$ARTIFACT_DIR/server.pid"
+    : > "$ARTIFACT_DIR/server.stdout"
+    : > "$ARTIFACT_DIR/server.stderr"
+    setsid "$VLLM_PY" -m vllm.entrypoints.openai.api_server \
+        --host 127.0.0.1 \
+        --port "$PORT" \
+        --model "$MODEL" \
+        --tokenizer "$MODEL" \
+        --served-model-name "$MODEL_ID" \
+        --dtype bfloat16 \
+        --tensor-parallel-size 2 \
+        --max-model-len 32768 \
+        --max-num-seqs 1 \
+        --gpu-memory-utilization 0.90 \
+        --seed "$TASK_SEED" \
+        --enforce-eager \
+        --reasoning-parser qwen3 \
+        --language-model-only \
+        --generation-config vllm \
+        > "$ARTIFACT_DIR/server.stdout" \
+        2> "$ARTIFACT_DIR/server.stderr" &
+    SERVER_PID=$!
+    printf '%s\n' "$SERVER_PID" > "$ARTIFACT_DIR/server.pid"
 
-ready=0
-for _ in $(seq 1 360); do
-    if ! kill -0 "$SERVER_PID" 2>/dev/null; then break; fi
-    status=$(/usr/bin/curl --noproxy '*' --silent --output "$ARTIFACT_DIR/health-response.raw" \
-        --write-out '%{http_code}' "$BASE_URL/health" || true)
-    if [ "$status" = 200 ]; then ready=1; break; fi
-    sleep 1
+    ready=0
+    bind_collision=0
+    for _ in $(seq 1 360); do
+        if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+            set +e
+            wait "$SERVER_PID"
+            server_status=$?
+            set -e
+            SERVER_PID=
+            if "$CMPILOT_PY" "$PORT_HELPER" classify-bind-failure \
+                --stderr "$ARTIFACT_DIR/server.stderr" \
+                --exit-code "$server_status" \
+                --record "$ARTIFACT_DIR/server-bind-classification-$attempt.json" \
+                >> "$ARTIFACT_DIR/server-port-helper.stdout"; then
+                cp "$ARTIFACT_DIR/server-command.txt" \
+                    "$ARTIFACT_DIR/server-bind-attempt-$attempt.command.txt"
+                cp "$ARTIFACT_DIR/server.stdout" \
+                    "$ARTIFACT_DIR/server-bind-attempt-$attempt.stdout"
+                cp "$ARTIFACT_DIR/server.stderr" \
+                    "$ARTIFACT_DIR/server-bind-attempt-$attempt.stderr"
+                "$CMPILOT_PY" "$PORT_HELPER" record-attempt \
+                    --record "$ARTIFACT_DIR/server-port-attempts.jsonl" \
+                    --job-id "$SLURM_JOB_ID" --attempt "$attempt" --port "$PORT" \
+                    --outcome EADDRINUSE_RETRY --server-exit-code "$server_status" \
+                    >> "$ARTIFACT_DIR/server-port-helper.stdout"
+                release_port_claim
+                bind_collision=1
+                break
+            fi
+            "$CMPILOT_PY" "$PORT_HELPER" record-attempt \
+                --record "$ARTIFACT_DIR/server-port-attempts.jsonl" \
+                --job-id "$SLURM_JOB_ID" --attempt "$attempt" --port "$PORT" \
+                --outcome FATAL_SERVER_EXIT --server-exit-code "$server_status" \
+                >> "$ARTIFACT_DIR/server-port-helper.stdout"
+            if [ "$server_status" -eq 0 ]; then server_status=1; fi
+            exit "$server_status"
+        fi
+        status=$(/usr/bin/curl --noproxy '*' --silent \
+            --output "$ARTIFACT_DIR/health-response.raw" \
+            --write-out '%{http_code}' "$BASE_URL/health" || true)
+        if [ "$status" = 200 ]; then
+            ready=1
+            server_selected=1
+            printf '%s\n' "$PORT" > "$ARTIFACT_DIR/selected-server-port.txt"
+            printf '%s\n' "$BASE_URL" > "$ARTIFACT_DIR/server-base-url.txt"
+            "$CMPILOT_PY" "$PORT_HELPER" record-attempt \
+                --record "$ARTIFACT_DIR/server-port-attempts.jsonl" \
+                --job-id "$SLURM_JOB_ID" --attempt "$attempt" --port "$PORT" \
+                --outcome SERVER_READY \
+                >> "$ARTIFACT_DIR/server-port-helper.stdout"
+            break
+        fi
+        sleep 1
+    done
+    if [ "$server_selected" -eq 1 ]; then break; fi
+    if [ "$bind_collision" -eq 1 ]; then continue; fi
+    "$CMPILOT_PY" "$PORT_HELPER" record-attempt \
+        --record "$ARTIFACT_DIR/server-port-attempts.jsonl" \
+        --job-id "$SLURM_JOB_ID" --attempt "$attempt" --port "$PORT" \
+        --outcome HEALTH_TIMEOUT \
+        >> "$ARTIFACT_DIR/server-port-helper.stdout"
+    exit 1
 done
-printf '%s\n' "$ready" > "$ARTIFACT_DIR/server-ready.txt"
-test "$ready" -eq 1
+printf '%s\n' "$server_selected" > "$ARTIFACT_DIR/server-ready.txt"
+test "$server_selected" -eq 1
 /usr/bin/curl --noproxy '*' --silent --show-error "$BASE_URL/v1/models" \
     > "$ARTIFACT_DIR/models-response.json"
 
