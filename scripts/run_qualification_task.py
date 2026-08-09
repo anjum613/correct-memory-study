@@ -27,6 +27,9 @@ def main() -> int:
     parser.add_argument("--base-url", required=True)
     parser.add_argument("--model", required=True)
     parser.add_argument("--mini-python", required=True)
+    parser.add_argument("--tokenizer-path")
+    parser.add_argument("--seed", type=int)
+    parser.add_argument("--suite-reference", type=Path)
     parser.add_argument("--agent-timeout", type=int, default=600)
     parser.add_argument("--server-pid", type=int)
     parser.add_argument("--runtime-integrity", type=Path)
@@ -41,6 +44,9 @@ def main() -> int:
             base_url=arguments.base_url,
             model=arguments.model,
             mini_python=arguments.mini_python,
+            tokenizer_path=arguments.tokenizer_path,
+            seed=arguments.seed,
+            suite_reference=arguments.suite_reference,
             agent_timeout=arguments.agent_timeout,
             server_pid=arguments.server_pid,
             runtime_integrity=arguments.runtime_integrity,

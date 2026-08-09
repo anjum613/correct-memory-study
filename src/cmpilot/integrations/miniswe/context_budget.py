@@ -146,7 +146,13 @@ class ExactQwenChatTokenCounter:
     controller environment does not need either dependency.
     """
 
-    def __init__(self, tokenizer_path: Path):
+    def __init__(
+        self,
+        tokenizer_path: Path,
+        *,
+        expected_tokenizer_json_sha256: str = PINNED_TOKENIZER_JSON_SHA256,
+        expected_tokenizer_config_sha256: str = PINNED_TOKENIZER_CONFIG_SHA256,
+    ):
         root = Path(tokenizer_path)
         if not root.is_absolute() or not root.is_dir():
             raise ContextBudgetError(
@@ -158,11 +164,11 @@ class ExactQwenChatTokenCounter:
             raise ContextBudgetError("pinned tokenizer files are incomplete")
         tokenizer_digest = _sha256(tokenizer_json)
         config_digest = _sha256(tokenizer_config)
-        if tokenizer_digest != PINNED_TOKENIZER_JSON_SHA256:
+        if tokenizer_digest != expected_tokenizer_json_sha256:
             raise ContextBudgetError(
                 "tokenizer.json does not match the pinned Qwen tokenizer"
             )
-        if config_digest != PINNED_TOKENIZER_CONFIG_SHA256:
+        if config_digest != expected_tokenizer_config_sha256:
             raise ContextBudgetError(
                 "tokenizer_config.json does not match the pinned Qwen chat template"
             )

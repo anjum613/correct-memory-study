@@ -71,6 +71,7 @@ class SmokeConfig:
     task_file: Path = DEFAULT_TASK
     oracle_source: Path = DEFAULT_CALCULATOR_ORACLE
     tokenizer_path: str = DEFAULT_QWEN32B_TOKENIZER_PATH
+    agent_config_source: Path = DEFAULT_AGENT_CONFIG
 
 
 @dataclass(frozen=True)
@@ -136,6 +137,7 @@ def _config_artifact(config: SmokeConfig) -> dict[str, object]:
         "task_file": str(config.task_file),
         "oracle_source": None,
         "oracle_source_disclosed_to_agent": False,
+        "agent_config_source": str(config.agent_config_source),
     }
 
 
@@ -379,7 +381,7 @@ def _safe_agent_environment(
         "CMPILOT_TASK_FILE": str(task_instruction),
         "CMPILOT_TRAJECTORY": str(trajectory),
         "CMPILOT_PATCH_HISTORY": str(artifacts / "patch-history.jsonl"),
-        "CMPILOT_AGENT_CONFIG_SOURCE": str(DEFAULT_AGENT_CONFIG),
+        "CMPILOT_AGENT_CONFIG_SOURCE": str(config.agent_config_source),
         "CMPILOT_AGENT_CONFIG_ARTIFACT": str(artifacts / "agent-config.yaml"),
         "CMPILOT_AGENT_CONFIG_JSON_ARTIFACT": str(artifacts / "agent-config.json"),
         "CMPILOT_AGENT_CONFIG_TYPES_ARTIFACT": str(artifacts / "agent-config-types.json"),

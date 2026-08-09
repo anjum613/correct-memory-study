@@ -67,6 +67,8 @@ class MockState:
                 reasons.append("provider_specific_fields leaked into request history")
             if _contains_key(messages, "extra"):
                 reasons.append("extra leaked into request history")
+            if _contains_key(messages, "reasoning"):
+                reasons.append("reasoning leaked into request history")
             if authorization_present:
                 reasons.append("authorization header must not be sent")
 
@@ -106,6 +108,10 @@ class MockState:
                             "index": 0,
                             "message": {
                                 "content": content,
+                                "reasoning": (
+                                    "Private mock reasoning for request "
+                                    f"{request_index}; it must never re-enter history."
+                                ),
                                 "provider_specific_fields": {
                                     "mock_transport_metadata": request_index
                                 },

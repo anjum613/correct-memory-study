@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from minisweagent.exceptions import FormatError
 from minisweagent.models import GLOBAL_MODEL_STATS
@@ -53,6 +53,8 @@ try:
         CONTEXT_SAFETY_MARGIN,
         DEFAULT_QWEN32B_TOKENIZER,
         MINIMUM_USEFUL_COMPLETION,
+        PINNED_TOKENIZER_CONFIG_SHA256,
+        PINNED_TOKENIZER_JSON_SHA256,
         ContextBudgetExhausted,
         ExactQwenChatTokenCounter,
         RequestTokenBudget,
@@ -65,6 +67,8 @@ except ImportError:
         CONTEXT_SAFETY_MARGIN,
         DEFAULT_QWEN32B_TOKENIZER,
         MINIMUM_USEFUL_COMPLETION,
+        PINNED_TOKENIZER_CONFIG_SHA256,
+        PINNED_TOKENIZER_JSON_SHA256,
         ContextBudgetExhausted,
         ExactQwenChatTokenCounter,
         RequestTokenBudget,
@@ -80,10 +84,19 @@ class VllmTextModelConfig(BaseModel):
     base_url: str
     temperature: float = Field(default=0.0, ge=0.0)
     max_tokens: int = Field(default=CONFIGURED_COMPLETION_LIMIT, gt=0)
+    top_p: float | None = Field(default=None, ge=0.0, le=1.0)
+    top_k: int | None = Field(default=None, ge=0)
+    min_p: float | None = Field(default=None, ge=0.0, le=1.0)
+    presence_penalty: float | None = Field(default=None, ge=-2.0, le=2.0)
+    repetition_penalty: float | None = Field(default=None, gt=0.0)
+    seed: int | None = Field(default=None, ge=0)
+    samples_per_call: Literal[1] | None = None
     tokenizer_path: Path = DEFAULT_QWEN32B_TOKENIZER
-    context_limit: Literal[4096] = CONTEXT_LIMIT
-    context_safety_margin: Literal[32] = CONTEXT_SAFETY_MARGIN
-    minimum_useful_completion: Literal[64] = MINIMUM_USEFUL_COMPLETION
+    tokenizer_json_sha256: str = PINNED_TOKENIZER_JSON_SHA256
+    tokenizer_config_sha256: str = PINNED_TOKENIZER_CONFIG_SHA256
+    context_limit: int = Field(default=CONTEXT_LIMIT, gt=0)
+    context_safety_margin: int = Field(default=CONTEXT_SAFETY_MARGIN, ge=0)
+    minimum_useful_completion: int = Field(default=MINIMUM_USEFUL_COMPLETION, gt=0)
     connect_timeout_seconds: float = Field(default=10.0, gt=0.0)
     read_timeout_seconds: float = Field(default=120.0, gt=0.0)
     transport_artifact_path: Path | None = None
@@ -96,6 +109,34 @@ class VllmTextModelConfig(BaseModel):
         "<returncode>{{output.returncode}}</returncode>\n<output>\n{{output.output}}</output>"
     )
     multimodal_regex: str = ""
+
+    @model_validator(mode="after")
+    def validate_context_profile(self) -> "VllmTextModelConfig":
+        profiles = {
+            (
+                PINNED_TOKENIZER_JSON_SHA256,
+                PINNED_TOKENIZER_CONFIG_SHA256,
+            ): 4096,
+            (
+                "5f9e4d4901a92b997e463c1f46055088b6cca5ca61a6522d1b9f64c4bb81cb42",
+                "5186f0defcd7f232382c7f0aebcd2252d073bb921ab240e407b7ae8745d2b29b",
+            ): 32768,
+        }
+        identity = (
+            self.tokenizer_json_sha256,
+            self.tokenizer_config_sha256,
+        )
+        expected_context = profiles.get(identity)
+        if expected_context is None:
+            raise ValueError("tokenizer identity is not an approved context profile")
+        if self.context_limit != expected_context:
+            raise ValueError(
+                f"context limit {self.context_limit} differs from approved profile "
+                f"{expected_context}"
+            )
+        if self.context_safety_margin != 32 or self.minimum_useful_completion != 64:
+            raise ValueError("frozen context reserve policy changed")
+        return self
 
 
 def _type_name(value: object) -> str:
@@ -149,7 +190,11 @@ class VllmTextModel:
 
     def _exact_token_counter(self) -> ExactQwenChatTokenCounter:
         if self._token_counter is None:
-            self._token_counter = ExactQwenChatTokenCounter(self.config.tokenizer_path)
+            self._token_counter = ExactQwenChatTokenCounter(
+                self.config.tokenizer_path,
+                expected_tokenizer_json_sha256=self.config.tokenizer_json_sha256,
+                expected_tokenizer_config_sha256=self.config.tokenizer_config_sha256,
+            )
         return self._token_counter
 
     @staticmethod
@@ -252,6 +297,13 @@ class VllmTextModel:
                 model=self.config.model_name,
                 temperature=temperature,
                 max_tokens=budget.effective_completion_limit,
+                top_p=self.config.top_p,
+                top_k=self.config.top_k,
+                min_p=self.config.min_p,
+                presence_penalty=self.config.presence_penalty,
+                repetition_penalty=self.config.repetition_penalty,
+                seed=self.config.seed,
+                n=self.config.samples_per_call,
             )
         except BaseException as error:
             self._record_failure(

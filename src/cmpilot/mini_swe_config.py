@@ -62,9 +62,18 @@ SUPPORTED_MODEL_FIELDS = frozenset(
         "action_regex",
         "temperature",
         "max_tokens",
+        "top_p",
+        "top_k",
+        "min_p",
+        "presence_penalty",
+        "repetition_penalty",
+        "seed",
+        "samples_per_call",
         "connect_timeout_seconds",
         "read_timeout_seconds",
         "tokenizer_path",
+        "tokenizer_json_sha256",
+        "tokenizer_config_sha256",
         "context_limit",
         "context_safety_margin",
         "minimum_useful_completion",
@@ -299,6 +308,8 @@ def build_mini_swe_config(
         request_timeout if request_timeout is not None else endpoint.read_timeout_seconds,
     )
     tokenizer_path = model_input.pop("tokenizer_path", endpoint.tokenizer_path)
+    tokenizer_json_sha256 = model_input.pop("tokenizer_json_sha256", None)
+    tokenizer_config_sha256 = model_input.pop("tokenizer_config_sha256", None)
     context_limit = model_input.pop("context_limit", 4096)
     context_safety_margin = model_input.pop("context_safety_margin", 32)
     minimum_useful_completion = model_input.pop("minimum_useful_completion", 64)
@@ -328,5 +339,9 @@ def build_mini_swe_config(
         "event_path": str(event_path or trajectory.with_name("adapter-events.jsonl")),
         **model_input,
     }
+    if tokenizer_json_sha256 is not None:
+        model["tokenizer_json_sha256"] = tokenizer_json_sha256
+    if tokenizer_config_sha256 is not None:
+        model["tokenizer_config_sha256"] = tokenizer_config_sha256
 
     return {"agent": agent, "environment": environment, "model": model}

@@ -306,6 +306,13 @@ class OpenAIChatTransport:
         model: str,
         temperature: float,
         max_tokens: int,
+        top_p: float | None = None,
+        top_k: int | None = None,
+        min_p: float | None = None,
+        presence_penalty: float | None = None,
+        repetition_penalty: float | None = None,
+        seed: int | None = None,
+        n: int | None = None,
     ) -> CompletionResult:
         normalized, excluded = normalize_messages(messages)
         request_body = {
@@ -314,6 +321,18 @@ class OpenAIChatTransport:
             "model": model,
             "temperature": temperature,
         }
+        optional_sampling = {
+            "top_p": top_p,
+            "top_k": top_k,
+            "min_p": min_p,
+            "presence_penalty": presence_penalty,
+            "repetition_penalty": repetition_penalty,
+            "seed": seed,
+            "n": n,
+        }
+        request_body.update(
+            {name: value for name, value in optional_sampling.items() if value is not None}
+        )
         request_bytes = canonical_json_bytes(request_body)
         request_hash = hashlib.sha256(request_bytes).hexdigest()
         path = self.parsed_endpoint.path or "/"

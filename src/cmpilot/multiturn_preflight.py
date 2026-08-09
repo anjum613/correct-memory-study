@@ -38,6 +38,8 @@ class MultiturnPreflightConfig:
     model: str = DEFAULT_MODEL
     template: Path = DEFAULT_TEMPLATE
     task_file: Path = DEFAULT_TASK
+    tokenizer_path: str = SmokeConfig.__dataclass_fields__["tokenizer_path"].default
+    agent_config_source: Path = SmokeConfig.__dataclass_fields__["agent_config_source"].default
 
 
 def _load_json(path: Path) -> dict[str, Any]:
@@ -89,7 +91,11 @@ def _request_histories_are_canonical(requests: list[dict[str, Any]]) -> bool:
         request = record.get("request", {})
         messages = request.get("messages", []) if isinstance(request, dict) else []
         serialized = json.dumps(messages, sort_keys=True)
-        if "provider_specific_fields" in serialized or '"extra"' in serialized:
+        if (
+            "provider_specific_fields" in serialized
+            or '"extra"' in serialized
+            or '"reasoning"' in serialized
+        ):
             return False
     return True
 
@@ -106,6 +112,7 @@ def run_multiturn_preflight(config: MultiturnPreflightConfig) -> int:
             "artifact_dir": str(config.artifact_dir),
             "template": str(config.template),
             "task_file": str(config.task_file),
+            "agent_config_source": str(config.agent_config_source),
         },
     )
     template_before = template_snapshot(config.template)
@@ -140,6 +147,8 @@ def run_multiturn_preflight(config: MultiturnPreflightConfig) -> int:
                     agent_timeout=config.timeout_seconds,
                     template=config.template,
                     task_file=config.task_file,
+                    tokenizer_path=config.tokenizer_path,
+                    agent_config_source=config.agent_config_source,
                 )
             )
         finally:
@@ -199,6 +208,17 @@ def run_multiturn_preflight(config: MultiturnPreflightConfig) -> int:
         .get("mock_transport_metadata")
         == 1
     )
+    raw_reasoning_preserved = bool(transport) and all(
+        isinstance(
+            record.get("response", {})
+            .get("choices", [{}])[0]
+            .get("message", {})
+            .get("reasoning"),
+            str,
+        )
+        for record in transport
+        if record.get("classification") == "success"
+    )
     request_usage_retained = all(
         isinstance(record.get("response", {}).get("usage"), dict)
         for record in transport
@@ -242,6 +262,7 @@ def run_multiturn_preflight(config: MultiturnPreflightConfig) -> int:
         "assistant_semantics_unchanged": semantic_first_in_trajectory
         and semantic_second_in_trajectory,
         "raw_provider_metadata_preserved_separately": raw_provider_metadata_preserved,
+        "raw_reasoning_preserved_separately": raw_reasoning_preserved,
         "usage_retained": request_usage_retained and metrics["usage_total"] is not None,
         "source_repository_unchanged": source_unchanged,
         "temporary_repository_unchanged": initial_hashes.get("content_sha256")

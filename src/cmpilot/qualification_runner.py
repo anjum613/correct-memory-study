@@ -41,6 +41,12 @@ from .qualification import (
     validate_task_manifest,
 )
 from .qualification_adapter import command, write_qualification_adapter
+from .qwen36_qualification import (
+    MODEL_ID as QWEN36_MODEL_ID,
+    MODEL_REVISION as QWEN36_MODEL_REVISION,
+    resolved_agent_config as resolved_qwen36_agent_config,
+    validate_freeze_manifest as validate_qwen36_freeze_manifest,
+)
 from .repository_manager import (
     final_patch,
     git,
@@ -74,6 +80,9 @@ class QualificationRunConfig:
     base_url: str
     model: str
     mini_python: str
+    tokenizer_path: str | None = None
+    seed: int | None = None
+    suite_reference: Path | None = None
     agent_timeout: int = 600
     server_pid: int | None = None
     runtime_integrity: Path | None = None
@@ -193,6 +202,8 @@ def run_qualification_task(config: QualificationRunConfig) -> int:
     if not memory_check["pass"]:
         raise QualificationError("qualification prompt contains memory material")
 
+    freeze_record = load_json(config.freeze_manifest)
+    qwen36 = freeze_record.get("schema") == "qwen36-qualification-freeze-v1"
     input_hashes = {
         "freeze_manifest": sha256_file(config.freeze_manifest),
         "suite_manifest": sha256_file(config.suite_manifest),
@@ -200,13 +211,56 @@ def run_qualification_task(config: QualificationRunConfig) -> int:
         "task_policy": sha256_file(paths["task_policy"]),
         "task_instruction": sha256_file(paths["task_instruction"]),
     }
-    expected_freeze = suite["freeze_manifest"]["sha256"]
-    if input_hashes["freeze_manifest"] != expected_freeze:
-        raise QualificationError("freeze manifest hash differs from frozen suite")
-    if config.model != str(task["model_configuration"]["served_model_path"]):
-        raise QualificationError("submitted model path differs from task manifest")
-    if task["model_configuration"]["revision"] != MODEL_REVISION:
-        raise QualificationError("submitted model revision differs from frozen revision")
+    if qwen36:
+        freeze_validation = validate_qwen36_freeze_manifest(
+            project, config.freeze_manifest
+        )
+        if config.suite_reference is None:
+            raise QualificationError("Qwen3.6 suite reference is required")
+        reference = freeze_record["qualification_suite"]
+        if (
+            sha256_file(config.suite_manifest)
+            != reference["source_manifest_sha256"]
+            or sha256_file(config.suite_reference)
+            != reference["suite_reference_sha256"]
+        ):
+            raise QualificationError("Qwen3.6 qualification suite identity changed")
+        if config.model != QWEN36_MODEL_ID:
+            raise QualificationError("submitted Qwen3.6 served model ID changed")
+        if freeze_record["model"]["revision"] != QWEN36_MODEL_REVISION:
+            raise QualificationError("submitted Qwen3.6 revision changed")
+        expected_seed = freeze_record["generation"]["seeds"].get(task_id)
+        if config.seed != expected_seed:
+            raise QualificationError("submitted Qwen3.6 task seed changed")
+        if config.tokenizer_path != freeze_record["model"]["snapshot"]:
+            raise QualificationError("submitted Qwen3.6 tokenizer snapshot changed")
+        resolved_config = resolved_qwen36_agent_config(project, task_id)
+        resolved_config_path = artifact / "resolved-agent-config.json"
+        write_json(resolved_config_path, resolved_config)
+        input_hashes.update(
+            {
+                "suite_reference": sha256_file(config.suite_reference),
+                "resolved_agent_config": sha256_file(resolved_config_path),
+            }
+        )
+        model_revision = QWEN36_MODEL_REVISION
+        run_schema = "qwen36-qualification-run-identity-v1"
+        success_label = "QWEN36_QUALIFICATION_TECHNICAL_VALID"
+        technical_failure_label = "QWEN36_QUALIFICATION_TECHNICAL_FAILURE"
+    else:
+        expected_freeze = suite["freeze_manifest"]["sha256"]
+        if input_hashes["freeze_manifest"] != expected_freeze:
+            raise QualificationError("freeze manifest hash differs from frozen suite")
+        if config.model != str(task["model_configuration"]["served_model_path"]):
+            raise QualificationError("submitted model path differs from task manifest")
+        if task["model_configuration"]["revision"] != MODEL_REVISION:
+            raise QualificationError("submitted model revision differs from frozen revision")
+        freeze_validation = {"pass": True, "scope": "historical qwen32 freeze"}
+        resolved_config_path = None
+        model_revision = MODEL_REVISION
+        run_schema = "qwen32b-qualification-run-identity-v1"
+        success_label = "QWEN32B_QUALIFICATION_TECHNICAL_VALID"
+        technical_failure_label = "QWEN32B_QUALIFICATION_TECHNICAL_FAILURE"
 
     write_json(artifact / "input-hashes.json", input_hashes)
     write_json(artifact / "task-manifest.json", task)
@@ -220,7 +274,9 @@ def run_qualification_task(config: QualificationRunConfig) -> int:
             "project_root": str(project),
             "python": str(CMPILOT_PYTHON),
             "python_version": platform.python_version(),
-            "schema": "qwen32b-qualification-run-identity-v1",
+            "model_revision": model_revision,
+            "qwen36_seed": config.seed if qwen36 else None,
+            "schema": run_schema,
             "started_at_utc": started.isoformat(),
             "task_id": task_id,
             "treatment": "no_memory",
@@ -296,7 +352,7 @@ def run_qualification_task(config: QualificationRunConfig) -> int:
             (),
             {
                 "model": config.model,
-                "tokenizer_path": config.model,
+                "tokenizer_path": config.tokenizer_path or config.model,
                 "base_url": config.base_url,
             },
         )(),
@@ -312,6 +368,8 @@ def run_qualification_task(config: QualificationRunConfig) -> int:
             "CMPILOT_TASK_POLICY_SOURCE": str(paths["task_policy"]),
         }
     )
+    if resolved_config_path is not None:
+        environment["CMPILOT_AGENT_CONFIG_SOURCE"] = str(resolved_config_path)
     command_line = command(config.mini_python, adapter)
     write_json(artifact / "agent-command.json", command_line)
     agent_started = time.perf_counter()
@@ -515,14 +573,17 @@ def run_qualification_task(config: QualificationRunConfig) -> int:
         artifact_directory=artifact,
         termination_reason=termination_reason or "MODEL_TASK_FAILURE",
         callbacks=callbacks,
-        success_label="QWEN32B_QUALIFICATION_TECHNICAL_VALID",
-        technical_failure_label="QWEN32B_QUALIFICATION_TECHNICAL_FAILURE",
+        success_label=success_label,
+        technical_failure_label=technical_failure_label,
         requested_exit_code=0,
         initial_technical_validity=technical_before_finalizer,
         base_result={
             "dimensions": dimensions,
             "frozen_harness_commit": FROZEN_HARNESS_COMMIT,
-            "model_revision": MODEL_REVISION,
+            "freeze_manifest_sha256": input_hashes["freeze_manifest"],
+            "freeze_validation": freeze_validation,
+            "model_revision": model_revision,
+            "seed": config.seed if qwen36 else None,
             "task_id": task_id,
             "treatment": "no_memory",
         },
