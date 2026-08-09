@@ -208,7 +208,15 @@ def build_smoke_result(artifact: Path = SMOKE_ARTIFACT) -> dict[str, Any]:
     smoke = load_json(artifact / "smoke-client-result.json")
     models = load_json(artifact / "models-response.json")
     health = load_json(artifact / "health-response.json")
-    load_memory = load_json(artifact / "gpu-memory-after-load.json")
+    load_memory = json.loads(
+        (artifact / "gpu-memory-after-load.json").read_text(encoding="utf-8")
+    )
+    if not isinstance(load_memory, list) or not all(
+        isinstance(row, dict) for row in load_memory
+    ):
+        raise Qwen36QualificationError(
+            "gpu-memory-after-load.json must contain one object per GPU"
+        )
     path_budget = load_json(artifact / "runtime-ipc-path-budget.json")
     cleanup = load_json(artifact / "runtime-scratch-cleanup.json")
     server_cleanup = load_json(artifact / "server-cleanup.json")

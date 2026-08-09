@@ -35,6 +35,8 @@ from cmpilot.qwen36_qualification import (
     SEED_SCHEDULE,
     SUITE_REFERENCE,
     SUITE_REFERENCE_SHA256,
+    SMOKE_ARTIFACT,
+    build_smoke_result,
     resolved_agent_config,
     validate_agent_config,
     validate_freeze_manifest,
@@ -231,6 +233,19 @@ def test_candidate_and_suite_identity_remain_unchanged() -> None:
         "b36b9c47b130dba7c2a0ae60161029d3f5b0b522e8bd0f5b0f0749bae86b3a74"
     )
     assert REASONING_PARSER == "qwen3"
+
+
+def test_smoke_result_builds_from_the_two_gpu_array_artifact() -> None:
+    if not SMOKE_ARTIFACT.is_dir():
+        pytest.skip("preserved job-25940 artifacts are unavailable")
+
+    result = build_smoke_result(SMOKE_ARTIFACT)
+
+    assert result["classification"] == "PASS"
+    assert result["job_id"] == "25940"
+    assert result["context_decision"] == "SAFE_FOR_QUALIFICATION"
+    assert len(result["gpu_memory_after_load"]) == 2
+    assert all(result["checks"].values())
 
 
 def test_final_freeze_validates_when_present() -> None:
