@@ -21,23 +21,11 @@ from cmpilot.environment_fingerprint import (  # noqa: E402
     write_fingerprint_artifacts,
 )
 from cmpilot.qwen36_candidate import (  # noqa: E402
+    ENVIRONMENT_CONTENT_DISTRIBUTIONS,
     ENVIRONMENT_PATH,
     QUALIFICATION_NAMESPACE,
     sha256_file,
     write_canonical_json,
-)
-
-
-CONTENT_DISTRIBUTIONS = (
-    "llguidance",
-    "lm-format-enforcer",
-    "openai",
-    "pyzmq",
-    "tokenizers",
-    "torch",
-    "transformers",
-    "vllm",
-    "xgrammar",
 )
 
 
@@ -65,7 +53,9 @@ def main() -> int:
         outputs["fingerprint_record"],
         interpreter=sys.executable,
     )
-    content = fingerprint_installed_distributions(CONTENT_DISTRIBUTIONS)
+    content = fingerprint_installed_distributions(
+        ENVIRONMENT_CONTENT_DISTRIBUTIONS
+    )
     write_content_digest_artifacts(
         outputs["content_inventory"], outputs["content_record"], content
     )
@@ -98,7 +88,7 @@ def main() -> int:
     }
     manifest = {
         "content_digest": content.as_record(),
-        "content_distributions": list(CONTENT_DISTRIBUTIONS),
+        "content_distributions": list(ENVIRONMENT_CONTENT_DISTRIBUTIONS),
         "environment_path": str(ENVIRONMENT_PATH),
         "fingerprint": fingerprint.as_record(interpreter=sys.executable),
         "lock_sha256": sha256_file(outputs["lock"]),

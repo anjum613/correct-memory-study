@@ -45,7 +45,7 @@ from cmpilot.qwen36_candidate import (  # noqa: E402
 
 CMPILOT_PYTHON = Path("/home/s224049759/environments/cmpilot-conda/bin/python")
 VLLM_PYTHON = ENVIRONMENT_PATH / "bin/python"
-DEFAULT_OUTPUT = ARTIFACT_ROOT / "cpu-preflight"
+DEFAULT_OUTPUT = ARTIFACT_ROOT / "cpu-preflight-v2"
 _UNRESOLVED = re.compile(r"{{.*?}}|{%.*?%}|\b(?:TODO|TBD|FIXME)\b", re.DOTALL)
 _TEST_SUMMARY = re.compile(
     r"(?P<passed>\d+) passed(?:, (?P<failed>\d+) failed)?(?:, (?P<skipped>\d+) skipped)?"

@@ -47,6 +47,17 @@ ARTIFACT_ROOT = Path(
     "/home/s224049759/run-artifacts/qwen36-no-memory-qualification/v1"
 )
 QUALIFICATION_NAMESPACE = Path("qualification/qwen36-v1")
+ENVIRONMENT_CONTENT_DISTRIBUTIONS = (
+    "llguidance",
+    "lm-format-enforcer",
+    "openai",
+    "pyzmq",
+    "tokenizers",
+    "torch",
+    "transformers",
+    "vllm",
+    "xgrammar",
+)
 SOURCE_SUITE = Path("qualification/qwen32b-v1/suite-manifest.json")
 SOURCE_SUITE_SHA256 = (
     "67a97e7ec0452907d80da681b128021d65a9205664ce7ff6be90944e92ba9c48"

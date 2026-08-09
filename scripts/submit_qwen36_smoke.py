@@ -50,7 +50,7 @@ def main() -> int:
     parser.add_argument(
         "--cpu-gate",
         type=Path,
-        default=ARTIFACT_ROOT / "cpu-preflight/cpu-preflight-result.json",
+        default=ARTIFACT_ROOT / "cpu-preflight-v2/cpu-preflight-result.json",
     )
     parser.add_argument(
         "--candidate-manifest",

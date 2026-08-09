@@ -21,8 +21,12 @@ from cmpilot.environment_fingerprint import (  # noqa: E402
     compare_fingerprint_records,
     write_fingerprint_artifacts,
 )
-from cmpilot.qwen36_candidate import ENVIRONMENT_PATH, load_json, write_canonical_json  # noqa: E402
-from scripts.capture_qwen36_environment import CONTENT_DISTRIBUTIONS  # noqa: E402
+from cmpilot.qwen36_candidate import (  # noqa: E402
+    ENVIRONMENT_CONTENT_DISTRIBUTIONS,
+    ENVIRONMENT_PATH,
+    load_json,
+    write_canonical_json,
+)
 
 
 def main() -> int:
@@ -42,7 +46,9 @@ def main() -> int:
         output / "environment-fingerprint.json",
         interpreter=sys.executable,
     )
-    content = fingerprint_installed_distributions(CONTENT_DISTRIBUTIONS)
+    content = fingerprint_installed_distributions(
+        ENVIRONMENT_CONTENT_DISTRIBUTIONS
+    )
     write_content_digest_artifacts(
         output / "environment-content-inventory.json",
         output / "environment-content-digest.json",

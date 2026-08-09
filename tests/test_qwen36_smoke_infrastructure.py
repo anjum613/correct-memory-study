@@ -118,3 +118,28 @@ def test_new_python_sources_compile() -> None:
     )
 
     assert completed.returncode == 0, completed.stderr
+
+
+def test_environment_verifier_imports_when_invoked_by_absolute_path() -> None:
+    verifier = ROOT / "scripts/verify_qwen36_environment.py"
+    completed = subprocess.run(
+        (str(ENVIRONMENT_PATH / "bin/python"), str(verifier), "--help"),
+        cwd=Path("/"),
+        capture_output=True,
+        text=True,
+        check=False,
+        env={"PYTHONNOUSERSITE": "1"},
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert "Compare the live Qwen3.6 environment" in completed.stdout
+
+
+def test_corrected_cpu_gate_uses_a_new_preservation_path() -> None:
+    batch = BATCH.read_text(encoding="utf-8")
+    preflight = (ROOT / "scripts/qwen36_cpu_preflight.py").read_text(encoding="utf-8")
+    submission = (ROOT / "scripts/submit_qwen36_smoke.py").read_text(encoding="utf-8")
+
+    assert 'ARTIFACT_ROOT / "cpu-preflight-v2"' in preflight
+    assert "cpu-preflight-v2/cpu-preflight-result.json" in batch
+    assert 'ARTIFACT_ROOT / "cpu-preflight-v2/cpu-preflight-result.json"' in submission
