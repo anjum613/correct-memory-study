@@ -92,3 +92,16 @@ primary and two reserve tasks. The competence definition and 4/5,
 
 Only one model-load/request smoke may be submitted in this phase. No
 qualification task is consumed by that job.
+
+## CPU-preflight audit history
+
+The first candidate preflight artifact at
+`/home/s224049759/run-artifacts/qwen36-no-memory-qualification/v1/cpu-preflight`
+is preserved as `FAIL`. Its snapshot checks passed, but the new environment
+verifier failed before producing its result because an absolute-path
+invocation could not import a constant from the `scripts` package. No model,
+task, prompt, oracle, policy, environment, or snapshot changed. Commit
+`de8435dc363aa7e19589a6482d9446ba0d5cd296` moved the constant into the
+project package and added an exact-invocation regression. The corrected gate
+writes to the separate `cpu-preflight-v2` artifact path; the failed artifact
+is not overwritten.
