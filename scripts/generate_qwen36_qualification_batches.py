@@ -34,7 +34,7 @@ TECHNICAL_RERUN_OUTPUT = (
 )
 CPU_GATE = (
     "/home/s224049759/run-artifacts/qwen36-no-memory-qualification/v1/"
-    "cpu-preflight-qualification-port-fix-25953/cpu-preflight-result.json"
+    "cpu-preflight-qualification-port-fix-25953-v2/cpu-preflight-result.json"
 )
 
 

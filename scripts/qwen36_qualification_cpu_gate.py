@@ -80,7 +80,7 @@ from scripts.qwen36_server_port import (  # noqa: E402
 )
 
 
-DEFAULT_OUTPUT = QWEN36_ARTIFACT_ROOT / "cpu-preflight-qualification-port-fix-25953"
+DEFAULT_OUTPUT = QWEN36_ARTIFACT_ROOT / "cpu-preflight-qualification-port-fix-25953-v2"
 _TEST_SUMMARY = re.compile(
     r"(?P<passed>\d+) passed(?:, (?P<failed>\d+) failed)?"
     r"(?:, (?P<skipped>\d+) skipped)?"

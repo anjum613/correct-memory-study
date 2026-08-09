@@ -232,7 +232,7 @@ def test_tracked_batches_exactly_match_the_frozen_generator() -> None:
             seeds[task_id],
             freeze_sha256,
         )
-        assert "cpu-preflight-qualification-port-fix-25953" in path.read_text(
+        assert "cpu-preflight-qualification-port-fix-25953-v2" in path.read_text(
             encoding="utf-8"
         )
 
