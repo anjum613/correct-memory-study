@@ -46,6 +46,7 @@ from cmpilot.qwen36_qualification import (
     validate_seed_schedule,
     write_canonical_json,
 )
+from cmpilot.qwen36_submission_gate import validate_submission_gate
 from scripts.generate_qwen36_qualification_batches import render
 
 
@@ -196,13 +197,13 @@ def test_qwen36_scientific_adapter_multiturn_mock(
 
 def test_all_seven_generated_batches_share_the_frozen_scientific_settings() -> None:
     seeds = validate_seed_schedule(ROOT / SEED_SCHEDULE)["seeds"]
-    dummy_freeze = "a" * 64
+    gate = validate_submission_gate(ROOT)
 
     for task_id in ALL_TASKS:
-        batch = render(task_id, seeds[task_id], dummy_freeze)
+        batch = render(task_id, seeds[task_id], submission_gate=gate)
         assert f"TASK_ID={task_id}" in batch
         assert f"TASK_SEED={seeds[task_id]}" in batch
-        assert f"EXPECTED_FREEZE_SHA256={dummy_freeze}" in batch
+        assert f"EXPECTED_FREEZE_SHA256={gate['scientific_freeze_sha256']}" in batch
         assert "#SBATCH --gres=gpu:a100:2" in batch
         assert "--dtype bfloat16" in batch
         assert "--tensor-parallel-size 2" in batch
@@ -225,6 +226,7 @@ def test_all_seven_generated_batches_share_the_frozen_scientific_settings() -> N
 def test_tracked_batches_exactly_match_the_frozen_generator() -> None:
     freeze_sha256 = sha256_file(ROOT / QUALIFICATION_FREEZE)
     seeds = validate_seed_schedule(ROOT / SEED_SCHEDULE)["seeds"]
+    gate = validate_submission_gate(ROOT)
 
     for task_id in ALL_TASKS:
         path = ROOT / "slurm" / f"qwen36_{task_id.replace('-', '_')}.sbatch"
@@ -232,10 +234,11 @@ def test_tracked_batches_exactly_match_the_frozen_generator() -> None:
             task_id,
             seeds[task_id],
             freeze_sha256,
+            submission_gate=gate,
         )
-        assert "cpu-preflight-qualification-harness-fix-25963" in path.read_text(
-            encoding="utf-8"
-        )
+        text = path.read_text(encoding="utf-8")
+        assert str(gate["cpu_gate_result_path"]) in text
+        assert "cpu-preflight-qualification-harness-fix-25963/" not in text
 
 
 def test_candidate_and_suite_identity_remain_unchanged() -> None:

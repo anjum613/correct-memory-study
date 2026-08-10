@@ -14,12 +14,14 @@ sys.path.insert(0, str(ROOT / "src"))
 from cmpilot.qwen36_candidate import MODEL_REVISION, sha256_file  # noqa: E402
 from cmpilot.qwen36_qualification import (  # noqa: E402
     ALL_TASKS,
-    INFRASTRUCTURE_AMENDMENT,
     PRIMARY_TASKS,
     QUALIFICATION_FREEZE,
     SEED_SCHEDULE,
-    validate_freeze_manifest,
     validate_seed_schedule,
+)
+from cmpilot.qwen36_submission_gate import (  # noqa: E402
+    batch_gate_equivalence,
+    validate_submission_gate,
 )
 
 
@@ -28,15 +30,11 @@ OUTPUTS = {
     for task_id in ALL_TASKS
 }
 TECHNICAL_RERUN_TASK = "qnm-p01-interval-merge"
-TECHNICAL_RERUN_OF = "25963"
+TECHNICAL_RERUN_OF = "26036"
 TECHNICAL_RERUN_NUMBER = 1
 TECHNICAL_ROOT_QUALIFICATION = "25953"
 TECHNICAL_RERUN_OUTPUT = (
-    ROOT / "slurm/qwen36_qnm_p01_interval_merge_technical_rerun_25963_1.sbatch"
-)
-CPU_GATE = (
-    "/home/s224049759/run-artifacts/qwen36-no-memory-qualification/v1/"
-    "cpu-preflight-qualification-harness-fix-25963/cpu-preflight-result.json"
+    ROOT / "slurm/qwen36_qnm_p01_interval_merge_technical_rerun_26036_1.sbatch"
 )
 
 
@@ -72,10 +70,16 @@ SUITE_REFERENCE=$PROJECT/qualification/qwen36-v1/suite-reference.json
 TASK=$PROJECT/qualification/qwen32b-v1/tasks/$TASK_ID.json
 FREEZE=$PROJECT/qualification/qwen36-v1/qualification-freeze-manifest.json
 EXPECTED_FREEZE_SHA256=@@FREEZE_SHA256@@
-INFRASTRUCTURE_AMENDMENT=$PROJECT/qualification/qwen36-v1/infrastructure-amendment-25963.json
+SEED_SCHEDULE=$PROJECT/qualification/qwen36-v1/qualification-seeds.json
+EXPECTED_SEED_SCHEDULE_SHA256=@@SEED_SCHEDULE_SHA256@@
+INFRASTRUCTURE_AMENDMENT=$PROJECT/@@AMENDMENT_PATH@@
 EXPECTED_AMENDMENT_SHA256=@@AMENDMENT_SHA256@@
 AGENT_CONFIG_SOURCE=$PROJECT/qualification/qwen36-v1/qualification-agent-config.json
+SUBMISSION_GATE_RECORD=$PROJECT/@@SUBMISSION_GATE_PATH@@
+EXPECTED_SUBMISSION_GATE_SHA256=@@SUBMISSION_GATE_SHA256@@
 CPU_GATE=@@CPU_GATE@@
+EXPECTED_CPU_GATE_SHA256=@@CPU_GATE_SHA256@@
+EXPECTED_SUITE_REFERENCE_SHA256=@@SUITE_REFERENCE_SHA256@@
 ENV_FINGERPRINT=$PROJECT/qualification/qwen36-v1/environment-fingerprint.json
 ENV_CONTENT=$PROJECT/qualification/qwen36-v1/environment-content-digest.json
 ARTIFACT_ROOT=/home/s224049759/run-artifacts/qwen36-no-memory-qualification/v1/tasks/$TASK_ID/jobs
@@ -212,22 +216,37 @@ test -f "$SUITE"
 test -f "$SUITE_REFERENCE"
 test -f "$TASK"
 test -f "$FREEZE"
+test -f "$SEED_SCHEDULE"
 test -f "$INFRASTRUCTURE_AMENDMENT"
 test -f "$AGENT_CONFIG_SOURCE"
+test -f "$SUBMISSION_GATE_RECORD"
 test "$(sha256sum "$FREEZE" | cut -d' ' -f1)" = "$EXPECTED_FREEZE_SHA256"
+test "$(sha256sum "$SEED_SCHEDULE" | cut -d' ' -f1)" = "$EXPECTED_SEED_SCHEDULE_SHA256"
+test "$(sha256sum "$SUITE_REFERENCE" | cut -d' ' -f1)" = "$EXPECTED_SUITE_REFERENCE_SHA256"
 test "$(sha256sum "$INFRASTRUCTURE_AMENDMENT" | cut -d' ' -f1)" = "$EXPECTED_AMENDMENT_SHA256"
+test "$(sha256sum "$SUBMISSION_GATE_RECORD" | cut -d' ' -f1)" = "$EXPECTED_SUBMISSION_GATE_SHA256"
+test "$(sha256sum "$CPU_GATE" | cut -d' ' -f1)" = "$EXPECTED_CPU_GATE_SHA256"
 
-"$CMPILOT_PY" - "$CPU_GATE" "$TASK_ID" "$TASK_SEED" <<'PY'
+"$CMPILOT_PY" - "$SUBMISSION_GATE_RECORD" "$CPU_GATE" "$TASK_ID" "$TASK_SEED" <<'PY'
 import json
 import sys
 from pathlib import Path
-record = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+gate = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+record = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
+if gate.get("status") != "PASS":
+    raise SystemExit("canonical submission gate is not PASS")
+if gate.get("cpu_gate_result", {}).get("path") != sys.argv[2]:
+    raise SystemExit("batch CPU gate differs from canonical submission gate")
 if record.get("overall") != "PASS" or not all(record.get("checks", {}).values()):
     raise SystemExit("Qwen3.6 post-freeze CPU gate is not PASS")
-if record.get("seeds", {}).get(sys.argv[2]) != int(sys.argv[3]):
+if record.get("seeds", {}).get(sys.argv[3]) != int(sys.argv[4]):
     raise SystemExit("task seed differs from CPU-gated schedule")
 if record.get("infrastructure_amendment_sha256") != "@@AMENDMENT_SHA256@@":
     raise SystemExit("CPU gate covered a different infrastructure amendment")
+if record.get("qualification_freeze_sha256") != "@@FREEZE_SHA256@@":
+    raise SystemExit("CPU gate covered a different scientific freeze")
+if record.get("suite_reference_sha256") != "@@SUITE_REFERENCE_SHA256@@":
+    raise SystemExit("CPU gate covered a different suite reference")
 PY
 
 git -C "$PROJECT" rev-parse HEAD > "$ARTIFACT_DIR/project-commit.txt"
@@ -236,8 +255,8 @@ test ! -s "$ARTIFACT_DIR/project-status.txt"
 git -C "$PROJECT" rev-list -n 1 qwen32b-qualification-v1 > "$ARTIFACT_DIR/qwen32b-freeze-tag-target.txt"
 test "$(sed -n '1p' "$ARTIFACT_DIR/qwen32b-freeze-tag-target.txt")" = ba039a0eaddc358d6b7174260c3b3c36169c44c0
 sha256sum "$0" "$SUITE" "$SUITE_REFERENCE" "$TASK" "$FREEZE" \
-    "$INFRASTRUCTURE_AMENDMENT" "$AGENT_CONFIG_SOURCE" \
-    "$PROJECT/qualification/qwen36-v1/qualification-seeds.json" \
+    "$SEED_SCHEDULE" "$INFRASTRUCTURE_AMENDMENT" "$AGENT_CONFIG_SOURCE" \
+    "$SUBMISSION_GATE_RECORD" "$CPU_GATE" \
     "$PORT_HELPER" "$SERVER_LIFECYCLE_HELPER" \
     > "$ARTIFACT_DIR/runtime-input-hashes.txt"
 printf '%s\n' "$TASK_ID" > "$ARTIFACT_DIR/task-id.txt"
@@ -449,11 +468,16 @@ exit 0
 def render(
     task_id: str,
     seed: int,
-    freeze_sha256: str,
+    freeze_sha256: str | None = None,
     *,
-    amendment_sha256: str | None = None,
+    submission_gate: dict[str, object] | None = None,
     technical_rerun: bool = False,
 ) -> str:
+    gate = submission_gate or validate_submission_gate(ROOT)
+    if freeze_sha256 is not None and freeze_sha256 != gate["scientific_freeze_sha256"]:
+        raise RuntimeError("render freeze differs from canonical submission gate")
+    if gate["seeds"].get(task_id) != seed:
+        raise RuntimeError("render seed differs from canonical submission gate")
     role = "primary" if task_id in PRIMARY_TASKS else "reserve"
     job_name = "qwen36-" + task_id.replace("qnm-", "")
     rerun_metadata = ""
@@ -461,7 +485,7 @@ def render(
     if technical_rerun:
         if task_id != TECHNICAL_RERUN_TASK:
             raise ValueError("the frozen technical rerun is only valid for qnm-p01")
-        job_name += "-tr25963r1"
+        job_name += "-tr26036r1"
         rerun_metadata = "\n".join(
             (
                 f"TECHNICAL_RERUN_OF={TECHNICAL_RERUN_OF}",
@@ -485,15 +509,22 @@ def render(
                 '"$ARTIFACT_DIR/qualification-seed.txt"',
             )
         )
-    amendment_sha256 = amendment_sha256 or sha256_file(ROOT / INFRASTRUCTURE_AMENDMENT)
+    record_relative = gate["record_path"].relative_to(ROOT)
+    amendment_relative = gate["infrastructure_amendment_path"].relative_to(ROOT)
     values = {
-        "@@AMENDMENT_SHA256@@": amendment_sha256,
-        "@@CPU_GATE@@": CPU_GATE,
-        "@@FREEZE_SHA256@@": freeze_sha256,
+        "@@AMENDMENT_PATH@@": amendment_relative.as_posix(),
+        "@@AMENDMENT_SHA256@@": gate["infrastructure_amendment_sha256"],
+        "@@CPU_GATE@@": str(gate["cpu_gate_result_path"]),
+        "@@CPU_GATE_SHA256@@": gate["cpu_gate_result_sha256"],
+        "@@FREEZE_SHA256@@": gate["scientific_freeze_sha256"],
         "@@JOB_NAME@@": job_name,
         "@@TASK_ID@@": task_id,
         "@@TASK_ROLE@@": role,
         "@@TASK_SEED@@": str(seed),
+        "@@SEED_SCHEDULE_SHA256@@": gate["seed_schedule_sha256"],
+        "@@SUBMISSION_GATE_PATH@@": record_relative.as_posix(),
+        "@@SUBMISSION_GATE_SHA256@@": gate["record_sha256"],
+        "@@SUITE_REFERENCE_SHA256@@": gate["suite_reference_sha256"],
         "@@TECHNICAL_RERUN_ARTIFACTS@@": rerun_artifacts,
         "@@TECHNICAL_RERUN_METADATA@@": rerun_metadata,
     }
@@ -502,6 +533,14 @@ def render(
         value = value.replace(marker, replacement)
     if "@@" in value or "{{" in value or "TODO" in value:
         raise RuntimeError(f"unresolved batch marker for {task_id}")
+    equivalence = batch_gate_equivalence(
+        value,
+        gate=gate,
+        task_id=task_id,
+        seed=seed,
+    )
+    if not all(equivalence.values()):
+        raise RuntimeError(f"generated batch gate mismatch: {equivalence}")
     return value
 
 
@@ -514,14 +553,8 @@ def main() -> int:
         help="replace only the known generated qualification batch outputs",
     )
     arguments = parser.parse_args()
-    freeze_path = ROOT / QUALIFICATION_FREEZE
-    amendment_path = ROOT / INFRASTRUCTURE_AMENDMENT
-    validation = validate_freeze_manifest(
-        ROOT,
-        freeze_path,
-        infrastructure_amendment=amendment_path,
-    )
-    if validation["sha256"] != arguments.freeze_sha256:
+    gate = validate_submission_gate(ROOT)
+    if gate["scientific_freeze_sha256"] != arguments.freeze_sha256:
         raise RuntimeError("provided freeze digest differs from final manifest")
     schedule = validate_seed_schedule(ROOT / SEED_SCHEDULE)["seeds"]
     rendered = [
@@ -532,7 +565,7 @@ def main() -> int:
                 task_id,
                 schedule[task_id],
                 arguments.freeze_sha256,
-                amendment_sha256=validation["infrastructure_amendment_sha256"],
+                submission_gate=gate,
             ),
         )
         for task_id, output in OUTPUTS.items()
@@ -545,7 +578,7 @@ def main() -> int:
                 TECHNICAL_RERUN_TASK,
                 schedule[TECHNICAL_RERUN_TASK],
                 arguments.freeze_sha256,
-                amendment_sha256=validation["infrastructure_amendment_sha256"],
+                submission_gate=gate,
                 technical_rerun=True,
             ),
         )

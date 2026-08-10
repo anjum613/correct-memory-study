@@ -48,6 +48,9 @@ QUALIFICATION_FREEZE_SHA256 = (
     "7c8e22bcdd6d2e264ed205310b584df3643e5499e01e354b71779fc3fdcfca91"
 )
 INFRASTRUCTURE_AMENDMENT = NAMESPACE / "infrastructure-amendment-25963.json"
+INFRASTRUCTURE_AMENDMENT_SUCCESSOR = (
+    NAMESPACE / "infrastructure-amendment-26036.json"
+)
 SMOKE_ARTIFACT = Path(
     "/home/s224049759/run-artifacts/qwen36-no-memory-qualification/v1/smoke/jobs/25940"
 )
@@ -479,11 +482,68 @@ def validate_infrastructure_amendment(
     expected_paths = {"src/cmpilot/qualification_runner.py"}
     amended_paths = {str(path) for path in amendments}
     changed_hashes = amendment.get("changed_file_hashes")
+    successor_path = project / INFRASTRUCTURE_AMENDMENT_SUCCESSOR
+    successor: dict[str, Any] | None = None
+    successor_changes: Mapping[str, Any] = {}
+    successor_previous: Mapping[str, Any] = {}
+    successor_checks: dict[str, bool] = {}
+    if successor_path.is_file():
+        successor = load_json(successor_path)
+        successor_changes_value = successor.get("changed_file_hashes")
+        successor_previous_value = successor.get("previous_file_hashes")
+        if isinstance(successor_changes_value, Mapping):
+            successor_changes = successor_changes_value
+        if isinstance(successor_previous_value, Mapping):
+            successor_previous = successor_previous_value
+        predecessor = successor.get("predecessor_amendment", {})
+        successor_scientific = successor.get("scientific_configuration", {})
+        successor_checks = {
+            "schema": successor.get("schema")
+            == "qwen36-qualification-infrastructure-amendment-v2",
+            "job": successor.get("technical_invalid_job", {}).get("slurm_job_id")
+            == "26036",
+            "predecessor": predecessor.get("path")
+            == str(INFRASTRUCTURE_AMENDMENT)
+            and predecessor.get("sha256") == sha256_file(amendment_path),
+            "scientific_configuration": successor_scientific.get("status")
+            == "UNCHANGED"
+            and successor_scientific.get("model_revision") == MODEL_REVISION
+            and successor_scientific.get("seed_schedule_sha256")
+            == "32849f701145306bff8f235747588726735125bf65beb5b37406a400803ab108"
+            and successor_scientific.get("suite_reference_sha256")
+            == SUITE_REFERENCE_SHA256
+            and successor_scientific.get("treatment") == "no_memory",
+            "changed_file_hashes": bool(successor_changes)
+            and all(
+                isinstance(relative, str)
+                and isinstance(expected, str)
+                and len(expected) == 64
+                and (project / relative).is_file()
+                and sha256_file(project / relative) == expected
+                for relative, expected in successor_changes.items()
+            ),
+            "previous_hashes": all(
+                isinstance(relative, str)
+                and isinstance(previous, str)
+                and len(previous) == 64
+                for relative, previous in successor_previous.items()
+            ),
+        }
+        if not all(successor_checks.values()):
+            raise Qwen36QualificationError(
+                f"invalid successor infrastructure amendment: {successor_checks}"
+            )
     changed_hashes_valid = isinstance(changed_hashes, Mapping) and all(
         isinstance(relative, str)
         and isinstance(expected, str)
         and len(expected) == 64
-        and sha256_file(project / relative) == expected
+        and (
+            sha256_file(project / relative) == expected
+            or (
+                successor_changes.get(relative) == sha256_file(project / relative)
+                and successor_previous.get(relative) == expected
+            )
+        )
         for relative, expected in (
             changed_hashes.items() if isinstance(changed_hashes, Mapping) else ()
         )
@@ -541,6 +601,10 @@ def validate_infrastructure_amendment(
         "checks": checks,
         "pass": True,
         "sha256": sha256_file(amendment_path),
+        "successor_amendment_sha256": (
+            sha256_file(successor_path) if successor is not None else None
+        ),
+        "successor_checks": successor_checks,
     }
 
 
@@ -620,6 +684,11 @@ def validate_freeze_manifest(
         "infrastructure_amendment_sha256": (
             amendment["sha256"] if amendment is not None else None
         ),
+        "infrastructure_successor_amendment_sha256": (
+            amendment["successor_amendment_sha256"]
+            if amendment is not None
+            else None
+        ),
         "pass": True,
         "sha256": sha256_file(path),
     }
@@ -631,6 +700,7 @@ __all__ = [
     "ALL_TASKS",
     "MAX_OUTPUT_TOKENS",
     "INFRASTRUCTURE_AMENDMENT",
+    "INFRASTRUCTURE_AMENDMENT_SUCCESSOR",
     "MINI_SWE_PYTHON",
     "PROJECT_ENVIRONMENT_FINGERPRINT",
     "PRIMARY_TASKS",

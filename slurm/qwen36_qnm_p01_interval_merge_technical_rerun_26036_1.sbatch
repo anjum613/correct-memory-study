@@ -1,5 +1,5 @@
 #!/usr/bin/bash
-#SBATCH --job-name=qwen36-p01-interval-merge-tr25963r1
+#SBATCH --job-name=qwen36-p01-interval-merge-tr26036r1
 #SBATCH --partition=gpu
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -8,8 +8,8 @@
 #SBATCH --gres=gpu:a100:2
 #SBATCH --time=03:00:00
 #SBATCH --no-requeue
-#SBATCH --output=/home/s224049759/slurm-logs/qwen36-p01-interval-merge-tr25963r1-%j.out
-#SBATCH --error=/home/s224049759/slurm-logs/qwen36-p01-interval-merge-tr25963r1-%j.err
+#SBATCH --output=/home/s224049759/slurm-logs/qwen36-p01-interval-merge-tr26036r1-%j.out
+#SBATCH --error=/home/s224049759/slurm-logs/qwen36-p01-interval-merge-tr26036r1-%j.err
 
 set -euo pipefail
 
@@ -24,7 +24,7 @@ MODEL_CACHE=/home/s224049759/model-cache/huggingface
 TASK_ID=qnm-p01-interval-merge
 TASK_SEED=1602021252
 TASK_ROLE=primary
-TECHNICAL_RERUN_OF=25963
+TECHNICAL_RERUN_OF=26036
 TECHNICAL_RERUN_NUMBER=1
 TECHNICAL_ROOT_QUALIFICATION=25953
 QUALIFICATION_TASK_ID=qnm-p01-interval-merge
@@ -34,10 +34,16 @@ SUITE_REFERENCE=$PROJECT/qualification/qwen36-v1/suite-reference.json
 TASK=$PROJECT/qualification/qwen32b-v1/tasks/$TASK_ID.json
 FREEZE=$PROJECT/qualification/qwen36-v1/qualification-freeze-manifest.json
 EXPECTED_FREEZE_SHA256=7c8e22bcdd6d2e264ed205310b584df3643e5499e01e354b71779fc3fdcfca91
+SEED_SCHEDULE=$PROJECT/qualification/qwen36-v1/qualification-seeds.json
+EXPECTED_SEED_SCHEDULE_SHA256=32849f701145306bff8f235747588726735125bf65beb5b37406a400803ab108
 INFRASTRUCTURE_AMENDMENT=$PROJECT/qualification/qwen36-v1/infrastructure-amendment-25963.json
 EXPECTED_AMENDMENT_SHA256=9d266adb2af0a32cb87dd824d9a6a8fbdab86ae4f60dbba7c7ee4e8eab4d72ba
 AGENT_CONFIG_SOURCE=$PROJECT/qualification/qwen36-v1/qualification-agent-config.json
-CPU_GATE=/home/s224049759/run-artifacts/qwen36-no-memory-qualification/v1/cpu-preflight-qualification-harness-fix-25963/cpu-preflight-result.json
+SUBMISSION_GATE_RECORD=$PROJECT/qualification/qwen36-v1/submission-gate.json
+EXPECTED_SUBMISSION_GATE_SHA256=7f4d1d59b66dbf1648c6c559688b4669381e37b10cbdb75289bdd730cee3ed66
+CPU_GATE=/home/s224049759/run-artifacts/qwen36-no-memory-qualification/v1/cpu-preflight-qualification-harness-fix-25963-ready/cpu-preflight-result.json
+EXPECTED_CPU_GATE_SHA256=a885e1e7c28e0c1c15e1dd6d0ef47a56903a6cae3213822638fc16510660503c
+EXPECTED_SUITE_REFERENCE_SHA256=2403982c3d3681e746d741b357b52a7fc4e3b8b97d7219a1b46fe26f3c9200cf
 ENV_FINGERPRINT=$PROJECT/qualification/qwen36-v1/environment-fingerprint.json
 ENV_CONTENT=$PROJECT/qualification/qwen36-v1/environment-content-digest.json
 ARTIFACT_ROOT=/home/s224049759/run-artifacts/qwen36-no-memory-qualification/v1/tasks/$TASK_ID/jobs
@@ -174,22 +180,37 @@ test -f "$SUITE"
 test -f "$SUITE_REFERENCE"
 test -f "$TASK"
 test -f "$FREEZE"
+test -f "$SEED_SCHEDULE"
 test -f "$INFRASTRUCTURE_AMENDMENT"
 test -f "$AGENT_CONFIG_SOURCE"
+test -f "$SUBMISSION_GATE_RECORD"
 test "$(sha256sum "$FREEZE" | cut -d' ' -f1)" = "$EXPECTED_FREEZE_SHA256"
+test "$(sha256sum "$SEED_SCHEDULE" | cut -d' ' -f1)" = "$EXPECTED_SEED_SCHEDULE_SHA256"
+test "$(sha256sum "$SUITE_REFERENCE" | cut -d' ' -f1)" = "$EXPECTED_SUITE_REFERENCE_SHA256"
 test "$(sha256sum "$INFRASTRUCTURE_AMENDMENT" | cut -d' ' -f1)" = "$EXPECTED_AMENDMENT_SHA256"
+test "$(sha256sum "$SUBMISSION_GATE_RECORD" | cut -d' ' -f1)" = "$EXPECTED_SUBMISSION_GATE_SHA256"
+test "$(sha256sum "$CPU_GATE" | cut -d' ' -f1)" = "$EXPECTED_CPU_GATE_SHA256"
 
-"$CMPILOT_PY" - "$CPU_GATE" "$TASK_ID" "$TASK_SEED" <<'PY'
+"$CMPILOT_PY" - "$SUBMISSION_GATE_RECORD" "$CPU_GATE" "$TASK_ID" "$TASK_SEED" <<'PY'
 import json
 import sys
 from pathlib import Path
-record = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+gate = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+record = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
+if gate.get("status") != "PASS":
+    raise SystemExit("canonical submission gate is not PASS")
+if gate.get("cpu_gate_result", {}).get("path") != sys.argv[2]:
+    raise SystemExit("batch CPU gate differs from canonical submission gate")
 if record.get("overall") != "PASS" or not all(record.get("checks", {}).values()):
     raise SystemExit("Qwen3.6 post-freeze CPU gate is not PASS")
-if record.get("seeds", {}).get(sys.argv[2]) != int(sys.argv[3]):
+if record.get("seeds", {}).get(sys.argv[3]) != int(sys.argv[4]):
     raise SystemExit("task seed differs from CPU-gated schedule")
 if record.get("infrastructure_amendment_sha256") != "9d266adb2af0a32cb87dd824d9a6a8fbdab86ae4f60dbba7c7ee4e8eab4d72ba":
     raise SystemExit("CPU gate covered a different infrastructure amendment")
+if record.get("qualification_freeze_sha256") != "7c8e22bcdd6d2e264ed205310b584df3643e5499e01e354b71779fc3fdcfca91":
+    raise SystemExit("CPU gate covered a different scientific freeze")
+if record.get("suite_reference_sha256") != "2403982c3d3681e746d741b357b52a7fc4e3b8b97d7219a1b46fe26f3c9200cf":
+    raise SystemExit("CPU gate covered a different suite reference")
 PY
 
 git -C "$PROJECT" rev-parse HEAD > "$ARTIFACT_DIR/project-commit.txt"
@@ -198,8 +219,8 @@ test ! -s "$ARTIFACT_DIR/project-status.txt"
 git -C "$PROJECT" rev-list -n 1 qwen32b-qualification-v1 > "$ARTIFACT_DIR/qwen32b-freeze-tag-target.txt"
 test "$(sed -n '1p' "$ARTIFACT_DIR/qwen32b-freeze-tag-target.txt")" = ba039a0eaddc358d6b7174260c3b3c36169c44c0
 sha256sum "$0" "$SUITE" "$SUITE_REFERENCE" "$TASK" "$FREEZE" \
-    "$INFRASTRUCTURE_AMENDMENT" "$AGENT_CONFIG_SOURCE" \
-    "$PROJECT/qualification/qwen36-v1/qualification-seeds.json" \
+    "$SEED_SCHEDULE" "$INFRASTRUCTURE_AMENDMENT" "$AGENT_CONFIG_SOURCE" \
+    "$SUBMISSION_GATE_RECORD" "$CPU_GATE" \
     "$PORT_HELPER" "$SERVER_LIFECYCLE_HELPER" \
     > "$ARTIFACT_DIR/runtime-input-hashes.txt"
 printf '%s\n' "$TASK_ID" > "$ARTIFACT_DIR/task-id.txt"

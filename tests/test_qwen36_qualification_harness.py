@@ -20,6 +20,7 @@ from cmpilot.qwen36_qualification import (
     SUITE_REFERENCE,
     validate_freeze_manifest,
 )
+from cmpilot.qwen36_submission_gate import validate_submission_gate
 from cmpilot.qualification import QualificationError
 from cmpilot.qualification_runner import AdapterConfig, QualificationRunConfig
 from cmpilot.qualification_runner_preflight import run_qualification_runner_preflight
@@ -120,15 +121,21 @@ def _start_server(*, ignore_term: bool) -> subprocess.Popen[str]:
     setup = (
         "signal.signal(signal.SIGTERM, signal.SIG_IGN); " if ignore_term else ""
     )
-    return subprocess.Popen(
+    process = subprocess.Popen(
         [
             sys.executable,
             "-c",
-            "import signal,time; " + setup + "time.sleep(60)",
+            "import signal,time; "
+            + setup
+            + "print('READY', flush=True); time.sleep(60)",
         ],
+        stdout=subprocess.PIPE,
         text=True,
         start_new_session=True,
     )
+    assert process.stdout is not None
+    assert process.stdout.readline().strip() == "READY"
+    return process
 
 
 @pytest.mark.parametrize("runner_exit", (0, 1))
@@ -172,7 +179,6 @@ def test_server_shutdown_is_independent_of_runner_exit(
 
 def test_stubborn_server_uses_bounded_sigkill_escalation(tmp_path: Path) -> None:
     process = _start_server(ignore_term=True)
-    time.sleep(0.1)
     started = time.monotonic()
     try:
         result = shutdown_process_group(
@@ -238,14 +244,14 @@ def test_runner_exception_status_remains_distinct_from_outer_finalizer(
 
 def test_all_batches_shutdown_before_testing_runner_status() -> None:
     freeze = sha256_file(ROOT / QUALIFICATION_FREEZE)
-    amendment = sha256_file(ROOT / INFRASTRUCTURE_AMENDMENT)
+    gate = validate_submission_gate(ROOT)
     seeds = json.loads((ROOT / SEED_SCHEDULE).read_text(encoding="utf-8"))["seeds"]
     for task_id in ALL_TASKS:
         text = render(
             task_id,
             seeds[task_id],
             freeze,
-            amendment_sha256=amendment,
+            submission_gate=gate,
         )
         shutdown = text.index("cleanup_server\nserver_shutdown_status=$?")
         runner_test = text.index(

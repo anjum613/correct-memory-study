@@ -209,7 +209,7 @@ def test_all_seven_batches_propagate_one_dynamic_loopback_endpoint() -> None:
 def test_technical_rerun_preserves_lineage_seed_and_scientific_configuration() -> None:
     freeze = sha256_file(ROOT / QUALIFICATION_FREEZE)
     text = render(TECHNICAL_RERUN_TASK, P01_SEED, freeze, technical_rerun=True)
-    assert "TECHNICAL_RERUN_OF=25963" in text
+    assert "TECHNICAL_RERUN_OF=26036" in text
     assert "TECHNICAL_RERUN_NUMBER=1" in text
     assert "TECHNICAL_ROOT_QUALIFICATION=25953" in text
     assert "QUALIFICATION_TASK_ID=qnm-p01-interval-merge" in text
@@ -263,9 +263,9 @@ def test_submission_and_gate_fail_closed_around_the_port_amendment() -> None:
     gate = (ROOT / "scripts/qwen36_qualification_cpu_gate.py").read_text(
         encoding="utf-8"
     )
-    assert "only technical rerun 1 of job 25963 is authorized" in submit
+    assert "only technical rerun 1 of job 26036 is authorized" in submit
     assert "candidate_schedule(job_id)" in submit
-    assert "technical-invalid-qualification-25963.json" in submit
+    assert "technical-invalid-qualification-26036.json" in submit
     assert "dynamic_server_port_policy" in gate
-    assert "cpu-preflight-qualification-harness-fix-25963" in submit
-    assert "cpu-preflight-qualification-harness-fix-25963" in gate
+    assert "validate_submission_gate(ROOT)" in submit
+    assert "canonical_submission_gate_identity" in gate

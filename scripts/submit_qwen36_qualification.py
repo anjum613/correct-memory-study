@@ -35,6 +35,7 @@ from cmpilot.qwen36_qualification import (  # noqa: E402
     ENVIRONMENT_CONTENT_DIGEST,
     ENVIRONMENT_FINGERPRINT,
     INFRASTRUCTURE_AMENDMENT,
+    INFRASTRUCTURE_AMENDMENT_SUCCESSOR,
     PRIMARY_TASKS,
     QUALIFICATION_FREEZE,
     QWEN36_ARTIFACT_ROOT,
@@ -45,6 +46,10 @@ from cmpilot.qwen36_qualification import (  # noqa: E402
     validate_freeze_manifest,
     validate_seed_schedule,
     write_canonical_json,
+)
+from cmpilot.qwen36_submission_gate import (  # noqa: E402
+    batch_gate_equivalence,
+    validate_submission_gate,
 )
 from cmpilot.qualification_runtime_paths import runtime_path_record  # noqa: E402
 from scripts.qwen36_server_port import (  # noqa: E402
@@ -57,12 +62,11 @@ from scripts.qwen36_server_port import (  # noqa: E402
 
 SQUEUE = Path("/slurm/bin/squeue")
 SACCT = Path("/slurm/bin/sacct")
-CPU_GATE = QWEN36_ARTIFACT_ROOT / "cpu-preflight-qualification-harness-fix-25963-ready"
 TECHNICAL_INVALID_RECORD = (
-    ROOT / "qualification/qwen36-v1/technical-invalid-qualification-25963.json"
+    ROOT / "qualification/qwen36-v1/technical-invalid-qualification-26036.json"
 )
 TECHNICAL_RERUN_TASK = "qnm-p01-interval-merge"
-TECHNICAL_RERUN_OF = "25963"
+TECHNICAL_RERUN_OF = "26036"
 TECHNICAL_RERUN_NUMBER = 1
 TECHNICAL_ROOT_QUALIFICATION = "25953"
 
@@ -81,13 +85,13 @@ def batch_path(task_id: str, *, technical_rerun: bool = False) -> Path:
     if technical_rerun:
         if task_id != TECHNICAL_RERUN_TASK:
             raise ValueError("only qnm-p01 has a predeclared technical rerun")
-        return ROOT / "slurm/qwen36_qnm_p01_interval_merge_technical_rerun_25963_1.sbatch"
+        return ROOT / "slurm/qwen36_qnm_p01_interval_merge_technical_rerun_26036_1.sbatch"
     return ROOT / "slurm" / f"qwen36_{task_id.replace('-', '_')}.sbatch"
 
 
 def job_name(task_id: str, *, technical_rerun: bool = False) -> str:
     name = "qwen36-" + task_id.replace("qnm-", "")
-    return name + "-tr25963r1" if technical_rerun else name
+    return name + "-tr26036r1" if technical_rerun else name
 
 
 def main() -> int:
@@ -108,7 +112,7 @@ def main() -> int:
         or arguments.technical_rerun_of != TECHNICAL_RERUN_OF
         or arguments.technical_rerun_number != TECHNICAL_RERUN_NUMBER
     ):
-        raise RuntimeError("only technical rerun 1 of job 25963 is authorized")
+        raise RuntimeError("only technical rerun 1 of job 26036 is authorized")
     role = "primary" if task_id in PRIMARY_TASKS else "reserve"
     if task_id in RESERVE_TASKS:
         if arguments.primary_decision is None:
@@ -119,25 +123,39 @@ def main() -> int:
         ) != "BORDERLINE":
             raise RuntimeError("reserves are permitted only for exactly 3/5 primary passes")
 
-    freeze_path = (ROOT / QUALIFICATION_FREEZE).resolve(strict=True)
-    amendment_path = (ROOT / INFRASTRUCTURE_AMENDMENT).resolve(strict=True)
+    submission_gate = validate_submission_gate(ROOT)
+    freeze_path = submission_gate["scientific_freeze_path"]
+    amendment_path = submission_gate["infrastructure_amendment_path"]
     freeze = validate_freeze_manifest(
         ROOT,
         freeze_path,
         infrastructure_amendment=amendment_path,
     )
+    successor_path = (ROOT / INFRASTRUCTURE_AMENDMENT_SUCCESSOR).resolve(strict=True)
+    successor = json.loads(successor_path.read_text(encoding="utf-8"))
+    final_gate_path = Path(
+        successor.get("cpu_validation_evidence", {}).get("path", "")
+    )
+    if not final_gate_path.is_absolute() or not final_gate_path.is_file():
+        raise RuntimeError("job-26036 post-fix CPU gate is unavailable")
+    final_gate = json.loads(final_gate_path.read_text(encoding="utf-8"))
+    if (
+        final_gate.get("overall") != "PASS"
+        or not all(final_gate.get("checks", {}).values())
+        or final_gate.get("infrastructure_successor_amendment_sha256")
+        != sha256_file(successor_path)
+        or final_gate.get("submission_gate", {}).get("sha256")
+        != submission_gate["record_sha256"]
+    ):
+        raise RuntimeError("job-26036 post-fix CPU gate is not an exact all-check PASS")
     schedule = validate_seed_schedule(ROOT / SEED_SCHEDULE)["seeds"]
     seed = schedule[task_id]
-    cpu_path = CPU_GATE / "cpu-preflight-result.json"
-    cpu = json.loads(cpu_path.read_text(encoding="utf-8"))
-    if cpu.get("overall") != "PASS" or not all(cpu.get("checks", {}).values()):
-        raise RuntimeError("Qwen3.6 post-freeze CPU gate is not an all-check PASS")
-    if cpu.get("qualification_freeze_sha256") != freeze["sha256"]:
-        raise RuntimeError("CPU gate covered a different qualification freeze")
-    if cpu.get("infrastructure_amendment_sha256") != sha256_file(amendment_path):
-        raise RuntimeError("CPU gate covered a different infrastructure amendment")
+    cpu_path = submission_gate["cpu_gate_result_path"]
+    cpu = submission_gate["cpu_gate_record"]
+    if freeze["sha256"] != submission_gate["scientific_freeze_sha256"]:
+        raise RuntimeError("canonical gate differs from validated scientific freeze")
     if cpu.get("seeds", {}).get(task_id) != seed:
-        raise RuntimeError("CPU gate covered a different task seed")
+        raise RuntimeError("canonical gate covered a different task seed")
 
     suite_reference = build_suite_reference(ROOT)
     if not suite_reference.get("all_task_components_byte_identical"):
@@ -159,12 +177,24 @@ def main() -> int:
 
     batch = batch_path(task_id, technical_rerun=technical_rerun).resolve(strict=True)
     text = batch.read_text(encoding="utf-8")
+    gate_equivalence = batch_gate_equivalence(
+        text,
+        gate=submission_gate,
+        task_id=task_id,
+        seed=seed,
+    )
+    if not all(gate_equivalence.values()):
+        raise RuntimeError(
+            f"generated batch differs from canonical submission gate: {gate_equivalence}"
+        )
     required = (
         f"TASK_ID={task_id}",
         f"TASK_SEED={seed}",
         f"TASK_ROLE={role}",
         f"MODEL_REVISION={MODEL_REVISION}",
         f"EXPECTED_FREEZE_SHA256={freeze['sha256']}",
+        f"EXPECTED_SUBMISSION_GATE_SHA256={submission_gate['record_sha256']}",
+        f"EXPECTED_CPU_GATE_SHA256={submission_gate['cpu_gate_result_sha256']}",
         "--dtype bfloat16",
         "--tensor-parallel-size 2",
         "--max-model-len 32768",
@@ -241,12 +271,12 @@ def main() -> int:
             "task_id": TECHNICAL_RERUN_TASK,
             "seed": seed,
             "technical_validity": "FAIL",
-            "technical_failure_class": "PRE_AGENT_HARNESS_CONFIG_INTERFACE_FAILURE",
-            "technical_failure_detail": "ADAPTER_CONFIG_MISSING_AGENT_CONFIG_SOURCE",
+            "technical_failure_class": "PRE_SERVER_CPU_GATE_ATTESTATION_FAILURE",
+            "technical_failure_detail": "STALE_CPU_GATE_PATH_AMENDMENT_HASH_MISMATCH",
             "repository_competence": "NOT_SCORED",
         }
         if any(audit.get(key) != value for key, value in required_audit.items()):
-            raise RuntimeError("job-25963 technical-invalid audit record is not authoritative")
+            raise RuntimeError("job-26036 technical-invalid audit record is not authoritative")
         other_primary_names = {
             job_name(other)
             for other in PRIMARY_TASKS
@@ -272,7 +302,11 @@ def main() -> int:
         if (
             active
             or historical
-            or existing_artifacts != [TECHNICAL_ROOT_QUALIFICATION, TECHNICAL_RERUN_OF]
+            or existing_artifacts != [
+                TECHNICAL_ROOT_QUALIFICATION,
+                "25963",
+                TECHNICAL_RERUN_OF,
+            ]
             or submission.exists()
             or preflight.exists()
             or active_other_primaries
@@ -333,10 +367,14 @@ def main() -> int:
         "active_matching_jobs": active,
         "batch_script": str(batch),
         "batch_script_sha256": sha256_file(batch),
+        "batch_submission_gate_equivalence": gate_equivalence,
         "checked_at_utc": datetime.now(UTC).isoformat(),
+        "cpu_gate_result_sha256": submission_gate["cpu_gate_result_sha256"],
         "environment_content_digest": ENVIRONMENT_CONTENT_DIGEST,
         "environment_fingerprint": ENVIRONMENT_FINGERPRINT,
         "freeze_manifest_sha256": freeze["sha256"],
+        "gate_fix_cpu_preflight": str(final_gate_path),
+        "gate_fix_cpu_preflight_sha256": sha256_file(final_gate_path),
         "infrastructure_amendment_sha256": sha256_file(amendment_path),
         "historical_matching_jobs": historical,
         "model": {"id": MODEL_ID, "revision": MODEL_REVISION, "snapshot": str(MODEL_SNAPSHOT)},
@@ -351,6 +389,8 @@ def main() -> int:
         },
         "schema": "qwen36-qualification-pre-submission-v1",
         "seed": seed,
+        "submission_gate_path": str(submission_gate["record_path"]),
+        "submission_gate_sha256": submission_gate["record_sha256"],
         "task_identity": task_identity,
         "task_id": task_id,
         "technical_rerun": (
@@ -389,9 +429,12 @@ def main() -> int:
         "artifact_destination": str(artifacts / job_id),
         "controller_batch_script_sha256": result["attestation"]["controller_digest"],
         "cpu_preflight": str(cpu_path),
+        "cpu_preflight_sha256": submission_gate["cpu_gate_result_sha256"],
         "environment_content_digest": ENVIRONMENT_CONTENT_DIGEST,
         "environment_fingerprint": ENVIRONMENT_FINGERPRINT,
         "freeze_manifest_sha256": freeze["sha256"],
+        "gate_fix_cpu_preflight": str(final_gate_path),
+        "gate_fix_cpu_preflight_sha256": sha256_file(final_gate_path),
         "infrastructure_amendment_sha256": sha256_file(amendment_path),
         "model": {"id": MODEL_ID, "revision": MODEL_REVISION},
         "project_commit": commit.stdout.strip(),
@@ -417,6 +460,8 @@ def main() -> int:
         "slurm_job_id": job_id,
         "source_batch_script": str(batch),
         "source_batch_script_sha256": sha256_file(batch),
+        "submission_gate_path": str(submission_gate["record_path"]),
+        "submission_gate_sha256": submission_gate["record_sha256"],
         "submitted_at_utc": datetime.now(UTC).isoformat(),
         "suite_reference_sha256": sha256_file(ROOT / SUITE_REFERENCE),
         "task_identity": task_identity,

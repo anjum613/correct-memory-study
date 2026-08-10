@@ -49,6 +49,7 @@ from cmpilot.qwen36_qualification import (  # noqa: E402
     ENVIRONMENT_CONTENT_DIGEST,
     ENVIRONMENT_FINGERPRINT,
     INFRASTRUCTURE_AMENDMENT,
+    INFRASTRUCTURE_AMENDMENT_SUCCESSOR,
     MAX_OUTPUT_TOKENS,
     MINI_SWE_PYTHON,
     PROJECT_ENVIRONMENT_FINGERPRINT,
@@ -67,6 +68,10 @@ from cmpilot.qwen36_qualification import (  # noqa: E402
     validate_seed_schedule,
     write_canonical_json,
 )
+from cmpilot.qwen36_submission_gate import (  # noqa: E402
+    batch_gate_equivalence,
+    validate_submission_gate,
+)
 from cmpilot.qualification_runner_preflight import (  # noqa: E402
     run_qualification_runner_preflight,
 )
@@ -84,8 +89,11 @@ from scripts.qwen36_server_port import (  # noqa: E402
 )
 
 
-DEFAULT_OUTPUT = QWEN36_ARTIFACT_ROOT / "cpu-preflight-qualification-harness-fix-25963"
+DEFAULT_OUTPUT = QWEN36_ARTIFACT_ROOT / "cpu-preflight-qualification-gate-fix-26036"
 ALLOWED_INFRASTRUCTURE_CHANGE_PATHS = {
+    "qualification/qwen36-v1/infrastructure-amendment-26036.json",
+    "qualification/qwen36-v1/submission-gate.json",
+    "qualification/qwen36-v1/technical-invalid-qualification-26036.json",
     "qualification/qwen36-v1/infrastructure-amendment-25963.json",
     "qualification/qwen36-v1/technical-invalid-qualification-25963.json",
     "scripts/generate_qwen36_qualification_batches.py",
@@ -95,6 +103,7 @@ ALLOWED_INFRASTRUCTURE_CHANGE_PATHS = {
     "scripts/submit_qwen36_qualification.py",
     "slurm/qwen36_qnm_p01_interval_merge.sbatch",
     "slurm/qwen36_qnm_p01_interval_merge_technical_rerun_25963_1.sbatch",
+    "slurm/qwen36_qnm_p01_interval_merge_technical_rerun_26036_1.sbatch",
     "slurm/qwen36_qnm_p02_shipment_summary.sbatch",
     "slurm/qwen36_qnm_p03_page_window.sbatch",
     "slurm/qwen36_qnm_p04_record_parser.sbatch",
@@ -104,9 +113,11 @@ ALLOWED_INFRASTRUCTURE_CHANGE_PATHS = {
     "src/cmpilot/qualification_runner.py",
     "src/cmpilot/qualification_runner_preflight.py",
     "src/cmpilot/qwen36_qualification.py",
+    "src/cmpilot/qwen36_submission_gate.py",
     "tests/test_qwen36_dynamic_port.py",
     "tests/test_qwen36_qualification.py",
     "tests/test_qwen36_qualification_harness.py",
+    "tests/test_qwen36_submission_gate.py",
 }
 _TEST_SUMMARY = re.compile(
     r"(?P<passed>\d+) passed(?:, (?P<failed>\d+) failed)?"
@@ -193,8 +204,7 @@ def _batch_path(task_id: str) -> Path:
 def _batch_gate(
     output: Path,
     *,
-    amendment_sha256: str,
-    freeze_sha256: str,
+    submission_gate: dict[str, Any],
     seeds: dict[str, int],
 ) -> dict[str, Any]:
     rows = []
@@ -216,8 +226,12 @@ def _batch_gate(
             "#SBATCH --no-requeue",
             f"TASK_ID={task_id}",
             f"TASK_SEED={seeds[task_id]}",
-            f"EXPECTED_FREEZE_SHA256={freeze_sha256}",
-            f"EXPECTED_AMENDMENT_SHA256={amendment_sha256}",
+            f"EXPECTED_FREEZE_SHA256={submission_gate['scientific_freeze_sha256']}",
+            f"EXPECTED_AMENDMENT_SHA256={submission_gate['infrastructure_amendment_sha256']}",
+            f"EXPECTED_SUBMISSION_GATE_SHA256={submission_gate['record_sha256']}",
+            f"EXPECTED_CPU_GATE_SHA256={submission_gate['cpu_gate_result_sha256']}",
+            f"EXPECTED_SEED_SCHEDULE_SHA256={submission_gate['seed_schedule_sha256']}",
+            f"EXPECTED_SUITE_REFERENCE_SHA256={submission_gate['suite_reference_sha256']}",
             "--dtype bfloat16",
             "--tensor-parallel-size 2",
             "--max-model-len 32768",
@@ -308,12 +322,24 @@ def _batch_gate(
                     "artifact-manifest.exit",
                 )
             ),
+            "submission_gate_equivalence": all(
+                batch_gate_equivalence(
+                    text,
+                    gate=submission_gate,
+                    task_id=task_id,
+                    seed=seeds[task_id],
+                ).values()
+            ),
+            "stale_gate_absent": (
+                "cpu-preflight-qualification-harness-fix-25963/"
+                not in text
+            ),
         }
         row["pass"] = syntax["exit_code"] == 0 and all(
             value for key, value in row.items() if isinstance(value, bool)
         )
         rows.append(row)
-    rerun_path = ROOT / "slurm/qwen36_qnm_p01_interval_merge_technical_rerun_25963_1.sbatch"
+    rerun_path = ROOT / "slurm/qwen36_qnm_p01_interval_merge_technical_rerun_26036_1.sbatch"
     rerun_text = rerun_path.read_text(encoding="utf-8")
     rerun_syntax = run(
         ("/usr/bin/bash", "-n", str(rerun_path)),
@@ -325,7 +351,7 @@ def _batch_gate(
         "sha256": sha256_file(rerun_path),
         "syntax_exit_code": rerun_syntax["exit_code"],
         "lineage": (
-            "TECHNICAL_RERUN_OF=25963" in rerun_text
+            "TECHNICAL_RERUN_OF=26036" in rerun_text
             and "TECHNICAL_RERUN_NUMBER=1" in rerun_text
             and "TECHNICAL_ROOT_QUALIFICATION=25953" in rerun_text
             and "QUALIFICATION_TASK_ID=qnm-p01-interval-merge" in rerun_text
@@ -349,6 +375,17 @@ def _batch_gate(
                 "--reasoning-parser qwen3",
                 "--language-model-only",
             )
+        ),
+        "submission_gate_equivalence": all(
+            batch_gate_equivalence(
+                rerun_text,
+                gate=submission_gate,
+                task_id="qnm-p01-interval-merge",
+                seed=1602021252,
+            ).values()
+        ),
+        "stale_gate_absent": (
+            "cpu-preflight-qualification-harness-fix-25963/" not in rerun_text
         ),
     }
     rerun["pass"] = rerun_syntax["exit_code"] == 0 and all(
@@ -377,6 +414,18 @@ def main() -> int:
         "treatment": "no_memory",
     }
     try:
+        submission_gate = validate_submission_gate(ROOT)
+        result["submission_gate"] = {
+            "checks": submission_gate["checks"],
+            "cpu_gate_result_path": str(submission_gate["cpu_gate_result_path"]),
+            "cpu_gate_result_sha256": submission_gate["cpu_gate_result_sha256"],
+            "path": str(submission_gate["record_path"]),
+            "sha256": submission_gate["record_sha256"],
+        }
+        result["checks"]["canonical_submission_gate_identity"] = bool(
+            submission_gate["pass"] is True
+            and all(submission_gate["checks"].values())
+        )
         freeze_path = ROOT / QUALIFICATION_FREEZE
         amendment_path = ROOT / INFRASTRUCTURE_AMENDMENT
         freeze = validate_freeze_manifest(
@@ -386,10 +435,17 @@ def main() -> int:
         )
         result["qualification_freeze_sha256"] = freeze["sha256"]
         result["infrastructure_amendment_sha256"] = sha256_file(amendment_path)
+        result["infrastructure_successor_amendment_sha256"] = freeze[
+            "infrastructure_successor_amendment_sha256"
+        ]
         result["checks"]["qualification_freeze_manifest"] = freeze["pass"] is True
         result["checks"]["infrastructure_amendment"] = (
             freeze["infrastructure_amendment_sha256"]
             == result["infrastructure_amendment_sha256"]
+        )
+        result["checks"]["infrastructure_successor_amendment"] = bool(
+            freeze["infrastructure_successor_amendment_sha256"]
+            == sha256_file(ROOT / INFRASTRUCTURE_AMENDMENT_SUCCESSOR)
         )
 
         candidate_sha = sha256_file(ROOT / CANDIDATE_MANIFEST)
@@ -474,6 +530,36 @@ def main() -> int:
             and technical_25963.get("repository_competence") == "NOT_SCORED"
             and "AttributeError: 'AdapterConfig' object has no attribute "
             "'agent_config_source'" in technical_25963_stderr
+        )
+
+        technical_26036_path = (
+            ROOT / "qualification/qwen36-v1/technical-invalid-qualification-26036.json"
+        )
+        technical_26036 = load_json(technical_26036_path)
+        technical_26036_stderr_path = Path(
+            "/home/s224049759/slurm-logs/"
+            "qwen36-p01-interval-merge-tr25963r1-26036.err"
+        )
+        technical_26036_stderr = technical_26036_stderr_path.read_text(
+            encoding="utf-8", errors="replace"
+        )
+        result["technical_invalid_26036"] = {
+            "path": str(technical_26036_path),
+            "sha256": sha256_file(technical_26036_path),
+            "stderr_path": str(technical_26036_stderr_path),
+        }
+        result["checks"]["job_26036_preserved_as_technical_invalid"] = bool(
+            technical_26036.get("slurm_job_id") == "26036"
+            and technical_26036.get("task_id") == "qnm-p01-interval-merge"
+            and technical_26036.get("seed") == 1602021252
+            and technical_26036.get("technical_validity") == "FAIL"
+            and technical_26036.get("technical_failure_class")
+            == "PRE_SERVER_CPU_GATE_ATTESTATION_FAILURE"
+            and technical_26036.get("technical_failure_detail")
+            == "STALE_CPU_GATE_PATH_AMENDMENT_HASH_MISMATCH"
+            and technical_26036.get("repository_competence") == "NOT_SCORED"
+            and technical_26036_stderr.strip()
+            == "CPU gate covered a different infrastructure amendment"
         )
 
         metadata = load_json(ROOT / "qualification/qwen36-v1/model-metadata.json")
@@ -563,11 +649,14 @@ def main() -> int:
 
         agent_validation = validate_agent_config(ROOT / AGENT_CONFIG)
         seed_validation = validate_seed_schedule(ROOT / SEED_SCHEDULE)
+        seed_schedule_sha256 = sha256_file(ROOT / SEED_SCHEDULE)
         seeds = seed_validation["seeds"]
         result["seeds"] = seeds
+        result["seed_schedule_sha256"] = seed_schedule_sha256
         result["checks"]["generation_and_seed_freeze"] = (
             agent_validation["pass"] is True
             and seed_validation["pass"] is True
+            and seed_schedule_sha256 == submission_gate["seed_schedule_sha256"]
             and agent_validation["model"]["context_limit"]
             == SELECTED_CONTEXT_LENGTH
             and agent_validation["model"]["max_tokens"] == MAX_OUTPUT_TOKENS
@@ -695,6 +784,7 @@ def main() -> int:
                 "tests/test_qwen36_smoke_infrastructure.py",
                 "tests/test_qwen36_qualification.py",
                 "tests/test_qwen36_qualification_harness.py",
+                "tests/test_qwen36_submission_gate.py",
                 "tests/test_qwen36_dynamic_port.py",
                 "tests/test_openai_transport.py",
                 "tests/test_mini_swe_config.py",
@@ -792,14 +882,21 @@ def main() -> int:
 
         batches = _batch_gate(
             output,
-            amendment_sha256=result["infrastructure_amendment_sha256"],
-            freeze_sha256=freeze["sha256"],
+            submission_gate=submission_gate,
             seeds=seeds,
         )
         result["batches"] = batches
         result["checks"]["all_seven_batches_and_controller_preparation"] = batches[
             "pass"
         ]
+        result["checks"]["generated_batch_submission_gate_equivalence"] = bool(
+            all(
+                row.get("submission_gate_equivalence") is True
+                for row in batches["rows"]
+            )
+            and batches["technical_rerun"].get("submission_gate_equivalence")
+            is True
+        )
 
         submit_text = (ROOT / "scripts/submit_qwen36_qualification.py").read_text(
             encoding="utf-8"
@@ -809,7 +906,9 @@ def main() -> int:
             and "duplicate Qwen3.6 qualification evidence exists" in submit_text
             and "reserves are permitted only for exactly 3/5" in submit_text
             and "treatment\": \"no_memory" in submit_text
-            and "only technical rerun 1 of job 25963 is authorized" in submit_text
+            and "only technical rerun 1 of job 26036 is authorized" in submit_text
+            and "validate_submission_gate(ROOT)" in submit_text
+            and "batch_gate_equivalence" in submit_text
         )
 
         smoke = load_json(ROOT / SMOKE_RESULT)
