@@ -42,6 +42,7 @@ from .qualification import (
 )
 from .qualification_adapter import command, write_qualification_adapter
 from .qwen36_qualification import (
+    AGENT_CONFIG as QWEN36_AGENT_CONFIG,
     MODEL_ID as QWEN36_MODEL_ID,
     MODEL_REVISION as QWEN36_MODEL_REVISION,
     resolved_agent_config as resolved_qwen36_agent_config,
@@ -80,12 +81,43 @@ class QualificationRunConfig:
     base_url: str
     model: str
     mini_python: str
+    agent_config_source: Path | None = None
+    infrastructure_amendment: Path | None = None
     tokenizer_path: str | None = None
     seed: int | None = None
     suite_reference: Path | None = None
     agent_timeout: int = 600
     server_pid: int | None = None
     runtime_integrity: Path | None = None
+
+    def __post_init__(self) -> None:
+        if self.agent_config_source is None:
+            raise QualificationError(
+                "qualification agent_config_source is required; no default is permitted"
+            )
+
+
+@dataclass(frozen=True)
+class AdapterConfig:
+    """Complete configuration contract consumed by the scientific adapter."""
+
+    model: str
+    tokenizer_path: str
+    base_url: str
+    agent_config_source: Path
+
+    def __post_init__(self) -> None:
+        if not self.model.strip():
+            raise QualificationError("adapter model must not be empty")
+        if not self.tokenizer_path.strip():
+            raise QualificationError("adapter tokenizer path must not be empty")
+        if not self.base_url.strip():
+            raise QualificationError("adapter base URL must not be empty")
+        if not self.agent_config_source.is_file():
+            raise QualificationError(
+                "adapter agent_config_source is not a regular file: "
+                f"{self.agent_config_source}"
+            )
 
 
 def _combined(result: Any) -> str:
@@ -212,8 +244,14 @@ def run_qualification_task(config: QualificationRunConfig) -> int:
         "task_instruction": sha256_file(paths["task_instruction"]),
     }
     if qwen36:
+        if config.infrastructure_amendment is None:
+            raise QualificationError(
+                "Qwen3.6 qualification infrastructure amendment is required"
+            )
         freeze_validation = validate_qwen36_freeze_manifest(
-            project, config.freeze_manifest
+            project,
+            config.freeze_manifest,
+            infrastructure_amendment=config.infrastructure_amendment,
         )
         if config.suite_reference is None:
             raise QualificationError("Qwen3.6 suite reference is required")
@@ -234,12 +272,27 @@ def run_qualification_task(config: QualificationRunConfig) -> int:
             raise QualificationError("submitted Qwen3.6 task seed changed")
         if config.tokenizer_path != freeze_record["model"]["snapshot"]:
             raise QualificationError("submitted Qwen3.6 tokenizer snapshot changed")
+        canonical_agent_config = (project / QWEN36_AGENT_CONFIG).resolve(strict=True)
+        submitted_agent_config = config.agent_config_source.resolve(strict=True)
+        if submitted_agent_config != canonical_agent_config:
+            raise QualificationError(
+                "submitted Qwen3.6 agent_config_source is not the frozen canonical source"
+            )
+        if (
+            sha256_file(submitted_agent_config)
+            != freeze_record["qualification_agent_config"]["sha256"]
+        ):
+            raise QualificationError("submitted Qwen3.6 agent config identity changed")
         resolved_config = resolved_qwen36_agent_config(project, task_id)
         resolved_config_path = artifact / "resolved-agent-config.json"
         write_json(resolved_config_path, resolved_config)
         input_hashes.update(
             {
                 "suite_reference": sha256_file(config.suite_reference),
+                "agent_config_source": sha256_file(submitted_agent_config),
+                "infrastructure_amendment": sha256_file(
+                    config.infrastructure_amendment
+                ),
                 "resolved_agent_config": sha256_file(resolved_config_path),
             }
         )
@@ -261,6 +314,17 @@ def run_qualification_task(config: QualificationRunConfig) -> int:
         run_schema = "qwen32b-qualification-run-identity-v1"
         success_label = "QWEN32B_QUALIFICATION_TECHNICAL_VALID"
         technical_failure_label = "QWEN32B_QUALIFICATION_TECHNICAL_FAILURE"
+
+    adapter_config = AdapterConfig(
+        model=config.model,
+        tokenizer_path=config.tokenizer_path or config.model,
+        base_url=config.base_url,
+        agent_config_source=(
+            resolved_config_path
+            if resolved_config_path is not None
+            else config.agent_config_source.resolve(strict=True)
+        ),
+    )
 
     write_json(artifact / "input-hashes.json", input_hashes)
     write_json(artifact / "task-manifest.json", task)
@@ -347,15 +411,7 @@ def run_qualification_task(config: QualificationRunConfig) -> int:
     environment = _safe_agent_environment(
         artifact,
         working_copy,
-        type(
-            "AdapterConfig",
-            (),
-            {
-                "model": config.model,
-                "tokenizer_path": config.tokenizer_path or config.model,
-                "base_url": config.base_url,
-            },
-        )(),
+        adapter_config,
         trajectory,
         paths["task_instruction"],
     )
@@ -368,8 +424,6 @@ def run_qualification_task(config: QualificationRunConfig) -> int:
             "CMPILOT_TASK_POLICY_SOURCE": str(paths["task_policy"]),
         }
     )
-    if resolved_config_path is not None:
-        environment["CMPILOT_AGENT_CONFIG_SOURCE"] = str(resolved_config_path)
     command_line = command(config.mini_python, adapter)
     write_json(artifact / "agent-command.json", command_line)
     agent_started = time.perf_counter()

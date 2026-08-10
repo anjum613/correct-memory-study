@@ -28,6 +28,7 @@ from cmpilot.qwen36_qualification import (
     CANDIDATE_MANIFEST_SHA256,
     ENVIRONMENT_CONTENT_DIGEST,
     ENVIRONMENT_FINGERPRINT,
+    INFRASTRUCTURE_AMENDMENT,
     MAX_OUTPUT_TOKENS,
     PRIMARY_TASKS,
     QUALIFICATION_FREEZE,
@@ -232,7 +233,7 @@ def test_tracked_batches_exactly_match_the_frozen_generator() -> None:
             seeds[task_id],
             freeze_sha256,
         )
-        assert "cpu-preflight-qualification-port-fix-25953-v2" in path.read_text(
+        assert "cpu-preflight-qualification-harness-fix-25963" in path.read_text(
             encoding="utf-8"
         )
 
@@ -276,7 +277,11 @@ def test_final_freeze_validates_when_present() -> None:
     if not path.is_file():
         pytest.skip("pre-outcome qualification freeze has not been emitted yet")
 
-    result = validate_freeze_manifest(ROOT, path)
+    result = validate_freeze_manifest(
+        ROOT,
+        path,
+        infrastructure_amendment=ROOT / INFRASTRUCTURE_AMENDMENT,
+    )
 
     assert result["pass"] is True
     assert len(result["sha256"]) == 64

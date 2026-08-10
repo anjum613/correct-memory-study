@@ -44,6 +44,10 @@ SEED_SCHEDULE = NAMESPACE / "qualification-seeds.json"
 ADAPTER_CONTRACT = NAMESPACE / "scientific-adapter-contract.json"
 SMOKE_RESULT = NAMESPACE / "smoke-result-25940.json"
 QUALIFICATION_FREEZE = NAMESPACE / "qualification-freeze-manifest.json"
+QUALIFICATION_FREEZE_SHA256 = (
+    "7c8e22bcdd6d2e264ed205310b584df3643e5499e01e354b71779fc3fdcfca91"
+)
+INFRASTRUCTURE_AMENDMENT = NAMESPACE / "infrastructure-amendment-25963.json"
 SMOKE_ARTIFACT = Path(
     "/home/s224049759/run-artifacts/qwen36-no-memory-qualification/v1/smoke/jobs/25940"
 )
@@ -452,7 +456,100 @@ def build_freeze_manifest(
     }
 
 
-def validate_freeze_manifest(project: Path, path: Path) -> dict[str, Any]:
+def validate_infrastructure_amendment(
+    project: Path,
+    amendment_path: Path,
+    *,
+    freeze_path: Path,
+) -> dict[str, Any]:
+    """Validate the exact, infrastructure-only amendment to the frozen runner."""
+    project = project.resolve(strict=True)
+    amendment = load_json(amendment_path)
+    freeze = load_json(freeze_path)
+    frozen_components = {
+        str(component.get("path")): component
+        for component in freeze.get("protocol_components", [])
+        if isinstance(component, Mapping)
+    }
+    amendments = amendment.get("protocol_component_amendments")
+    if not isinstance(amendments, Mapping):
+        raise Qwen36QualificationError(
+            "infrastructure amendment lacks protocol component amendments"
+        )
+    expected_paths = {"src/cmpilot/qualification_runner.py"}
+    amended_paths = {str(path) for path in amendments}
+    changed_hashes = amendment.get("changed_file_hashes")
+    changed_hashes_valid = isinstance(changed_hashes, Mapping) and all(
+        isinstance(relative, str)
+        and isinstance(expected, str)
+        and len(expected) == 64
+        and sha256_file(project / relative) == expected
+        for relative, expected in (
+            changed_hashes.items() if isinstance(changed_hashes, Mapping) else ()
+        )
+    )
+    component_checks: dict[str, bool] = {}
+    accepted: dict[str, dict[str, str]] = {}
+    for relative, value in amendments.items():
+        relative = str(relative)
+        frozen = frozen_components.get(relative, {})
+        valid = isinstance(value, Mapping)
+        old_sha256 = str(value.get("old_sha256", "")) if valid else ""
+        new_sha256 = str(value.get("new_sha256", "")) if valid else ""
+        component = str(value.get("component", "")) if valid else ""
+        component_checks[relative] = bool(
+            valid
+            and frozen.get("component") == component
+            and frozen.get("sha256") == old_sha256
+            and sha256_file(project / relative) == new_sha256
+            and old_sha256 != new_sha256
+        )
+        if component_checks[relative]:
+            accepted[relative] = {
+                "component": component,
+                "new_sha256": new_sha256,
+                "old_sha256": old_sha256,
+            }
+    scientific = amendment.get("scientific_configuration", {})
+    original = amendment.get("original_qualification_freeze", {})
+    checks = {
+        "schema": amendment.get("schema")
+        == "qwen36-qualification-infrastructure-amendment-v1",
+        "job": amendment.get("technical_invalid_job", {}).get("slurm_job_id")
+        == "25963",
+        "freeze": original.get("path") == str(QUALIFICATION_FREEZE)
+        and original.get("sha256") == QUALIFICATION_FREEZE_SHA256
+        and original.get("status") == "UNCHANGED"
+        and sha256_file(freeze_path) == QUALIFICATION_FREEZE_SHA256,
+        "scientific_configuration": scientific.get("status") == "UNCHANGED"
+        and scientific.get("model_revision") == MODEL_REVISION
+        and scientific.get("seed_schedule_sha256")
+        == "32849f701145306bff8f235747588726735125bf65beb5b37406a400803ab108"
+        and scientific.get("suite_reference_sha256") == SUITE_REFERENCE_SHA256
+        and scientific.get("treatment") == "no_memory",
+        "amended_component_scope": amended_paths == expected_paths,
+        "component_hashes": bool(component_checks)
+        and all(component_checks.values()),
+        "changed_file_hashes": changed_hashes_valid,
+    }
+    if not all(checks.values()):
+        raise Qwen36QualificationError(
+            f"invalid qualification infrastructure amendment: {checks}"
+        )
+    return {
+        "accepted_protocol_components": accepted,
+        "checks": checks,
+        "pass": True,
+        "sha256": sha256_file(amendment_path),
+    }
+
+
+def validate_freeze_manifest(
+    project: Path,
+    path: Path,
+    *,
+    infrastructure_amendment: Path | None = None,
+) -> dict[str, Any]:
     project = project.resolve(strict=True)
     record = load_json(path)
     checks: dict[str, bool] = {
@@ -480,14 +577,33 @@ def validate_freeze_manifest(project: Path, path: Path) -> dict[str, Any]:
         and record.get("model", {}).get("snapshot_sha256")
         == MODEL_SNAPSHOT_SHA256,
     }
+    amendment = (
+        validate_infrastructure_amendment(
+            project,
+            infrastructure_amendment,
+            freeze_path=path,
+        )
+        if infrastructure_amendment is not None
+        else None
+    )
+    accepted = (
+        amendment["accepted_protocol_components"] if amendment is not None else {}
+    )
     for component in record.get("protocol_components", []):
         if not isinstance(component, Mapping):
             checks["component_shape"] = False
             continue
         relative = str(component.get("path", ""))
-        checks[f"component:{component.get('component')}"] = bool(relative) and sha256_file(
-            project / relative
-        ) == component.get("sha256")
+        actual = sha256_file(project / relative) if relative else ""
+        amended = accepted.get(relative)
+        checks[f"component:{component.get('component')}"] = bool(relative) and (
+            actual == component.get("sha256")
+            or bool(
+                amended
+                and amended.get("old_sha256") == component.get("sha256")
+                and amended.get("new_sha256") == actual
+            )
+        )
     for name in (
         "qualification_agent_config",
         "scientific_adapter_contract",
@@ -499,7 +615,14 @@ def validate_freeze_manifest(project: Path, path: Path) -> dict[str, Any]:
         )
     if not all(checks.values()):
         raise Qwen36QualificationError(f"qualification freeze mismatch: {checks}")
-    return {"checks": checks, "pass": True, "sha256": sha256_file(path)}
+    return {
+        "checks": checks,
+        "infrastructure_amendment_sha256": (
+            amendment["sha256"] if amendment is not None else None
+        ),
+        "pass": True,
+        "sha256": sha256_file(path),
+    }
 
 
 __all__ = [
@@ -507,11 +630,13 @@ __all__ = [
     "AGENT_CONFIG",
     "ALL_TASKS",
     "MAX_OUTPUT_TOKENS",
+    "INFRASTRUCTURE_AMENDMENT",
     "MINI_SWE_PYTHON",
     "PROJECT_ENVIRONMENT_FINGERPRINT",
     "PRIMARY_TASKS",
     "PROJECT_PYTHON",
     "QUALIFICATION_FREEZE",
+    "QUALIFICATION_FREEZE_SHA256",
     "QWEN36_ARTIFACT_ROOT",
     "QWEN36_PYTHON",
     "REASONING_PARSER",
@@ -523,6 +648,7 @@ __all__ = [
     "resolved_agent_config",
     "validate_agent_config",
     "validate_freeze_manifest",
+    "validate_infrastructure_amendment",
     "validate_seed_schedule",
     "write_canonical_json",
 ]

@@ -14,6 +14,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from cmpilot.qwen36_candidate import MODEL_REVISION, sha256_file  # noqa: E402
 from cmpilot.qwen36_qualification import (  # noqa: E402
     ALL_TASKS,
+    INFRASTRUCTURE_AMENDMENT,
     PRIMARY_TASKS,
     QUALIFICATION_FREEZE,
     SEED_SCHEDULE,
@@ -27,14 +28,15 @@ OUTPUTS = {
     for task_id in ALL_TASKS
 }
 TECHNICAL_RERUN_TASK = "qnm-p01-interval-merge"
-TECHNICAL_RERUN_OF = "25953"
+TECHNICAL_RERUN_OF = "25963"
 TECHNICAL_RERUN_NUMBER = 1
+TECHNICAL_ROOT_QUALIFICATION = "25953"
 TECHNICAL_RERUN_OUTPUT = (
-    ROOT / "slurm/qwen36_qnm_p01_interval_merge_technical_rerun_1.sbatch"
+    ROOT / "slurm/qwen36_qnm_p01_interval_merge_technical_rerun_25963_1.sbatch"
 )
 CPU_GATE = (
     "/home/s224049759/run-artifacts/qwen36-no-memory-qualification/v1/"
-    "cpu-preflight-qualification-port-fix-25953-v2/cpu-preflight-result.json"
+    "cpu-preflight-qualification-harness-fix-25963/cpu-preflight-result.json"
 )
 
 
@@ -70,6 +72,9 @@ SUITE_REFERENCE=$PROJECT/qualification/qwen36-v1/suite-reference.json
 TASK=$PROJECT/qualification/qwen32b-v1/tasks/$TASK_ID.json
 FREEZE=$PROJECT/qualification/qwen36-v1/qualification-freeze-manifest.json
 EXPECTED_FREEZE_SHA256=@@FREEZE_SHA256@@
+INFRASTRUCTURE_AMENDMENT=$PROJECT/qualification/qwen36-v1/infrastructure-amendment-25963.json
+EXPECTED_AMENDMENT_SHA256=@@AMENDMENT_SHA256@@
+AGENT_CONFIG_SOURCE=$PROJECT/qualification/qwen36-v1/qualification-agent-config.json
 CPU_GATE=@@CPU_GATE@@
 ENV_FINGERPRINT=$PROJECT/qualification/qwen36-v1/environment-fingerprint.json
 ENV_CONTENT=$PROJECT/qualification/qwen36-v1/environment-content-digest.json
@@ -78,6 +83,7 @@ ARTIFACT_DIR=$ARTIFACT_ROOT/$SLURM_JOB_ID
 RUN_ARTIFACT=$ARTIFACT_DIR/run
 RUNTIME_SCRATCH=/tmp/cmq-$SLURM_JOB_ID
 PORT_HELPER=$PROJECT/scripts/qwen36_server_port.py
+SERVER_LIFECYCLE_HELPER=$PROJECT/scripts/qwen36_server_lifecycle.py
 MAX_SERVER_BIND_ATTEMPTS=4
 PORT_LOCK_ROOT=/tmp/cmq-qwen36-$UID-ports
 PORT=
@@ -89,19 +95,27 @@ SERVER_PID=
 mkdir -p "$ARTIFACT_DIR"
 
 cleanup_server() {
-    local cleanup_status=0
-    if [ -n "$SERVER_PID" ] && kill -0 "$SERVER_PID" 2>/dev/null; then
-        kill -TERM -- "-$SERVER_PID" 2>/dev/null || cleanup_status=1
-        for _ in $(seq 1 30); do
-            if ! kill -0 "$SERVER_PID" 2>/dev/null; then break; fi
-            sleep 1
-        done
-        if kill -0 "$SERVER_PID" 2>/dev/null; then
-            kill -KILL -- "-$SERVER_PID" 2>/dev/null || cleanup_status=1
+    local shutdown_status=0
+    if [ -z "$SERVER_PID" ]; then
+        if [ -f "$ARTIFACT_DIR/server-shutdown.exit" ]; then
+            return "$(cat "$ARTIFACT_DIR/server-shutdown.exit")"
         fi
+        printf '0\n' > "$ARTIFACT_DIR/server-shutdown.exit"
+        return 0
     fi
-    if [ -n "$SERVER_PID" ]; then wait "$SERVER_PID" 2>/dev/null || true; fi
-    return "$cleanup_status"
+    "$CMPILOT_PY" "$SERVER_LIFECYCLE_HELPER" shutdown \
+        --pid "$SERVER_PID" \
+        --term-timeout-seconds 30 \
+        --kill-timeout-seconds 10 \
+        --record "$ARTIFACT_DIR/server-shutdown-result.json" \
+        > "$ARTIFACT_DIR/server-shutdown.stdout" \
+        2> "$ARTIFACT_DIR/server-shutdown.stderr" || shutdown_status=$?
+    if [ "$shutdown_status" -eq 0 ]; then
+        wait "$SERVER_PID" 2>/dev/null || true
+    fi
+    SERVER_PID=
+    printf '%s\n' "$shutdown_status" > "$ARTIFACT_DIR/server-shutdown.exit"
+    return "$shutdown_status"
 }
 
 release_port_claim() {
@@ -125,19 +139,69 @@ cleanup_scratch() {
 }
 
 on_exit() {
-    local status=$?
+    local primary_status=$?
+    local server_status=0
+    local port_status=0
+    local scratch_status=0
+    local gpu_status=0
+    local manifest_status=0
+    local final_status=$primary_status
+    trap - EXIT TERM INT
     set +e
-    cleanup_server || status=1
-    release_port_claim || status=1
-    cleanup_scratch || status=1
-    /usr/bin/nvidia-smi > "$ARTIFACT_DIR/nvidia-smi-final.txt" 2>&1 || status=1
-    printf '%s\n' "$status" > "$ARTIFACT_DIR/job-exit-code.txt"
+    cleanup_server
+    server_status=$?
+    release_port_claim
+    port_status=$?
+    cleanup_scratch
+    scratch_status=$?
+    /usr/bin/nvidia-smi > "$ARTIFACT_DIR/nvidia-smi-final.txt" 2>&1
+    gpu_status=$?
+    if [ "$final_status" -eq 0 ] && \
+       { [ "$server_status" -ne 0 ] || [ "$port_status" -ne 0 ] || \
+         [ "$scratch_status" -ne 0 ] || [ "$gpu_status" -ne 0 ]; }; then
+        final_status=2
+    fi
+    printf '%s\n' "$primary_status" > "$ARTIFACT_DIR/batch-primary-exit-code.txt"
+    printf '%s\n' "$final_status" > "$ARTIFACT_DIR/batch-exit-code.txt"
+    printf '%s\n' "$final_status" > "$ARTIFACT_DIR/job-exit-code.txt"
     printf '%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$ARTIFACT_DIR/job-finished-utc.txt"
-    "$CMPILOT_PY" "$PROJECT/scripts/qualification_job_manifest.py" "$ARTIFACT_DIR" || status=1
-    trap - EXIT
-    exit "$status"
+    "$CMPILOT_PY" "$SERVER_LIFECYCLE_HELPER" record-status \
+        --runner-exit-file "$ARTIFACT_DIR/qualification-runner.exit" \
+        --server-shutdown-exit "$server_status" \
+        --port-release-exit "$port_status" \
+        --scratch-cleanup-exit "$scratch_status" \
+        --gpu-final-exit "$gpu_status" \
+        --manifest-exit -1 \
+        --batch-exit "$final_status" \
+        --record "$ARTIFACT_DIR/outer-finalizer-result.json" \
+        > "$ARTIFACT_DIR/outer-finalizer.stdout" 2> "$ARTIFACT_DIR/outer-finalizer.stderr" || true
+    "$CMPILOT_PY" "$PROJECT/scripts/qualification_job_manifest.py" "$ARTIFACT_DIR"
+    manifest_status=$?
+    if [ "$manifest_status" -ne 0 ] && [ "$final_status" -eq 0 ]; then final_status=2; fi
+    printf '%s\n' "$manifest_status" > "$ARTIFACT_DIR/artifact-manifest.exit"
+    printf '%s\n' "$final_status" > "$ARTIFACT_DIR/batch-exit-code.txt"
+    printf '%s\n' "$final_status" > "$ARTIFACT_DIR/job-exit-code.txt"
+    "$CMPILOT_PY" "$SERVER_LIFECYCLE_HELPER" record-status \
+        --runner-exit-file "$ARTIFACT_DIR/qualification-runner.exit" \
+        --server-shutdown-exit "$server_status" \
+        --port-release-exit "$port_status" \
+        --scratch-cleanup-exit "$scratch_status" \
+        --gpu-final-exit "$gpu_status" \
+        --manifest-exit "$manifest_status" \
+        --batch-exit "$final_status" \
+        --record "$ARTIFACT_DIR/outer-finalizer-result.json" \
+        > "$ARTIFACT_DIR/outer-finalizer.stdout" 2> "$ARTIFACT_DIR/outer-finalizer.stderr" || true
+    "$CMPILOT_PY" "$PROJECT/scripts/qualification_job_manifest.py" "$ARTIFACT_DIR"
+    if [ "$?" -ne 0 ] && [ "$final_status" -eq 0 ]; then
+        final_status=2
+        printf '%s\n' "$final_status" > "$ARTIFACT_DIR/batch-exit-code.txt"
+        printf '%s\n' "$final_status" > "$ARTIFACT_DIR/job-exit-code.txt"
+    fi
+    exit "$final_status"
 }
 trap on_exit EXIT
+trap 'exit 143' TERM
+trap 'exit 130' INT
 
 test -x "$CMPILOT_PY"
 test -x "$MINI_PY"
@@ -148,7 +212,10 @@ test -f "$SUITE"
 test -f "$SUITE_REFERENCE"
 test -f "$TASK"
 test -f "$FREEZE"
+test -f "$INFRASTRUCTURE_AMENDMENT"
+test -f "$AGENT_CONFIG_SOURCE"
 test "$(sha256sum "$FREEZE" | cut -d' ' -f1)" = "$EXPECTED_FREEZE_SHA256"
+test "$(sha256sum "$INFRASTRUCTURE_AMENDMENT" | cut -d' ' -f1)" = "$EXPECTED_AMENDMENT_SHA256"
 
 "$CMPILOT_PY" - "$CPU_GATE" "$TASK_ID" "$TASK_SEED" <<'PY'
 import json
@@ -159,6 +226,8 @@ if record.get("overall") != "PASS" or not all(record.get("checks", {}).values())
     raise SystemExit("Qwen3.6 post-freeze CPU gate is not PASS")
 if record.get("seeds", {}).get(sys.argv[2]) != int(sys.argv[3]):
     raise SystemExit("task seed differs from CPU-gated schedule")
+if record.get("infrastructure_amendment_sha256") != "@@AMENDMENT_SHA256@@":
+    raise SystemExit("CPU gate covered a different infrastructure amendment")
 PY
 
 git -C "$PROJECT" rev-parse HEAD > "$ARTIFACT_DIR/project-commit.txt"
@@ -167,9 +236,9 @@ test ! -s "$ARTIFACT_DIR/project-status.txt"
 git -C "$PROJECT" rev-list -n 1 qwen32b-qualification-v1 > "$ARTIFACT_DIR/qwen32b-freeze-tag-target.txt"
 test "$(sed -n '1p' "$ARTIFACT_DIR/qwen32b-freeze-tag-target.txt")" = ba039a0eaddc358d6b7174260c3b3c36169c44c0
 sha256sum "$0" "$SUITE" "$SUITE_REFERENCE" "$TASK" "$FREEZE" \
-    "$PROJECT/qualification/qwen36-v1/qualification-agent-config.json" \
+    "$INFRASTRUCTURE_AMENDMENT" "$AGENT_CONFIG_SOURCE" \
     "$PROJECT/qualification/qwen36-v1/qualification-seeds.json" \
-    "$PORT_HELPER" \
+    "$PORT_HELPER" "$SERVER_LIFECYCLE_HELPER" \
     > "$ARTIFACT_DIR/runtime-input-hashes.txt"
 printf '%s\n' "$TASK_ID" > "$ARTIFACT_DIR/task-id.txt"
 printf '%s\n' "$TASK_ROLE" > "$ARTIFACT_DIR/task-role.txt"
@@ -356,6 +425,8 @@ set +e
     --model "$MODEL_ID" \
     --tokenizer-path "$MODEL" \
     --mini-python "$MINI_PY" \
+    --agent-config-source "$AGENT_CONFIG_SOURCE" \
+    --infrastructure-amendment "$INFRASTRUCTURE_AMENDMENT" \
     --seed "$TASK_SEED" \
     --agent-timeout 600 \
     --server-pid "$SERVER_PID" \
@@ -365,9 +436,13 @@ set +e
 runner_status=$?
 set -e
 printf '%s\n' "$runner_status" > "$ARTIFACT_DIR/qualification-runner.exit"
-wait "$SERVER_PID" 2>/dev/null || true
-SERVER_PID=
-test "$runner_status" -eq 0
+set +e
+cleanup_server
+server_shutdown_status=$?
+set -e
+if [ "$runner_status" -ne 0 ]; then exit "$runner_status"; fi
+if [ "$server_shutdown_status" -ne 0 ]; then exit 2; fi
+exit 0
 '''
 
 
@@ -376,6 +451,7 @@ def render(
     seed: int,
     freeze_sha256: str,
     *,
+    amendment_sha256: str | None = None,
     technical_rerun: bool = False,
 ) -> str:
     role = "primary" if task_id in PRIMARY_TASKS else "reserve"
@@ -385,11 +461,12 @@ def render(
     if technical_rerun:
         if task_id != TECHNICAL_RERUN_TASK:
             raise ValueError("the frozen technical rerun is only valid for qnm-p01")
-        job_name += "-tr1"
+        job_name += "-tr25963r1"
         rerun_metadata = "\n".join(
             (
                 f"TECHNICAL_RERUN_OF={TECHNICAL_RERUN_OF}",
                 f"TECHNICAL_RERUN_NUMBER={TECHNICAL_RERUN_NUMBER}",
+                f"TECHNICAL_ROOT_QUALIFICATION={TECHNICAL_ROOT_QUALIFICATION}",
                 f"QUALIFICATION_TASK_ID={task_id}",
                 f"QUALIFICATION_SEED={seed}",
             )
@@ -400,13 +477,17 @@ def render(
                 '"$ARTIFACT_DIR/technical-rerun-of.txt"',
                 "printf '%s\\n' \"$TECHNICAL_RERUN_NUMBER\" > "
                 '"$ARTIFACT_DIR/technical-rerun-number.txt"',
+                "printf '%s\\n' \"$TECHNICAL_ROOT_QUALIFICATION\" > "
+                '"$ARTIFACT_DIR/technical-root-qualification.txt"',
                 "printf '%s\\n' \"$QUALIFICATION_TASK_ID\" > "
                 '"$ARTIFACT_DIR/qualification-task-id.txt"',
                 "printf '%s\\n' \"$QUALIFICATION_SEED\" > "
                 '"$ARTIFACT_DIR/qualification-seed.txt"',
             )
         )
+    amendment_sha256 = amendment_sha256 or sha256_file(ROOT / INFRASTRUCTURE_AMENDMENT)
     values = {
+        "@@AMENDMENT_SHA256@@": amendment_sha256,
         "@@CPU_GATE@@": CPU_GATE,
         "@@FREEZE_SHA256@@": freeze_sha256,
         "@@JOB_NAME@@": job_name,
@@ -434,12 +515,26 @@ def main() -> int:
     )
     arguments = parser.parse_args()
     freeze_path = ROOT / QUALIFICATION_FREEZE
-    validation = validate_freeze_manifest(ROOT, freeze_path)
+    amendment_path = ROOT / INFRASTRUCTURE_AMENDMENT
+    validation = validate_freeze_manifest(
+        ROOT,
+        freeze_path,
+        infrastructure_amendment=amendment_path,
+    )
     if validation["sha256"] != arguments.freeze_sha256:
         raise RuntimeError("provided freeze digest differs from final manifest")
     schedule = validate_seed_schedule(ROOT / SEED_SCHEDULE)["seeds"]
     rendered = [
-        (task_id, output, render(task_id, schedule[task_id], arguments.freeze_sha256))
+        (
+            task_id,
+            output,
+            render(
+                task_id,
+                schedule[task_id],
+                arguments.freeze_sha256,
+                amendment_sha256=validation["infrastructure_amendment_sha256"],
+            ),
+        )
         for task_id, output in OUTPUTS.items()
     ]
     rendered.append(
@@ -450,6 +545,7 @@ def main() -> int:
                 TECHNICAL_RERUN_TASK,
                 schedule[TECHNICAL_RERUN_TASK],
                 arguments.freeze_sha256,
+                amendment_sha256=validation["infrastructure_amendment_sha256"],
                 technical_rerun=True,
             ),
         )

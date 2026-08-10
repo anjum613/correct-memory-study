@@ -48,6 +48,7 @@ from cmpilot.qwen36_qualification import (  # noqa: E402
     CANDIDATE_MANIFEST_SHA256,
     ENVIRONMENT_CONTENT_DIGEST,
     ENVIRONMENT_FINGERPRINT,
+    INFRASTRUCTURE_AMENDMENT,
     MAX_OUTPUT_TOKENS,
     MINI_SWE_PYTHON,
     PROJECT_ENVIRONMENT_FINGERPRINT,
@@ -66,6 +67,9 @@ from cmpilot.qwen36_qualification import (  # noqa: E402
     validate_seed_schedule,
     write_canonical_json,
 )
+from cmpilot.qualification_runner_preflight import (  # noqa: E402
+    run_qualification_runner_preflight,
+)
 from cmpilot.qualification import artifact_manifest  # noqa: E402
 from cmpilot.qualification_runtime_paths import suite_runtime_path_record  # noqa: E402
 from scripts.qualification_cpu_gate import _task_gate  # noqa: E402
@@ -80,7 +84,30 @@ from scripts.qwen36_server_port import (  # noqa: E402
 )
 
 
-DEFAULT_OUTPUT = QWEN36_ARTIFACT_ROOT / "cpu-preflight-qualification-port-fix-25953-v2"
+DEFAULT_OUTPUT = QWEN36_ARTIFACT_ROOT / "cpu-preflight-qualification-harness-fix-25963"
+ALLOWED_INFRASTRUCTURE_CHANGE_PATHS = {
+    "qualification/qwen36-v1/infrastructure-amendment-25963.json",
+    "qualification/qwen36-v1/technical-invalid-qualification-25963.json",
+    "scripts/generate_qwen36_qualification_batches.py",
+    "scripts/qwen36_qualification_cpu_gate.py",
+    "scripts/qwen36_server_lifecycle.py",
+    "scripts/run_qualification_task.py",
+    "scripts/submit_qwen36_qualification.py",
+    "slurm/qwen36_qnm_p01_interval_merge.sbatch",
+    "slurm/qwen36_qnm_p01_interval_merge_technical_rerun_25963_1.sbatch",
+    "slurm/qwen36_qnm_p02_shipment_summary.sbatch",
+    "slurm/qwen36_qnm_p03_page_window.sbatch",
+    "slurm/qwen36_qnm_p04_record_parser.sbatch",
+    "slurm/qwen36_qnm_p05_event_replay.sbatch",
+    "slurm/qwen36_qnm_r01_dependency_order.sbatch",
+    "slurm/qwen36_qnm_r02_ledger_transfer.sbatch",
+    "src/cmpilot/qualification_runner.py",
+    "src/cmpilot/qualification_runner_preflight.py",
+    "src/cmpilot/qwen36_qualification.py",
+    "tests/test_qwen36_dynamic_port.py",
+    "tests/test_qwen36_qualification.py",
+    "tests/test_qwen36_qualification_harness.py",
+}
 _TEST_SUMMARY = re.compile(
     r"(?P<passed>\d+) passed(?:, (?P<failed>\d+) failed)?"
     r"(?:, (?P<skipped>\d+) skipped)?"
@@ -166,6 +193,7 @@ def _batch_path(task_id: str) -> Path:
 def _batch_gate(
     output: Path,
     *,
+    amendment_sha256: str,
     freeze_sha256: str,
     seeds: dict[str, int],
 ) -> dict[str, Any]:
@@ -189,6 +217,7 @@ def _batch_gate(
             f"TASK_ID={task_id}",
             f"TASK_SEED={seeds[task_id]}",
             f"EXPECTED_FREEZE_SHA256={freeze_sha256}",
+            f"EXPECTED_AMENDMENT_SHA256={amendment_sha256}",
             "--dtype bfloat16",
             "--tensor-parallel-size 2",
             "--max-model-len 32768",
@@ -201,6 +230,7 @@ def _batch_gate(
             'MINI_PY=/home/s224049759/environments/mini-swe-agent-smoke/bin/python',
             'VLLM_PY=/home/s224049759/environments/qwen36-vllm-v1/bin/python',
             "PORT_HELPER=$PROJECT/scripts/qwen36_server_port.py",
+            "SERVER_LIFECYCLE_HELPER=$PROJECT/scripts/qwen36_server_lifecycle.py",
             "MAX_SERVER_BIND_ATTEMPTS=4",
             'BASE_URL=http://127.0.0.1:$PORT',
             "classify-bind-failure",
@@ -208,6 +238,10 @@ def _batch_gate(
             'PORT_LOCK_ROOT=/tmp/cmq-qwen36-$UID-ports',
             "/usr/bin/flock --exclusive --nonblock",
             "ACTIVE_ENDPOINT_CLAIM_RETRY",
+            '--agent-config-source "$AGENT_CONFIG_SOURCE"',
+            '--infrastructure-amendment "$INFRASTRUCTURE_AMENDMENT"',
+            'cleanup_server\nserver_shutdown_status=$?',
+            'if [ "$runner_status" -ne 0 ]; then exit "$runner_status"; fi',
         )
         forbidden = (
             "pip install",
@@ -253,12 +287,33 @@ def _batch_gate(
                 and "ACTIVE_ENDPOINT_CLAIM_RETRY" in text
                 and "release_port_claim" in text
             ),
+            "bounded_server_lifecycle": (
+                "--term-timeout-seconds 30" in text
+                and "--kill-timeout-seconds 10" in text
+                and "server-shutdown-result.json" in text
+                and "server-shutdown.exit" in text
+                and "outer-finalizer-result.json" in text
+                and "wait \"$SERVER_PID\" 2>/dev/null || true" in text
+                and text.index("cleanup_server\nserver_shutdown_status=$?")
+                < text.index('if [ "$runner_status" -ne 0 ]; then exit "$runner_status"; fi')
+            ),
+            "dimensional_exit_evidence": all(
+                item in text
+                for item in (
+                    "qualification-runner.exit",
+                    "server-shutdown.exit",
+                    "outer-finalizer-result.json",
+                    "batch-primary-exit-code.txt",
+                    "batch-exit-code.txt",
+                    "artifact-manifest.exit",
+                )
+            ),
         }
         row["pass"] = syntax["exit_code"] == 0 and all(
             value for key, value in row.items() if isinstance(value, bool)
         )
         rows.append(row)
-    rerun_path = ROOT / "slurm/qwen36_qnm_p01_interval_merge_technical_rerun_1.sbatch"
+    rerun_path = ROOT / "slurm/qwen36_qnm_p01_interval_merge_technical_rerun_25963_1.sbatch"
     rerun_text = rerun_path.read_text(encoding="utf-8")
     rerun_syntax = run(
         ("/usr/bin/bash", "-n", str(rerun_path)),
@@ -270,8 +325,9 @@ def _batch_gate(
         "sha256": sha256_file(rerun_path),
         "syntax_exit_code": rerun_syntax["exit_code"],
         "lineage": (
-            "TECHNICAL_RERUN_OF=25953" in rerun_text
+            "TECHNICAL_RERUN_OF=25963" in rerun_text
             and "TECHNICAL_RERUN_NUMBER=1" in rerun_text
+            and "TECHNICAL_ROOT_QUALIFICATION=25953" in rerun_text
             and "QUALIFICATION_TASK_ID=qnm-p01-interval-merge" in rerun_text
             and "QUALIFICATION_SEED=1602021252" in rerun_text
         ),
@@ -322,9 +378,19 @@ def main() -> int:
     }
     try:
         freeze_path = ROOT / QUALIFICATION_FREEZE
-        freeze = validate_freeze_manifest(ROOT, freeze_path)
+        amendment_path = ROOT / INFRASTRUCTURE_AMENDMENT
+        freeze = validate_freeze_manifest(
+            ROOT,
+            freeze_path,
+            infrastructure_amendment=amendment_path,
+        )
         result["qualification_freeze_sha256"] = freeze["sha256"]
+        result["infrastructure_amendment_sha256"] = sha256_file(amendment_path)
         result["checks"]["qualification_freeze_manifest"] = freeze["pass"] is True
+        result["checks"]["infrastructure_amendment"] = (
+            freeze["infrastructure_amendment_sha256"]
+            == result["infrastructure_amendment_sha256"]
+        )
 
         candidate_sha = sha256_file(ROOT / CANDIDATE_MANIFEST)
         suite_sha = sha256_file(ROOT / SUITE_REFERENCE)
@@ -378,6 +444,36 @@ def main() -> int:
             == "FIXED_PORT_ADDRESS_ALREADY_IN_USE"
             and technical_invalid.get("repository_competence") == "NOT_SCORED"
             and is_explicit_pre_model_address_in_use(technical_stderr, 1)
+        )
+
+        technical_25963_path = (
+            ROOT / "qualification/qwen36-v1/technical-invalid-qualification-25963.json"
+        )
+        technical_25963 = load_json(technical_25963_path)
+        technical_25963_stderr_path = (
+            QWEN36_ARTIFACT_ROOT
+            / "tasks/qnm-p01-interval-merge/jobs/25963/qualification-runner.stderr"
+        )
+        technical_25963_stderr = technical_25963_stderr_path.read_text(
+            encoding="utf-8", errors="replace"
+        )
+        result["technical_invalid_25963"] = {
+            "path": str(technical_25963_path),
+            "sha256": sha256_file(technical_25963_path),
+            "stderr_path": str(technical_25963_stderr_path),
+        }
+        result["checks"]["job_25963_preserved_as_technical_invalid"] = bool(
+            technical_25963.get("slurm_job_id") == "25963"
+            and technical_25963.get("task_id") == "qnm-p01-interval-merge"
+            and technical_25963.get("seed") == 1602021252
+            and technical_25963.get("technical_validity") == "FAIL"
+            and technical_25963.get("technical_failure_class")
+            == "PRE_AGENT_HARNESS_CONFIG_INTERFACE_FAILURE"
+            and technical_25963.get("technical_failure_detail")
+            == "ADAPTER_CONFIG_MISSING_AGENT_CONFIG_SOURCE"
+            and technical_25963.get("repository_competence") == "NOT_SCORED"
+            and "AttributeError: 'AdapterConfig' object has no attribute "
+            "'agent_config_source'" in technical_25963_stderr
         )
 
         metadata = load_json(ROOT / "qualification/qwen36-v1/model-metadata.json")
@@ -523,6 +619,19 @@ def main() -> int:
             and sampling_pass
         )
 
+        actual_runner_directory = output / "actual-qualification-runner-mock"
+        actual_runner = run_qualification_runner_preflight(
+            ROOT,
+            actual_runner_directory,
+        )
+        result["actual_qualification_runner_mock"] = actual_runner
+        result["checks"]["actual_qualification_runner_request_boundary"] = bool(
+            actual_runner.get("pass") is True
+            and actual_runner.get("runner_exit_code") == 0
+            and actual_runner.get("mock_request_count") == 3
+            and all(actual_runner.get("checks", {}).values())
+        )
+
         recorded_reference = load_json(ROOT / SUITE_REFERENCE)
         observed_reference = build_suite_reference(ROOT)
         write_canonical_json(output / "suite-reference-observed.json", observed_reference)
@@ -585,6 +694,7 @@ def main() -> int:
                 "tests/test_qwen36_interpreter_contract.py",
                 "tests/test_qwen36_smoke_infrastructure.py",
                 "tests/test_qwen36_qualification.py",
+                "tests/test_qwen36_qualification_harness.py",
                 "tests/test_qwen36_dynamic_port.py",
                 "tests/test_openai_transport.py",
                 "tests/test_mini_swe_config.py",
@@ -680,7 +790,12 @@ def main() -> int:
             and all(len(set(ports)) == MAX_BIND_ATTEMPTS for ports in simulated_schedules.values())
         )
 
-        batches = _batch_gate(output, freeze_sha256=freeze["sha256"], seeds=seeds)
+        batches = _batch_gate(
+            output,
+            amendment_sha256=result["infrastructure_amendment_sha256"],
+            freeze_sha256=freeze["sha256"],
+            seeds=seeds,
+        )
         result["batches"] = batches
         result["checks"]["all_seven_batches_and_controller_preparation"] = batches[
             "pass"
@@ -694,6 +809,7 @@ def main() -> int:
             and "duplicate Qwen3.6 qualification evidence exists" in submit_text
             and "reserves are permitted only for exactly 3/5" in submit_text
             and "treatment\": \"no_memory" in submit_text
+            and "only technical rerun 1 of job 25963 is authorized" in submit_text
         )
 
         smoke = load_json(ROOT / SMOKE_RESULT)
@@ -726,9 +842,24 @@ def main() -> int:
         result["checks"]["git_diff_check"] = diff["exit_code"] == 0
         status = git("status", "--short")
         result["git_status_short"] = status.stdout
-        result["checks"]["clean_project_worktree"] = (
-            status.returncode == 0 and not status.stdout
+        changed_paths = {
+            line[3:].strip()
+            for line in status.stdout.splitlines()
+            if len(line) >= 4
+        }
+        result["controlled_infrastructure_change_paths"] = sorted(changed_paths)
+        result["checks"]["controlled_infrastructure_change_set"] = (
+            status.returncode == 0
+            and changed_paths.issubset(ALLOWED_INFRASTRUCTURE_CHANGE_PATHS)
         )
+        infrastructure_hash_paths = sorted(
+            path
+            for path in ALLOWED_INFRASTRUCTURE_CHANGE_PATHS
+            if (ROOT / path).is_file()
+        )
+        result["infrastructure_source_hashes"] = {
+            path: sha256_file(ROOT / path) for path in infrastructure_hash_paths
+        }
         result["checks"]["cpu_only"] = os.environ.get("CUDA_VISIBLE_DEVICES", "") in {
             "",
             "-1",

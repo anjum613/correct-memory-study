@@ -27,6 +27,8 @@ def main() -> int:
     parser.add_argument("--base-url", required=True)
     parser.add_argument("--model", required=True)
     parser.add_argument("--mini-python", required=True)
+    parser.add_argument("--agent-config-source", type=Path, required=True)
+    parser.add_argument("--infrastructure-amendment", type=Path)
     parser.add_argument("--tokenizer-path")
     parser.add_argument("--seed", type=int)
     parser.add_argument("--suite-reference", type=Path)
@@ -44,6 +46,8 @@ def main() -> int:
             base_url=arguments.base_url,
             model=arguments.model,
             mini_python=arguments.mini_python,
+            agent_config_source=arguments.agent_config_source,
+            infrastructure_amendment=arguments.infrastructure_amendment,
             tokenizer_path=arguments.tokenizer_path,
             seed=arguments.seed,
             suite_reference=arguments.suite_reference,

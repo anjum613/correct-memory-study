@@ -34,6 +34,7 @@ from cmpilot.qwen36_qualification import (  # noqa: E402
     ALL_TASKS,
     ENVIRONMENT_CONTENT_DIGEST,
     ENVIRONMENT_FINGERPRINT,
+    INFRASTRUCTURE_AMENDMENT,
     PRIMARY_TASKS,
     QUALIFICATION_FREEZE,
     QWEN36_ARTIFACT_ROOT,
@@ -56,13 +57,14 @@ from scripts.qwen36_server_port import (  # noqa: E402
 
 SQUEUE = Path("/slurm/bin/squeue")
 SACCT = Path("/slurm/bin/sacct")
-CPU_GATE = QWEN36_ARTIFACT_ROOT / "cpu-preflight-qualification-port-fix-25953-v2"
+CPU_GATE = QWEN36_ARTIFACT_ROOT / "cpu-preflight-qualification-harness-fix-25963"
 TECHNICAL_INVALID_RECORD = (
-    ROOT / "qualification/qwen36-v1/technical-invalid-qualification-25953.json"
+    ROOT / "qualification/qwen36-v1/technical-invalid-qualification-25963.json"
 )
 TECHNICAL_RERUN_TASK = "qnm-p01-interval-merge"
-TECHNICAL_RERUN_OF = "25953"
+TECHNICAL_RERUN_OF = "25963"
 TECHNICAL_RERUN_NUMBER = 1
+TECHNICAL_ROOT_QUALIFICATION = "25953"
 
 
 def run(argv: tuple[str, ...], *, timeout: int = 180) -> subprocess.CompletedProcess[str]:
@@ -79,13 +81,13 @@ def batch_path(task_id: str, *, technical_rerun: bool = False) -> Path:
     if technical_rerun:
         if task_id != TECHNICAL_RERUN_TASK:
             raise ValueError("only qnm-p01 has a predeclared technical rerun")
-        return ROOT / "slurm/qwen36_qnm_p01_interval_merge_technical_rerun_1.sbatch"
+        return ROOT / "slurm/qwen36_qnm_p01_interval_merge_technical_rerun_25963_1.sbatch"
     return ROOT / "slurm" / f"qwen36_{task_id.replace('-', '_')}.sbatch"
 
 
 def job_name(task_id: str, *, technical_rerun: bool = False) -> str:
     name = "qwen36-" + task_id.replace("qnm-", "")
-    return name + "-tr1" if technical_rerun else name
+    return name + "-tr25963r1" if technical_rerun else name
 
 
 def main() -> int:
@@ -106,7 +108,7 @@ def main() -> int:
         or arguments.technical_rerun_of != TECHNICAL_RERUN_OF
         or arguments.technical_rerun_number != TECHNICAL_RERUN_NUMBER
     ):
-        raise RuntimeError("only technical rerun 1 of job 25953 is authorized")
+        raise RuntimeError("only technical rerun 1 of job 25963 is authorized")
     role = "primary" if task_id in PRIMARY_TASKS else "reserve"
     if task_id in RESERVE_TASKS:
         if arguments.primary_decision is None:
@@ -118,7 +120,12 @@ def main() -> int:
             raise RuntimeError("reserves are permitted only for exactly 3/5 primary passes")
 
     freeze_path = (ROOT / QUALIFICATION_FREEZE).resolve(strict=True)
-    freeze = validate_freeze_manifest(ROOT, freeze_path)
+    amendment_path = (ROOT / INFRASTRUCTURE_AMENDMENT).resolve(strict=True)
+    freeze = validate_freeze_manifest(
+        ROOT,
+        freeze_path,
+        infrastructure_amendment=amendment_path,
+    )
     schedule = validate_seed_schedule(ROOT / SEED_SCHEDULE)["seeds"]
     seed = schedule[task_id]
     cpu_path = CPU_GATE / "cpu-preflight-result.json"
@@ -127,6 +134,8 @@ def main() -> int:
         raise RuntimeError("Qwen3.6 post-freeze CPU gate is not an all-check PASS")
     if cpu.get("qualification_freeze_sha256") != freeze["sha256"]:
         raise RuntimeError("CPU gate covered a different qualification freeze")
+    if cpu.get("infrastructure_amendment_sha256") != sha256_file(amendment_path):
+        raise RuntimeError("CPU gate covered a different infrastructure amendment")
     if cpu.get("seeds", {}).get(task_id) != seed:
         raise RuntimeError("CPU gate covered a different task seed")
 
@@ -165,12 +174,16 @@ def main() -> int:
         'RUNTIME_SCRATCH=/tmp/cmq-$SLURM_JOB_ID',
         "MAX_SERVER_BIND_ATTEMPTS=4",
         "qwen36_server_port.py",
+        "qwen36_server_lifecycle.py",
         "--host 127.0.0.1",
+        "--agent-config-source \"$AGENT_CONFIG_SOURCE\"",
+        "--infrastructure-amendment \"$INFRASTRUCTURE_AMENDMENT\"",
     )
     if technical_rerun:
         required += (
             f"TECHNICAL_RERUN_OF={TECHNICAL_RERUN_OF}",
             f"TECHNICAL_RERUN_NUMBER={TECHNICAL_RERUN_NUMBER}",
+            f"TECHNICAL_ROOT_QUALIFICATION={TECHNICAL_ROOT_QUALIFICATION}",
             f"QUALIFICATION_TASK_ID={task_id}",
             f"QUALIFICATION_SEED={seed}",
         )
@@ -228,12 +241,12 @@ def main() -> int:
             "task_id": TECHNICAL_RERUN_TASK,
             "seed": seed,
             "technical_validity": "FAIL",
-            "technical_failure_class": "PRE_MODEL_LOAD_SERVER_BIND_FAILURE",
-            "technical_failure_detail": "FIXED_PORT_ADDRESS_ALREADY_IN_USE",
+            "technical_failure_class": "PRE_AGENT_HARNESS_CONFIG_INTERFACE_FAILURE",
+            "technical_failure_detail": "ADAPTER_CONFIG_MISSING_AGENT_CONFIG_SOURCE",
             "repository_competence": "NOT_SCORED",
         }
         if any(audit.get(key) != value for key, value in required_audit.items()):
-            raise RuntimeError("job-25953 technical-invalid audit record is not authoritative")
+            raise RuntimeError("job-25963 technical-invalid audit record is not authoritative")
         other_primary_names = {
             job_name(other)
             for other in PRIMARY_TASKS
@@ -259,7 +272,7 @@ def main() -> int:
         if (
             active
             or historical
-            or existing_artifacts != [TECHNICAL_RERUN_OF]
+            or existing_artifacts != [TECHNICAL_ROOT_QUALIFICATION, TECHNICAL_RERUN_OF]
             or submission.exists()
             or preflight.exists()
             or active_other_primaries
@@ -324,6 +337,7 @@ def main() -> int:
         "environment_content_digest": ENVIRONMENT_CONTENT_DIGEST,
         "environment_fingerprint": ENVIRONMENT_FINGERPRINT,
         "freeze_manifest_sha256": freeze["sha256"],
+        "infrastructure_amendment_sha256": sha256_file(amendment_path),
         "historical_matching_jobs": historical,
         "model": {"id": MODEL_ID, "revision": MODEL_REVISION, "snapshot": str(MODEL_SNAPSHOT)},
         "pass": True,
@@ -343,6 +357,7 @@ def main() -> int:
             {
                 "number": TECHNICAL_RERUN_NUMBER,
                 "of": TECHNICAL_RERUN_OF,
+                "root_qualification": TECHNICAL_ROOT_QUALIFICATION,
                 "technical_invalid_record": str(TECHNICAL_INVALID_RECORD),
                 "technical_invalid_record_sha256": sha256_file(TECHNICAL_INVALID_RECORD),
             }
@@ -377,6 +392,7 @@ def main() -> int:
         "environment_content_digest": ENVIRONMENT_CONTENT_DIGEST,
         "environment_fingerprint": ENVIRONMENT_FINGERPRINT,
         "freeze_manifest_sha256": freeze["sha256"],
+        "infrastructure_amendment_sha256": sha256_file(amendment_path),
         "model": {"id": MODEL_ID, "revision": MODEL_REVISION},
         "project_commit": commit.stdout.strip(),
         "role": role,
@@ -410,6 +426,7 @@ def main() -> int:
             {
                 "number": TECHNICAL_RERUN_NUMBER,
                 "of": TECHNICAL_RERUN_OF,
+                "root_qualification": TECHNICAL_ROOT_QUALIFICATION,
             }
             if technical_rerun
             else None
