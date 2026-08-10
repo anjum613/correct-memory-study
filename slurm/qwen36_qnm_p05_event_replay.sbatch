@@ -31,7 +31,7 @@ TASK=$PROJECT/qualification/qwen32b-v1/tasks/$TASK_ID.json
 FREEZE=$PROJECT/qualification/qwen36-v1/qualification-freeze-manifest.json
 EXPECTED_FREEZE_SHA256=7c8e22bcdd6d2e264ed205310b584df3643e5499e01e354b71779fc3fdcfca91
 INFRASTRUCTURE_AMENDMENT=$PROJECT/qualification/qwen36-v1/infrastructure-amendment-25963.json
-EXPECTED_AMENDMENT_SHA256=e788c6caa9af265c31a7cdde5e9a3b88bf9601ef825a34d0ad352f534cfe6c1b
+EXPECTED_AMENDMENT_SHA256=9d266adb2af0a32cb87dd824d9a6a8fbdab86ae4f60dbba7c7ee4e8eab4d72ba
 AGENT_CONFIG_SOURCE=$PROJECT/qualification/qwen36-v1/qualification-agent-config.json
 CPU_GATE=/home/s224049759/run-artifacts/qwen36-no-memory-qualification/v1/cpu-preflight-qualification-harness-fix-25963/cpu-preflight-result.json
 ENV_FINGERPRINT=$PROJECT/qualification/qwen36-v1/environment-fingerprint.json
@@ -184,7 +184,7 @@ if record.get("overall") != "PASS" or not all(record.get("checks", {}).values())
     raise SystemExit("Qwen3.6 post-freeze CPU gate is not PASS")
 if record.get("seeds", {}).get(sys.argv[2]) != int(sys.argv[3]):
     raise SystemExit("task seed differs from CPU-gated schedule")
-if record.get("infrastructure_amendment_sha256") != "e788c6caa9af265c31a7cdde5e9a3b88bf9601ef825a34d0ad352f534cfe6c1b":
+if record.get("infrastructure_amendment_sha256") != "9d266adb2af0a32cb87dd824d9a6a8fbdab86ae4f60dbba7c7ee4e8eab4d72ba":
     raise SystemExit("CPU gate covered a different infrastructure amendment")
 PY
 

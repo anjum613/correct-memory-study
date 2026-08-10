@@ -57,7 +57,7 @@ from scripts.qwen36_server_port import (  # noqa: E402
 
 SQUEUE = Path("/slurm/bin/squeue")
 SACCT = Path("/slurm/bin/sacct")
-CPU_GATE = QWEN36_ARTIFACT_ROOT / "cpu-preflight-qualification-harness-fix-25963"
+CPU_GATE = QWEN36_ARTIFACT_ROOT / "cpu-preflight-qualification-harness-fix-25963-ready"
 TECHNICAL_INVALID_RECORD = (
     ROOT / "qualification/qwen36-v1/technical-invalid-qualification-25963.json"
 )
