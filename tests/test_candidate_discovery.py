@@ -26,6 +26,12 @@ SOURCE_SCHEMA = (
     ROOT / "benchmark-selection/discovery/v0.1/source-list.schema.json"
 )
 DISCOVERY_SCRIPT = ROOT / "scripts/discover_candidates.py"
+REAL_SNAPSHOT = (
+    ROOT
+    / "benchmark-selection/discovery/v0.1/snapshots/"
+    "github-python-2024-medium-001"
+)
+REAL_LEDGER = ROOT / "benchmark-selection/candidate-ledger.jsonl"
 
 
 def _write_json(path: Path, value: object) -> None:
@@ -307,3 +313,28 @@ def test_capture_and_materialization_refuse_overwrite(tmp_path: Path) -> None:
             snapshot_directory=snapshot,
             ledger_path=ledger,
         )
+
+
+def test_checked_in_first_discovery_snapshot_verifies_offline() -> None:
+    verification = verify_snapshot(
+        project_root=ROOT,
+        query_path=FROZEN_QUERY,
+        snapshot_directory=REAL_SNAPSHOT,
+        ledger_path=REAL_LEDGER,
+    )
+    records = [
+        json.loads(line)
+        for line in REAL_LEDGER.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+
+    assert verification["candidate_count"] == 8
+    assert verification["network_accessed"] is False
+    assert all(record["current_state"] == "DISCOVERED" for record in records)
+    assert all(record["trust_family"] is None for record in records)
+    assert all(record["mechanism_key"] is None for record in records)
+    assert all(
+        {gate["status"] for gate in record["hard_gates"].values()}
+        == {"NOT_ASSESSED"}
+        for record in records
+    )

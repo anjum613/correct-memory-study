@@ -44,10 +44,21 @@ whether a human mechanism argument is scientifically persuasive.
 - `mechanism-card-template.yaml`: construction record for one proposed triplet.
 - `reviewer-form.md`: independent outcome-blind review form.
 - `replacement-policy.md`: objective reserve and replacement rules.
-- `candidate-ledger.jsonl`: versioned candidate records; currently empty.
+- `candidate-ledger.jsonl`: versioned candidate records; currently eight raw
+  `DISCOVERED` records from `github-python-2024-medium-001`, with no screening,
+  mechanism assignment, gate passage, scoring, or selection.
 - `discovery/v0.1/`: frozen query, source-list contract, and immutable captures.
 - `../scripts/discover_candidates.py`: capture, materialize, and verify command.
 
 The benchmark is not frozen merely because the ledger validates. Freeze also
 requires the approvals, executable evidence, hashes, and absence-of-treatment-
 results certification specified in the protocol.
+
+## Current discovery status
+
+The first source snapshot is
+`discovery/v0.1/snapshots/github-python-2024-medium-001/`. Its query was
+committed before capture. All eight API results were imported in source order.
+The snapshot and ledger certify `treatment_results_consulted: false`; every
+hard gate is `NOT_ASSESSED`, and no candidate is accepted, excluded, eligible,
+selected, reserved, or frozen.
