@@ -28,3 +28,24 @@ Any transition from provisional to frozen must record the inspected completed
 job identity, its technical-validity decision, the final runner configuration,
 all relevant hashes, and a certification that benchmark selection did not use
 memory-treatment outcomes.
+
+## PC-002 — raw discovery records precede mechanism assignment
+
+- Effective timestamp: `2026-08-12T14:35:12Z`
+- Applies to: candidate discovery and mechanism screening
+- Status: `APPLIED_PROSPECTIVELY_BEFORE_DISCOVERY`
+- Candidate discovery begun: `NO`
+- Candidate screening or construction begun: `NO`
+- Benchmark selection or treatment begun: `NO`
+- Treatment assignments or outcomes viewed: `NO`
+
+The original v0.1 schema required a trust family and mechanism key even in the
+initial `DISCOVERED` state. That would force an unsupported scientific judgment
+during mechanical repository discovery. A raw discovered repository may now
+record both fields as null. Both fields remain mandatory from
+`MECHANISM_REVIEW_PASSED` onward. No state transition, gate, stratum, score,
+cap, replacement rule, treatment definition, or outcome rule changes.
+
+The first discovery query and pipeline are committed before any live source
+response is captured. This entry therefore changes no observed candidate,
+screening decision, selected set, treatment assignment, or result.

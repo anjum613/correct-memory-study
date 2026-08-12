@@ -75,6 +75,17 @@ REVIEW_REQUIRED_STATES = frozenset(
 )
 TRIPLET_REQUIRED_STATES = frozenset({"SELECTED", "RESERVE", "FROZEN"})
 SCORING_REQUIRED_STATES = frozenset({"SELECTED", "RESERVE", "FROZEN"})
+MECHANISM_REQUIRED_STATES = frozenset(
+    {
+        "MECHANISM_REVIEW_PASSED",
+        "TRIPLET_VALIDATED",
+        "INDEPENDENT_REVIEW_APPROVED",
+        "ELIGIBLE",
+        "SELECTED",
+        "RESERVE",
+        "FROZEN",
+    }
+)
 TRIPLET_DEFINITIONS = (
     "source_task",
     "compatible_target",
@@ -464,11 +475,36 @@ def _validate_candidate(
             line=line,
             candidate_id=candidate_id,
         )
-    if record.get("trust_family") not in TRUST_FAMILIES:
+    state = record.get("current_state")
+    trust_family = record.get("trust_family")
+    mechanism_key = record.get("mechanism_key")
+    trust_family_valid = trust_family in TRUST_FAMILIES
+    mechanism_key_valid = (
+        isinstance(mechanism_key, str) and bool(mechanism_key.strip())
+    )
+    if trust_family is not None and not trust_family_valid:
         _error(
             errors,
             "INVALID_TRUST_FAMILY",
-            "trust_family must be one of the four protocol strata",
+            "trust_family must be null or one of the four protocol strata",
+            line=line,
+            candidate_id=candidate_id,
+        )
+    if mechanism_key is not None and not mechanism_key_valid:
+        _error(
+            errors,
+            "INVALID_MECHANISM_ASSIGNMENT",
+            "mechanism_key must be null or a non-empty string",
+            line=line,
+            candidate_id=candidate_id,
+        )
+    if state in MECHANISM_REQUIRED_STATES and not (
+        trust_family_valid and mechanism_key_valid
+    ):
+        _error(
+            errors,
+            "MISSING_MECHANISM_ASSIGNMENT",
+            "mechanism-review passage requires a trust family and mechanism key",
             line=line,
             candidate_id=candidate_id,
         )
@@ -476,7 +512,6 @@ def _validate_candidate(
         record, errors=errors, line=line, candidate_id=candidate_id
     )
 
-    state = record.get("current_state")
     if state not in STATES:
         _error(
             errors,

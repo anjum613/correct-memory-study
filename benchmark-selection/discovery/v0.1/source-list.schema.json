@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/correct-memory-study/benchmark-selection/discovery-source-list-v0.1.schema.json",
+  "title": "Correct Memory discovery source list v0.1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "protocol_version",
+    "source_list_id",
+    "inclusion_policy",
+    "query",
+    "capture",
+    "candidate_count",
+    "candidates",
+    "screening_status",
+    "treatment_results_consulted"
+  ],
+  "properties": {
+    "schema": {"const": "candidate-discovery-source-list-v0.1"},
+    "protocol_version": {"const": "benchmark-selection-v0.1"},
+    "source_list_id": {"type": "string", "minLength": 1},
+    "inclusion_policy": {"const": "ALL_RETURNED_ITEMS_IN_API_ORDER"},
+    "query": {"$ref": "#/$defs/artifact"},
+    "capture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["manifest", "started_at_utc", "completed_at_utc"],
+      "properties": {
+        "manifest": {"$ref": "#/$defs/artifact"},
+        "started_at_utc": {"type": "string", "format": "date-time"},
+        "completed_at_utc": {"type": "string", "format": "date-time"}
+      }
+    },
+    "candidate_count": {"type": "integer", "minimum": 1},
+    "candidates": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "candidate_id",
+          "position",
+          "source",
+          "normalized_metadata",
+          "raw_evidence"
+        ],
+        "properties": {
+          "candidate_id": {"type": "string", "pattern": "^CMVP-CAND-[0-9]{4}$"},
+          "position": {"type": "integer", "minimum": 1},
+          "source": {"type": "object"},
+          "normalized_metadata": {"type": "object"},
+          "raw_evidence": {
+            "type": "array",
+            "minItems": 3,
+            "items": {"$ref": "#/$defs/artifact"}
+          }
+        }
+      }
+    },
+    "screening_status": {"const": "NOT_STARTED"},
+    "treatment_results_consulted": {"const": false}
+  },
+  "$defs": {
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    }
+  }
+}

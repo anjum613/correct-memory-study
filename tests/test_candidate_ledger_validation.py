@@ -164,6 +164,21 @@ def _selected_candidate(candidate_id: str = "CMVP-CAND-0001") -> dict[str, objec
     }
 
 
+def _discovered_candidate() -> dict[str, object]:
+    candidate = _selected_candidate()
+    candidate["current_state"] = "DISCOVERED"
+    candidate["status_history"] = _status_history("DISCOVERED")
+    candidate["trust_family"] = None
+    candidate["mechanism_key"] = None
+    candidate["hard_gates"] = {
+        gate: {"status": "NOT_ASSESSED", "evidence": []}
+        for gate in VALIDATOR.HARD_GATES
+    }
+    for key in ("mechanism_card", "triplet", "independent_review", "scoring"):
+        del candidate[key]
+    return candidate
+
+
 def _freeze(candidate: dict[str, object]) -> None:
     history = candidate["status_history"]
     assert isinstance(history, list)
@@ -223,6 +238,26 @@ def test_schema_records_protocol_states_gates_and_trust_strata() -> None:
 
 def test_empty_initial_ledger_is_valid(tmp_path: Path) -> None:
     assert _validate(tmp_path)["pass"] is True
+
+
+def test_raw_discovered_candidate_may_defer_mechanism_assignment(
+    tmp_path: Path,
+) -> None:
+    assert _validate(tmp_path, _discovered_candidate())["pass"] is True
+
+
+def test_mechanism_review_passage_requires_mechanism_assignment(
+    tmp_path: Path,
+) -> None:
+    candidate = _discovered_candidate()
+    candidate["current_state"] = "MECHANISM_REVIEW_PASSED"
+    candidate["status_history"] = _status_history(
+        "DISCOVERED", "AUTOMATIC_GATES_PASSED", "MECHANISM_REVIEW_PASSED"
+    )
+
+    assert "MISSING_MECHANISM_ASSIGNMENT" in _codes(
+        _validate(tmp_path, candidate)
+    )
 
 
 def test_complete_selected_and_frozen_candidates_are_valid(tmp_path: Path) -> None:

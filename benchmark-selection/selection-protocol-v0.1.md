@@ -17,8 +17,12 @@ earlier decision except through the amendment and replacement rules below.
 
 ## 2. Candidate unit and sources
 
-One candidate is one upstream repository at one immutable commit plus one
-proposed mechanism. Discovery records must contain:
+At `DISCOVERED`, one raw candidate is one upstream repository at one immutable
+commit. `trust_family` and `mechanism_key` remain null unless a mechanism was
+specified by a source independently of screening. Both become mandatory when
+the candidate reaches `MECHANISM_REVIEW_PASSED`. This prevents discovery from
+inventing a mechanism merely to satisfy the record shape. Discovery records
+must contain:
 
 - the versioned query or source-list identifier;
 - forge, canonical repository URL, upstream owner and repository name;
@@ -31,8 +35,11 @@ proposed mechanism. Discovery records must contain:
 Permitted candidate sources are versioned forge/API query exports, archived
 curated lists, and prior source lists whose exact bytes and query parameters
 are preserved. Convenience recommendations may propose a source list but are
-not selection evidence until converted into a reproducible snapshot. This task
-does not execute discovery or clone candidates.
+not selection evidence until converted into a reproducible snapshot. Network
+capture and offline normalization are separate operations. The query is frozen
+before capture; every returned item in the configured page is retained in API
+order. Discovery captures metadata only: it does not clone, install, execute,
+screen, score, or assign a trust mechanism to repositories.
 
 ## 3. Controlled triplet design
 

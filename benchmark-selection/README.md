@@ -17,10 +17,12 @@ The fixed order is:
 8. frozen benchmark;
 9. only then, memory-treatment runs.
 
-`candidate-ledger.jsonl` is initially empty. A candidate may be appended only
-under `selection-protocol-v0.1.md` and `candidate.schema.json`. One line is one
+Records may be appended to `candidate-ledger.jsonl` only under
+`selection-protocol-v0.1.md` and `candidate.schema.json`. One line is one
 candidate record; candidate IDs are unique. Within each record,
-`status_history` is append-only and sequence numbered.
+`status_history` is append-only and sequence numbered. A raw `DISCOVERED`
+record is not a screened, eligible, selected, reserved, or frozen benchmark
+item.
 
 Validate the ledger with existing project Python only:
 
@@ -28,8 +30,9 @@ Validate the ledger with existing project Python only:
 python scripts/validate-candidate-ledger.py
 ```
 
-The validator checks structural and outcome-blindness invariants. It does not
-discover candidates, clone repositories, execute reference patches, or decide
+The ledger validator checks structural and outcome-blindness invariants. The
+separate discovery command captures public forge metadata and materializes raw
+records; it never clones repositories, executes reference patches, or decides
 whether a human mechanism argument is scientifically persuasive.
 
 ## File roles
@@ -42,6 +45,8 @@ whether a human mechanism argument is scientifically persuasive.
 - `reviewer-form.md`: independent outcome-blind review form.
 - `replacement-policy.md`: objective reserve and replacement rules.
 - `candidate-ledger.jsonl`: versioned candidate records; currently empty.
+- `discovery/v0.1/`: frozen query, source-list contract, and immutable captures.
+- `../scripts/discover_candidates.py`: capture, materialize, and verify command.
 
 The benchmark is not frozen merely because the ledger validates. Freeze also
 requires the approvals, executable evidence, hashes, and absence-of-treatment-

@@ -37,11 +37,16 @@
       "$ref": "#/$defs/source"
     },
     "trust_family": {
-      "$ref": "#/$defs/trust_family"
+      "oneOf": [
+        {"$ref": "#/$defs/trust_family"},
+        {"type": "null"}
+      ]
     },
     "mechanism_key": {
-      "type": "string",
-      "minLength": 1
+      "oneOf": [
+        {"type": "string", "minLength": 1},
+        {"type": "null"}
+      ]
     },
     "hard_gates": {
       "$ref": "#/$defs/hard_gates"
@@ -68,6 +73,32 @@
       "const": false
     }
   },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "current_state": {
+            "enum": [
+              "MECHANISM_REVIEW_PASSED",
+              "TRIPLET_VALIDATED",
+              "INDEPENDENT_REVIEW_APPROVED",
+              "ELIGIBLE",
+              "SELECTED",
+              "RESERVE",
+              "FROZEN"
+            ]
+          }
+        },
+        "required": ["current_state"]
+      },
+      "then": {
+        "properties": {
+          "trust_family": {"$ref": "#/$defs/trust_family"},
+          "mechanism_key": {"type": "string", "minLength": 1}
+        }
+      }
+    }
+  ],
   "$defs": {
     "sha256": {
       "type": "string",
