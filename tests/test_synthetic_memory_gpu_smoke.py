@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import subprocess
+import sys
 
 import pytest
 
@@ -355,3 +357,20 @@ def test_submitter_checks_duplicates_before_one_attested_submission() -> None:
     assert "submit_with_controller_attestation" in submitter
     assert '"submitted_job_count": 1' in submitter
     assert "squeue" not in submitter.split("submit_with_controller_attestation(", 1)[1]
+
+
+def test_submitter_loads_when_executed_as_a_script() -> None:
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "scripts/submit_synthetic_memory_gpu_smoke.py"),
+            "--help",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert "Submit exactly one attested synthetic" in completed.stdout

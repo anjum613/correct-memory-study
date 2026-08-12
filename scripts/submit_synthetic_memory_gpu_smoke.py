@@ -12,6 +12,7 @@ import sys
 
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "src"))
 
 from cmpilot.batch_script_attestation import (  # noqa: E402
@@ -42,7 +43,7 @@ from scripts.qwen36_server_port import (  # noqa: E402
 SQUEUE = Path("/slurm/bin/squeue")
 SACCT = Path("/slurm/bin/sacct")
 JOB_NAME = "qwen36-synth-memory-smoke-v1"
-PREFLIGHT = ARTIFACT_ROOT / "cpu-preflight/gpu-smoke-ready/preflight-result.json"
+PREFLIGHT = ARTIFACT_ROOT / "cpu-preflight/gpu-smoke-ready-v2/preflight-result.json"
 SUBMISSION = ARTIFACT_ROOT / "submissions/synthetic-four-condition-v1"
 
 
