@@ -28,6 +28,17 @@ capture is deliberately sequential and small. A failed or rate-limited request
 aborts without creating a completed snapshot; it is never silently retried
 with a changed query.
 
+The derived pagination audit in `audits/` records that the preserved response
+reported 2,420 matches and returned eight page-1 items. The imported eight are
+therefore the complete frozen page, not the complete search universe. The raw
+response and all original capture artifacts remain byte-for-byte unchanged.
+
+`../prospective-v0.1/` contains separately frozen, unexecuted specifications
+for repository-repair tasks, advisory-linked repairs, and trust-boundary
+issue/PR searches. Their source revisions, complete-import rules, ID ranges,
+deduplication, and source-priority policy must be committed before any of those
+sources is fetched or displayed.
+
 Commands use only the standard library:
 
 ```bash

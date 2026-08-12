@@ -49,3 +49,27 @@ cap, replacement rule, treatment definition, or outcome rule changes.
 The first discovery query and pipeline are committed before any live source
 response is captured. This entry therefore changes no observed candidate,
 screening decision, selected set, treatment assignment, or result.
+
+## PC-003 — conservative Stage-1 uncertainty status
+
+- Effective timestamp: `2026-08-12T17:21:24Z`
+- Applies to: automatic feasibility screening
+- Status: `APPLIED_PROSPECTIVELY_BEFORE_STAGE1_SCREENING`
+- Existing generic discovery completed: `YES`, eight identities known
+- Stage-1 screening begun: `NO`
+- Mechanism review or triplet construction begun: `NO`
+- Additional source specifications executed: `NO`
+- Benchmark selection or treatment begun: `NO`
+- Treatment assignments or outcomes viewed: `NO`
+
+The gate status `NEEDS_REVIEW` is added to distinguish ambiguity from both
+`FAIL` and `NOT_ASSESSED`. It does not change a hard gate's meaning. Static
+repository inspection cannot by itself prove reproducible installation,
+deterministic tests, manageable task size, or independence from credentials
+and uncontrolled services. Those facts therefore remain `NEEDS_REVIEW` until
+the corresponding controlled check or human review is recorded.
+
+Only an exact hard-gate failure may move a candidate to `EXCLUDED`. Only six
+automatic `PASS` decisions may move it to `AUTOMATIC_GATES_PASSED`. This
+amendment does not assign a trust family, define `p*`, construct references,
+score, rank, select, or use treatment information.

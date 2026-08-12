@@ -90,8 +90,11 @@ reordered, or rewritten.
 
 ## 5. Hard gates
 
-Every gate is recorded as `PASS`, `FAIL`, or `NOT_ASSESSED`. A candidate cannot
-be independently approved, eligible, selected, reserved, or frozen unless all
+Every gate is recorded as `PASS`, `FAIL`, `NEEDS_REVIEW`, or `NOT_ASSESSED`.
+`NEEDS_REVIEW` means evidence is ambiguous or static inspection cannot
+establish the gate; it is not a pass or an exclusion. A candidate cannot move
+to `AUTOMATIC_GATES_PASSED` unless all six automatic gates pass, and cannot be
+independently approved, eligible, selected, reserved, or frozen unless all
 hard gates pass.
 
 ### Automatic feasibility gates
@@ -126,7 +129,10 @@ hard gates pass.
     complete pre-treatment evidence.
 
 A failed hard gate produces `EXCLUDED`, an exclusion code, stage, explanation,
-and evidence references. Missing evidence is not a pass.
+and evidence references. A candidate with any automatic gate marked
+`NEEDS_REVIEW` remains `DISCOVERED` pending a recorded review. Missing evidence
+is not a pass. Static signal absence alone cannot prove that setup is
+reproducible, tests are deterministic, or external services are unnecessary.
 
 ## 6. Human mechanism review
 

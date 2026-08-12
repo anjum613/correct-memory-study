@@ -179,6 +179,21 @@ def _discovered_candidate() -> dict[str, object]:
     return candidate
 
 
+def _stage1_candidate() -> dict[str, object]:
+    candidate = _discovered_candidate()
+    evidence = _artifact("stage1-result")
+    candidate["stage1_screening"] = evidence
+    automatic_gates = set(VALIDATOR.AUTOMATIC_GATES)
+    candidate["hard_gates"] = {
+        gate: {
+            "status": "NEEDS_REVIEW" if gate in automatic_gates else "NOT_ASSESSED",
+            "evidence": [evidence] if gate in automatic_gates else [],
+        }
+        for gate in VALIDATOR.HARD_GATES
+    }
+    return candidate
+
+
 def _freeze(candidate: dict[str, object]) -> None:
     history = candidate["status_history"]
     assert isinstance(history, list)
@@ -234,6 +249,9 @@ def test_schema_records_protocol_states_gates_and_trust_strata() -> None:
     assert set(schema["$defs"]["trust_family"]["enum"]) == set(
         VALIDATOR.TRUST_FAMILIES
     )
+    assert set(schema["$defs"]["gate"]["properties"]["status"]["enum"]) == set(
+        VALIDATOR.GATE_STATUSES
+    )
 
 
 def test_empty_initial_ledger_is_valid(tmp_path: Path) -> None:
@@ -244,6 +262,61 @@ def test_raw_discovered_candidate_may_defer_mechanism_assignment(
     tmp_path: Path,
 ) -> None:
     assert _validate(tmp_path, _discovered_candidate())["pass"] is True
+
+
+def test_stage1_candidate_may_remain_discovered_for_needs_review(
+    tmp_path: Path,
+) -> None:
+    assert _validate(tmp_path, _stage1_candidate())["pass"] is True
+
+
+def test_stage1_evidence_requires_every_automatic_gate_assessed(
+    tmp_path: Path,
+) -> None:
+    candidate = _stage1_candidate()
+    candidate["hard_gates"]["usable_licence"] = {  # type: ignore[index]
+        "status": "NOT_ASSESSED",
+        "evidence": [],
+    }
+
+    assert "INCOMPLETE_STAGE1_SCREENING" in _codes(
+        _validate(tmp_path, candidate)
+    )
+
+
+def test_needs_review_cannot_advance_past_discovered(tmp_path: Path) -> None:
+    candidate = _stage1_candidate()
+    candidate["current_state"] = "AUTOMATIC_GATES_PASSED"
+    candidate["status_history"] = _status_history(
+        "DISCOVERED", "AUTOMATIC_GATES_PASSED"
+    )
+
+    assert "ADVANCED_WITH_UNPASSED_AUTOMATIC_GATE" in _codes(
+        _validate(tmp_path, candidate)
+    )
+
+
+def test_failed_automatic_gate_requires_exclusion(tmp_path: Path) -> None:
+    candidate = _stage1_candidate()
+    candidate["hard_gates"]["immutable_commit"]["status"] = "FAIL"  # type: ignore[index]
+
+    assert "FAILED_HARD_GATE_NOT_EXCLUDED" in _codes(
+        _validate(tmp_path, candidate)
+    )
+
+
+def test_assessed_gate_requires_hashed_evidence(tmp_path: Path) -> None:
+    candidate = _stage1_candidate()
+    candidate["hard_gates"]["usable_licence"]["evidence"] = []  # type: ignore[index]
+
+    assert "MISSING_GATE_EVIDENCE" in _codes(_validate(tmp_path, candidate))
+
+
+def test_gate_status_vocabulary_is_enforced(tmp_path: Path) -> None:
+    candidate = _discovered_candidate()
+    candidate["hard_gates"]["usable_licence"]["status"] = "UNKNOWN"  # type: ignore[index]
+
+    assert "INVALID_HARD_GATE_STATUS" in _codes(_validate(tmp_path, candidate))
 
 
 def test_mechanism_review_passage_requires_mechanism_assignment(

@@ -61,6 +61,20 @@ HARD_GATES = (
     "deterministic_security_witness",
     "independent_approval",
 )
+AUTOMATIC_GATES = HARD_GATES[:6]
+MECHANISM_GATES = HARD_GATES[6:]
+GATE_STATUSES = frozenset({"PASS", "FAIL", "NEEDS_REVIEW", "NOT_ASSESSED"})
+POST_AUTOMATIC_STATES = frozenset(STATES) - {"DISCOVERED", "EXCLUDED"}
+AUTOMATIC_EXCLUSION_CODES = {
+    "usable_licence": "LICENCE_UNUSABLE",
+    "immutable_commit": "IMMUTABLE_COMMIT_UNAVAILABLE",
+    "reproducible_setup": "SETUP_NOT_REPRODUCIBLE",
+    "deterministic_baseline_tests": "BASELINE_TESTS_NONDETERMINISTIC",
+    "manageable_task_size": "TASK_SIZE_UNMANAGEABLE",
+    "no_proprietary_credentials_or_uncontrolled_service": (
+        "CREDENTIAL_OR_SERVICE_DEPENDENCY"
+    ),
+}
 ACCEPTED_STATES = frozenset(
     {
         "INDEPENDENT_REVIEW_APPROVED",
@@ -162,6 +176,18 @@ def _error(
 
 def _is_sha256(value: Any) -> bool:
     return isinstance(value, str) and SHA256_PATTERN.fullmatch(value) is not None
+
+
+def _is_artifact(value: Any) -> bool:
+    artifact = _mapping(value)
+    path = artifact.get("path")
+    return (
+        isinstance(path, str)
+        and bool(path)
+        and not Path(path).is_absolute()
+        and ".." not in Path(path).parts
+        and _is_sha256(artifact.get("sha256"))
+    )
 
 
 def _parse_utc_timestamp(value: Any) -> datetime | None:
@@ -539,6 +565,54 @@ def _validate_candidate(
             line=line,
             candidate_id=candidate_id,
         )
+    extra_gates = sorted(set(gates) - set(HARD_GATES))
+    if extra_gates:
+        _error(
+            errors,
+            "UNKNOWN_HARD_GATE",
+            f"unknown hard gates: {extra_gates}",
+            line=line,
+            candidate_id=candidate_id,
+        )
+    for gate in HARD_GATES:
+        gate_record = _mapping(gates.get(gate))
+        status = gate_record.get("status")
+        evidence = gate_record.get("evidence")
+        if status not in GATE_STATUSES:
+            _error(
+                errors,
+                "INVALID_HARD_GATE_STATUS",
+                f"{gate} has invalid status {status!r}",
+                line=line,
+                candidate_id=candidate_id,
+            )
+        if not isinstance(evidence, list) or any(
+            not _is_artifact(artifact) for artifact in evidence or []
+        ):
+            _error(
+                errors,
+                "MALFORMED_GATE_EVIDENCE",
+                f"{gate} evidence must be an array of hashed relative artifacts",
+                line=line,
+                candidate_id=candidate_id,
+            )
+        elif status in {"PASS", "FAIL", "NEEDS_REVIEW"} and not evidence:
+            _error(
+                errors,
+                "MISSING_GATE_EVIDENCE",
+                f"{gate} assessment lacks evidence",
+                line=line,
+                candidate_id=candidate_id,
+            )
+    stage1 = record.get("stage1_screening")
+    if stage1 is not None and not _is_artifact(stage1):
+        _error(
+            errors,
+            "MALFORMED_STAGE1_EVIDENCE",
+            "stage1_screening must be a hashed relative artifact",
+            line=line,
+            candidate_id=candidate_id,
+        )
     failed = [
         gate
         for gate in HARD_GATES
@@ -549,6 +623,62 @@ def _validate_candidate(
         for gate in HARD_GATES
         if _mapping(gates.get(gate)).get("status") != "PASS"
     ]
+    failed_automatic = [gate for gate in AUTOMATIC_GATES if gate in failed]
+    automatic_statuses = {
+        gate: _mapping(gates.get(gate)).get("status") for gate in AUTOMATIC_GATES
+    }
+    if failed and state != "EXCLUDED":
+        _error(
+            errors,
+            "FAILED_HARD_GATE_NOT_EXCLUDED",
+            f"candidate remains active after failed hard gates: {failed}",
+            line=line,
+            candidate_id=candidate_id,
+        )
+    if state in POST_AUTOMATIC_STATES and any(
+        status != "PASS" for status in automatic_statuses.values()
+    ):
+        _error(
+            errors,
+            "ADVANCED_WITH_UNPASSED_AUTOMATIC_GATE",
+            "candidate advanced before all automatic gates passed",
+            line=line,
+            candidate_id=candidate_id,
+        )
+    if state == "DISCOVERED" and all(
+        status == "PASS" for status in automatic_statuses.values()
+    ):
+        _error(
+            errors,
+            "AUTOMATIC_PASS_WITHOUT_STATE_TRANSITION",
+            "all automatic gates passed but state remains DISCOVERED",
+            line=line,
+            candidate_id=candidate_id,
+        )
+    if stage1 is not None:
+        if any(status == "NOT_ASSESSED" for status in automatic_statuses.values()):
+            _error(
+                errors,
+                "INCOMPLETE_STAGE1_SCREENING",
+                "Stage-1 evidence is present but an automatic gate is unassessed",
+                line=line,
+                candidate_id=candidate_id,
+            )
+        if state == "DISCOVERED" and (
+            trust_family is not None
+            or mechanism_key is not None
+            or any(
+                _mapping(gates.get(gate)).get("status") != "NOT_ASSESSED"
+                for gate in MECHANISM_GATES
+            )
+        ):
+            _error(
+                errors,
+                "STAGE1_SCOPE_VIOLATION",
+                "static Stage-1 screening assigned or assessed a mechanism",
+                line=line,
+                candidate_id=candidate_id,
+            )
     if state in ACCEPTED_STATES and failed:
         _error(
             errors,
@@ -576,6 +706,18 @@ def _validate_candidate(
                 errors,
                 "MISSING_EXCLUSION_REASON",
                 f"excluded candidate lacks complete exclusion fields: {missing_exclusion}",
+                line=line,
+                candidate_id=candidate_id,
+            )
+        if failed_automatic and (
+            exclusion.get("stage") != "AUTOMATIC_GATE"
+            or exclusion.get("code")
+            != AUTOMATIC_EXCLUSION_CODES[failed_automatic[0]]
+        ):
+            _error(
+                errors,
+                "AUTOMATIC_EXCLUSION_MISMATCH",
+                "automatic exclusion code/stage does not match the first failed gate",
                 line=line,
                 candidate_id=candidate_id,
             )

@@ -48,7 +48,13 @@ whether a human mechanism argument is scientifically persuasive.
   `DISCOVERED` records from `github-python-2024-medium-001`, with no screening,
   mechanism assignment, gate passage, scoring, or selection.
 - `discovery/v0.1/`: frozen query, source-list contract, and immutable captures.
+- `discovery/prospective-v0.1/`: committed but unexecuted specifications for
+  three additional discovery strata and cross-source identity handling.
+- `stage1/v0.1/`: static objective-fact inspection protocol, schema, and frozen
+  batch specification. It does not install or execute candidate code.
 - `../scripts/discover_candidates.py`: capture, materialize, and verify command.
+- `../scripts/stage1_screen_candidates.py`: screen, attach, and verify Stage-1
+  evidence after its method commit is clean.
 
 The benchmark is not frozen merely because the ledger validates. Freeze also
 requires the approvals, executable evidence, hashes, and absence-of-treatment-
