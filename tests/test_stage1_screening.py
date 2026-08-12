@@ -22,6 +22,12 @@ from cmpilot.stage1_screening import (
 ROOT = Path(__file__).parents[1]
 METHOD_COMMIT = "a" * 40
 SHA256 = "b" * 64
+REAL_SPEC = ROOT / "benchmark-selection/stage1/v0.1/inspection-spec.json"
+REAL_OUTPUT = (
+    ROOT
+    / "benchmark-selection/stage1/v0.1/results/github-python-2024-medium-001"
+)
+REAL_LEDGER = ROOT / "benchmark-selection/candidate-ledger.jsonl"
 
 
 def _git(*arguments: str, cwd: Path | None = None) -> str:
@@ -51,11 +57,68 @@ def test_stage1_result_schema_freezes_scope_and_gate_vocabulary() -> None:
     assert schema["properties"]["treatment_results_consulted"]["const"] is False
 
 
+def test_checked_in_stage1_batch_verifies_without_selection() -> None:
+    verification = verify_screening(
+        project_root=ROOT,
+        spec_path=REAL_SPEC,
+        output_directory=REAL_OUTPUT,
+        ledger_path=REAL_LEDGER,
+    )
+    manifest = json.loads(
+        (REAL_OUTPUT / "screening-manifest.json").read_text(encoding="utf-8")
+    )
+    summary = json.loads((REAL_OUTPUT / "summary.json").read_text(encoding="utf-8"))
+    records = [
+        json.loads(line)
+        for line in REAL_LEDGER.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+
+    assert verification["pass"] is True
+    assert verification["candidate_count"] == 8
+    assert verification["exclusions"] == []
+    assert manifest["method_commit"] == "a706f3271b68e6f75326bfe77a733bd09a453289"
+    assert manifest["candidate_code_executed"] is False
+    assert manifest["installation_executed"] is False
+    assert manifest["tests_executed"] is False
+    assert summary["resulting_states"] == {
+        "AUTOMATIC_GATES_PASSED": 0,
+        "DISCOVERED": 8,
+        "EXCLUDED": 0,
+    }
+    assert summary["gate_status_counts"]["immutable_commit"]["PASS"] == 8
+    assert summary["gate_status_counts"]["usable_licence"] == {
+        "FAIL": 0,
+        "NEEDS_REVIEW": 2,
+        "PASS": 6,
+    }
+    assert all(record["current_state"] == "DISCOVERED" for record in records)
+    assert all(len(record["status_history"]) == 1 for record in records)
+    assert all(record["trust_family"] is None for record in records)
+    assert all(record["mechanism_key"] is None for record in records)
+
+
 def _write_json(path: Path, value: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
+
+
+def _replace_artifact_and_rehash(
+    output: Path, relative_path: str, value: object
+) -> None:
+    target = output / relative_path
+    _write_json(target, value)
+    manifest_path = output / "screening-manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    for artifact in manifest["artifacts"]:
+        if artifact["path"] == relative_path:
+            artifact["sha256"] = hashlib.sha256(target.read_bytes()).hexdigest()
+            break
+    else:
+        raise AssertionError(f"manifest lacks {relative_path}")
+    _write_json(manifest_path, manifest)
 
 
 def _upstream_repository(tmp_path: Path) -> tuple[Path, str, str]:
@@ -417,4 +480,52 @@ def test_screening_refuses_overwrite_and_detects_tampering(tmp_path: Path) -> No
             spec_path=spec,
             output_directory=output,
             ledger_path=ledger,
+        )
+
+
+def test_rehashed_execution_scope_tampering_is_rejected(tmp_path: Path) -> None:
+    project, _, output, ledger, _ = _screening_fixture(tmp_path)
+    relative = "candidates/CMVP-CAND-0001.json"
+    result = json.loads((output / relative).read_text(encoding="utf-8"))
+    result["inspection"]["tests_executed"] = True
+    _replace_artifact_and_rehash(output, relative, result)
+
+    with pytest.raises(Stage1ScreeningError, match="execution boundary"):
+        apply_results_to_ledger(
+            project_root=project, output_directory=output, ledger_path=ledger
+        )
+
+
+def test_rehashed_summary_drift_is_rejected(tmp_path: Path) -> None:
+    project, _, output, ledger, _ = _screening_fixture(tmp_path)
+    summary = json.loads((output / "summary.json").read_text(encoding="utf-8"))
+    summary["candidate_count"] = 99
+    _replace_artifact_and_rehash(output, "summary.json", summary)
+
+    with pytest.raises(Stage1ScreeningError, match="summary differs"):
+        apply_results_to_ledger(
+            project_root=project, output_directory=output, ledger_path=ledger
+        )
+
+
+def test_rehashed_gate_fact_mismatch_is_rejected(tmp_path: Path) -> None:
+    project, _, output, ledger, _ = _screening_fixture(tmp_path)
+    relative = "candidates/CMVP-CAND-0001.json"
+    result = json.loads((output / relative).read_text(encoding="utf-8"))
+    result["facts"]["frozen_commit_resolution"]["resolved_git_tree_sha"] = "0" * 40
+    _replace_artifact_and_rehash(output, relative, result)
+
+    with pytest.raises(Stage1ScreeningError, match="immutable gate/fact mismatch"):
+        apply_results_to_ledger(
+            project_root=project, output_directory=output, ledger_path=ledger
+        )
+
+
+def test_unmanifested_output_file_is_rejected(tmp_path: Path) -> None:
+    project, _, output, ledger, _ = _screening_fixture(tmp_path)
+    (output / "unexpected.txt").write_text("not in manifest\n", encoding="utf-8")
+
+    with pytest.raises(Stage1ScreeningError, match="file inventory"):
+        apply_results_to_ledger(
+            project_root=project, output_directory=output, ledger_path=ledger
         )

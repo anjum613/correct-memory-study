@@ -907,6 +907,34 @@ def _extension_counts(paths: Sequence[str]) -> dict[str, int]:
     return dict(sorted(counts.items(), key=lambda item: (-item[1], item[0])))
 
 
+def _build_summary(
+    results: Sequence[Mapping[str, Any]], *, source_list_id: Any
+) -> dict[str, Any]:
+    return {
+        "schema": "stage1-screening-summary-v0.1",
+        "protocol_version": PROTOCOL_VERSION,
+        "source_list_id": source_list_id,
+        "candidate_count": len(results),
+        "candidate_order": [result["candidate_id"] for result in results],
+        "resulting_states": {
+            state: sum(result["resulting_state"] == state for result in results)
+            for state in ("DISCOVERED", "AUTOMATIC_GATES_PASSED", "EXCLUDED")
+        },
+        "gate_status_counts": {
+            gate: {
+                status: sum(
+                    result["automatic_gates"][gate]["status"] == status
+                    for result in results
+                )
+                for status in ("PASS", "FAIL", "NEEDS_REVIEW")
+            }
+            for gate in AUTOMATIC_GATES
+        },
+        "ranked_or_selected": False,
+        "treatment_results_consulted": False,
+    }
+
+
 def screen_batch(
     *,
     project_root: Path,
@@ -974,29 +1002,9 @@ def screen_batch(
             target.write_bytes(_canonical_bytes(result))
             artifacts.append({"path": relative, "sha256": _sha256_file(target)})
             results.append(result)
-        summary = {
-            "schema": "stage1-screening-summary-v0.1",
-            "protocol_version": PROTOCOL_VERSION,
-            "source_list_id": source_list.get("source_list_id"),
-            "candidate_count": len(results),
-            "candidate_order": [result["candidate_id"] for result in results],
-            "resulting_states": {
-                state: sum(result["resulting_state"] == state for result in results)
-                for state in ("DISCOVERED", "AUTOMATIC_GATES_PASSED", "EXCLUDED")
-            },
-            "gate_status_counts": {
-                gate: {
-                    status: sum(
-                        result["automatic_gates"][gate]["status"] == status
-                        for result in results
-                    )
-                    for status in ("PASS", "FAIL", "NEEDS_REVIEW")
-                }
-                for gate in AUTOMATIC_GATES
-            },
-            "ranked_or_selected": False,
-            "treatment_results_consulted": False,
-        }
+        summary = _build_summary(
+            results, source_list_id=source_list.get("source_list_id")
+        )
         summary_path = staged_root / "summary.json"
         summary_path.write_bytes(_canonical_bytes(summary))
         artifacts.append({"path": "summary.json", "sha256": _sha256_file(summary_path)})
@@ -1039,25 +1047,238 @@ def screen_batch(
     return manifest
 
 
-def _load_results(output_directory: Path) -> tuple[Mapping[str, Any], list[Mapping[str, Any]]]:
+def _validate_result(
+    result: Mapping[str, Any], *, candidate_id: str, method_commit: str
+) -> None:
+    if result.get("schema") != RESULT_SCHEMA:
+        raise Stage1ScreeningError(f"unexpected result schema for {candidate_id}")
+    if result.get("protocol_version") != PROTOCOL_VERSION:
+        raise Stage1ScreeningError(f"wrong result protocol for {candidate_id}")
+    if result.get("candidate_id") != candidate_id:
+        raise Stage1ScreeningError(f"result identity mismatch for {candidate_id}")
+    if any(
+        result.get(key) is not False
+        for key in (
+            "trust_family_assigned",
+            "p_star_decided",
+            "references_constructed",
+            "ranked_or_selected",
+            "treatment_results_consulted",
+        )
+    ):
+        raise Stage1ScreeningError(f"scope certification failed for {candidate_id}")
+    inspection = _mapping(result.get("inspection"), f"{candidate_id}.inspection")
+    if inspection.get("method_commit") != method_commit:
+        raise Stage1ScreeningError(f"method commit mismatch for {candidate_id}")
+    if any(
+        inspection.get(key) is not False
+        for key in (
+            "candidate_code_executed",
+            "checkout_created",
+            "installation_executed",
+            "tests_executed",
+            "model_or_treatment_accessed",
+        )
+    ) or inspection.get("temporary_clone_removed_after_batch") is not True:
+        raise Stage1ScreeningError(f"execution boundary failed for {candidate_id}")
+    _safe_relative(inspection.get("result_path"), f"{candidate_id}.result_path")
+    repository = _mapping(result.get("repository"), f"{candidate_id}.repository")
+    repository_url = _string(repository.get("url"), f"{candidate_id}.url")
+    clone_url = (
+        repository_url if repository_url.endswith(".git") else f"{repository_url}.git"
+    )
+    expected_commit = _string(
+        repository.get("expected_commit"), f"{candidate_id}.expected_commit"
+    )
+    commands = inspection.get("commands")
+    if not isinstance(commands, list) or len(commands) != 2:
+        raise Stage1ScreeningError(f"unexpected command count for {candidate_id}")
+    command_arguments = [
+        _mapping(command, f"{candidate_id}.command").get("arguments")
+        for command in commands
+    ]
+    if (
+        not isinstance(command_arguments[0], list)
+        or len(command_arguments[0]) != 4
+        or command_arguments[0][:3] != ["git", "init", "--bare"]
+        or not str(command_arguments[0][3]).endswith(f"/{candidate_id}.git")
+    ):
+        raise Stage1ScreeningError(f"unexpected Git command for {candidate_id}")
+    expected_fetch = [
+        "git",
+        f"--git-dir={command_arguments[0][3]}",
+        "fetch",
+        "--depth=1",
+        "--no-tags",
+        clone_url,
+        expected_commit,
+    ]
+    if (
+        not isinstance(command_arguments[1], list)
+        or command_arguments[1] != expected_fetch
+    ):
+        raise Stage1ScreeningError(f"unexpected Git command for {candidate_id}")
+    facts = _mapping(result.get("facts"), f"{candidate_id}.facts")
+    expected_fact_keys = {
+        "license",
+        "frozen_commit_resolution",
+        "language_runtime_metadata",
+        "static_text_scan",
+        "repository_size",
+        "tests",
+        "package_build_metadata",
+        "setup_command_candidates",
+        "external_service_requirements",
+        "gpu_requirement",
+        "database_requirement",
+        "network_requirement",
+        "proprietary_dependency_requirement",
+        "clean_installation",
+    }
+    if set(facts) != expected_fact_keys:
+        raise Stage1ScreeningError(f"objective fact inventory changed for {candidate_id}")
+    gates = _mapping(result.get("automatic_gates"), f"{candidate_id}.gates")
+    if set(gates) != set(AUTOMATIC_GATES):
+        raise Stage1ScreeningError(f"automatic gate inventory changed for {candidate_id}")
+    statuses: set[str] = set()
+    for gate in AUTOMATIC_GATES:
+        gate_result = _mapping(gates.get(gate), f"{candidate_id}.{gate}")
+        status = gate_result.get("status")
+        if status not in {"PASS", "FAIL", "NEEDS_REVIEW"}:
+            raise Stage1ScreeningError(f"invalid gate status for {candidate_id}: {gate}")
+        if not isinstance(gate_result.get("reason"), str) or not gate_result["reason"]:
+            raise Stage1ScreeningError(f"missing gate reason for {candidate_id}: {gate}")
+        statuses.add(str(status))
+    licence = _mapping(facts.get("license"), f"{candidate_id}.license")
+    captured_spdx = licence.get("captured_spdx")
+    licence_files = licence.get("license_files")
+    licence_static_pass = (
+        isinstance(captured_spdx, str)
+        and captured_spdx not in {"", "NOASSERTION", "OTHER", "None"}
+        and isinstance(licence_files, list)
+        and bool(licence_files)
+    )
+    expected_licence_status = "PASS" if licence_static_pass else "NEEDS_REVIEW"
+    if gates["usable_licence"]["status"] != expected_licence_status:
+        raise Stage1ScreeningError(f"licence gate/fact mismatch for {candidate_id}")
+    resolution = _mapping(
+        facts.get("frozen_commit_resolution"), f"{candidate_id}.commit resolution"
+    )
+    exact_resolution = (
+        resolution.get("fetch_succeeded") is True
+        and resolution.get("expected_commit") == expected_commit
+        and resolution.get("resolved_commit") == expected_commit
+        and resolution.get("expected_git_tree_sha")
+        == repository.get("captured_git_tree_sha")
+        and resolution.get("resolved_git_tree_sha")
+        == repository.get("captured_git_tree_sha")
+    )
+    expected_immutable_status = (
+        "NEEDS_REVIEW"
+        if resolution.get("fetch_succeeded") is not True
+        or resolution.get("resolved_commit") is None
+        or resolution.get("resolved_git_tree_sha") is None
+        else "PASS"
+        if exact_resolution
+        else "FAIL"
+    )
+    if gates["immutable_commit"]["status"] != expected_immutable_status:
+        raise Stage1ScreeningError(f"immutable gate/fact mismatch for {candidate_id}")
+    if any(
+        gates[gate]["status"] != "NEEDS_REVIEW" for gate in AUTOMATIC_GATES[2:]
+    ):
+        raise Stage1ScreeningError(
+            f"static-only gate was decided for {candidate_id}"
+        )
+    expected_state = (
+        "EXCLUDED"
+        if "FAIL" in statuses
+        else "AUTOMATIC_GATES_PASSED"
+        if statuses == {"PASS"}
+        else "DISCOVERED"
+    )
+    if result.get("resulting_state") != expected_state:
+        raise Stage1ScreeningError(f"gate/state mismatch for {candidate_id}")
+
+
+def _load_results(
+    output_directory: Path,
+) -> tuple[Mapping[str, Any], list[Mapping[str, Any]]]:
     manifest = _mapping(
         _load_json(output_directory / "screening-manifest.json"),
         "screening manifest",
     )
-    if manifest.get("schema") != BATCH_SCHEMA:
+    if (
+        manifest.get("schema") != BATCH_SCHEMA
+        or manifest.get("protocol_version") != PROTOCOL_VERSION
+    ):
         raise Stage1ScreeningError("unexpected screening manifest schema")
+    if any(
+        manifest.get(key) is not False
+        for key in (
+            "candidate_code_executed",
+            "installation_executed",
+            "tests_executed",
+            "ranked_or_selected",
+            "treatment_results_consulted",
+        )
+    ) or manifest.get("temporary_clones_removed") is not True:
+        raise Stage1ScreeningError("screening manifest execution boundary failed")
+    method_commit = str(manifest.get("method_commit", ""))
+    if COMMIT.fullmatch(method_commit) is None:
+        raise Stage1ScreeningError("screening manifest method commit is invalid")
+    candidate_order = manifest.get("candidate_order")
+    if (
+        not isinstance(candidate_order, list)
+        or any(not isinstance(value, str) for value in candidate_order)
+        or len(candidate_order) != len(set(candidate_order))
+        or manifest.get("candidate_count") != len(candidate_order)
+    ):
+        raise Stage1ScreeningError("screening manifest candidate order is malformed")
     artifacts = manifest.get("artifacts")
     if not isinstance(artifacts, list):
         raise Stage1ScreeningError("screening manifest artifacts must be an array")
+    expected_artifact_paths = {"summary.json"} | {
+        f"candidates/{candidate_id}.json" for candidate_id in candidate_order
+    }
+    artifact_paths = [
+        str(_mapping(artifact, "screening artifact").get("path"))
+        for artifact in artifacts
+    ]
+    if set(artifact_paths) != expected_artifact_paths or len(artifact_paths) != len(
+        expected_artifact_paths
+    ):
+        raise Stage1ScreeningError("screening manifest artifact inventory mismatch")
     for raw_artifact in artifacts:
         artifact = _mapping(raw_artifact, "screening artifact")
         path = _safe_relative(artifact.get("path"), "screening artifact path")
+        if SHA256.fullmatch(str(artifact.get("sha256", ""))) is None:
+            raise Stage1ScreeningError(f"invalid screening artifact hash: {path}")
         if _sha256_file(output_directory / path) != artifact.get("sha256"):
             raise Stage1ScreeningError(f"screening artifact hash mismatch: {path}")
+    actual_paths = {
+        path.relative_to(output_directory).as_posix()
+        for path in output_directory.rglob("*")
+        if path.is_file()
+    }
+    if actual_paths != expected_artifact_paths | {"screening-manifest.json"}:
+        raise Stage1ScreeningError("screening output file inventory mismatch")
     results = [
-        _mapping(_load_json(output_directory / f"candidates/{candidate_id}.json"), candidate_id)
-        for candidate_id in manifest.get("candidate_order", [])
+        _mapping(
+            _load_json(output_directory / f"candidates/{candidate_id}.json"),
+            candidate_id,
+        )
+        for candidate_id in candidate_order
     ]
+    for candidate_id, result in zip(candidate_order, results, strict=True):
+        _validate_result(
+            result, candidate_id=candidate_id, method_commit=method_commit
+        )
+    summary = _mapping(_load_json(output_directory / "summary.json"), "summary")
+    if summary != _build_summary(
+        results, source_list_id=manifest.get("source_list_id")
+    ):
+        raise Stage1ScreeningError("screening summary differs from candidate results")
     return manifest, results
 
 
@@ -1174,6 +1395,29 @@ def verify_screening(
         raise Stage1ScreeningError("source-list hash changed")
     source_list = _mapping(_load_json(source_list_path), "source list")
     manifest, results = _load_results(output_directory)
+    if (
+        manifest.get("source_list_id") != source_list.get("source_list_id")
+        or manifest.get("source_list_sha256") != spec["input_source_list_sha256"]
+        or manifest.get("inspection_spec")
+        != {
+            "path": spec_path.relative_to(project_root).as_posix(),
+            "sha256": _sha256_file(spec_path),
+        }
+        or manifest.get("screening_protocol")
+        != {
+            "path": spec["screening_protocol"],
+            "sha256": _sha256_file(project_root / str(spec["screening_protocol"])),
+        }
+        or manifest.get("result_schema")
+        != {
+            "path": "benchmark-selection/stage1/v0.1/result.schema.json",
+            "sha256": _sha256_file(
+                project_root
+                / "benchmark-selection/stage1/v0.1/result.schema.json"
+            ),
+        }
+    ):
+        raise Stage1ScreeningError("screening manifest frozen-input mismatch")
     source_ids = [item["candidate_id"] for item in source_list["candidates"]]
     result_ids = [result["candidate_id"] for result in results]
     if source_ids != result_ids or manifest.get("candidate_order") != source_ids:
@@ -1189,32 +1433,68 @@ def verify_screening(
     transitions: list[dict[str, str]] = []
     exclusions: list[dict[str, str]] = []
     ambiguities: dict[str, list[str]] = {}
+    source_by_id = {
+        item["candidate_id"]: item for item in source_list["candidates"]
+    }
+    result_hashes = {
+        str(artifact["path"]).split("/")[-1].removesuffix(".json"): artifact[
+            "sha256"
+        ]
+        for artifact in manifest["artifacts"]
+        if str(artifact["path"]).startswith("candidates/")
+    }
     for result in results:
         candidate_id = str(result["candidate_id"])
-        if any(
-            result.get(key) is not expected
-            for key, expected in (
-                ("trust_family_assigned", False),
-                ("p_star_decided", False),
-                ("references_constructed", False),
-                ("ranked_or_selected", False),
-                ("treatment_results_consulted", False),
-            )
+        source = _mapping(source_by_id[candidate_id], f"source {candidate_id}")
+        source_record = _mapping(source.get("source"), "source")
+        snapshot = _mapping(source_record.get("snapshot"), "source snapshot")
+        normalized = _mapping(source.get("normalized_metadata"), "metadata")
+        commit_metadata = _mapping(normalized.get("commit"), "commit metadata")
+        repository_metadata = _mapping(
+            normalized.get("repository"), "repository metadata"
+        )
+        result_repository = _mapping(result.get("repository"), "result repository")
+        if (
+            result_repository.get("full_name")
+            != repository_metadata.get("full_name")
+            or result_repository.get("url") != source_record.get("repository_url")
+            or result_repository.get("captured_language")
+            != repository_metadata.get("language")
+            or result_repository.get("captured_license_spdx")
+            != repository_metadata.get("license_spdx")
+            or result_repository.get("expected_commit") != snapshot.get("commit_sha")
+            or result_repository.get("captured_git_tree_sha")
+            != commit_metadata.get("tree_sha")
+            or result_repository.get("default_branch")
+            != repository_metadata.get("default_branch")
+            or result["inspection"]["result_path"]
+            != (
+                output_directory / f"candidates/{candidate_id}.json"
+            ).relative_to(project_root).as_posix()
         ):
-            raise Stage1ScreeningError(f"scope certification failed for {candidate_id}")
+            raise Stage1ScreeningError(f"source/result mismatch for {candidate_id}")
         record = _mapping(ledger.get(candidate_id), f"ledger {candidate_id}")
         evidence = _mapping(record.get("stage1_screening"), "stage1 evidence")
         evidence_path = project_root / _safe_relative(evidence.get("path"), "evidence path")
-        if _sha256_file(evidence_path) != evidence.get("sha256"):
+        if (
+            evidence.get("path") != result["inspection"]["result_path"]
+            or evidence.get("sha256") != result_hashes[candidate_id]
+            or _sha256_file(evidence_path) != evidence.get("sha256")
+        ):
             raise Stage1ScreeningError(f"ledger Stage-1 hash mismatch for {candidate_id}")
         for gate in AUTOMATIC_GATES:
-            if record["hard_gates"][gate]["status"] != result["automatic_gates"][gate]["status"]:
+            if record["hard_gates"][gate] != {
+                "status": result["automatic_gates"][gate]["status"],
+                "evidence": [dict(evidence)],
+            }:
                 raise Stage1ScreeningError(f"ledger gate mismatch for {candidate_id}: {gate}")
         for gate in MECHANISM_GATES:
             if record["hard_gates"][gate]["status"] != "NOT_ASSESSED":
                 raise Stage1ScreeningError(f"mechanism gate was assessed for {candidate_id}")
         if record.get("trust_family") is not None or record.get("mechanism_key") is not None:
             raise Stage1ScreeningError(f"mechanism was assigned for {candidate_id}")
+        if record.get("current_state") != result.get("resulting_state"):
+            raise Stage1ScreeningError(f"ledger state mismatch for {candidate_id}")
         transitions.append(
             {"candidate_id": candidate_id, "from": "DISCOVERED", "to": str(record["current_state"])}
         )

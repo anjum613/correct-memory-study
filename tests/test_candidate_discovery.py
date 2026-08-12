@@ -18,6 +18,7 @@ from cmpilot.candidate_discovery import (
     search_url,
     verify_snapshot,
 )
+from cmpilot.stage1_screening import AUTOMATIC_GATES, MECHANISM_GATES
 
 
 ROOT = Path(__file__).parents[1]
@@ -334,7 +335,13 @@ def test_checked_in_first_discovery_snapshot_verifies_offline() -> None:
     assert all(record["trust_family"] is None for record in records)
     assert all(record["mechanism_key"] is None for record in records)
     assert all(
-        {gate["status"] for gate in record["hard_gates"].values()}
-        == {"NOT_ASSESSED"}
+        record["hard_gates"][gate]["status"] in {"PASS", "NEEDS_REVIEW"}
         for record in records
+        for gate in AUTOMATIC_GATES
     )
+    assert all(
+        record["hard_gates"][gate]["status"] == "NOT_ASSESSED"
+        for record in records
+        for gate in MECHANISM_GATES
+    )
+    assert all(record.get("stage1_screening") for record in records)

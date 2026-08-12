@@ -45,8 +45,9 @@ whether a human mechanism argument is scientifically persuasive.
 - `reviewer-form.md`: independent outcome-blind review form.
 - `replacement-policy.md`: objective reserve and replacement rules.
 - `candidate-ledger.jsonl`: versioned candidate records; currently eight raw
-  `DISCOVERED` records from `github-python-2024-medium-001`, with no screening,
-  mechanism assignment, gate passage, scoring, or selection.
+  `DISCOVERED` records from `github-python-2024-medium-001`, now linked to
+  static Stage-1 evidence but with no mechanism assignment, scoring, or
+  selection.
 - `discovery/v0.1/`: frozen query, source-list contract, and immutable captures.
 - `discovery/prospective-v0.1/`: committed but unexecuted specifications for
   three additional discovery strata and cross-source identity handling.
@@ -65,6 +66,9 @@ results certification specified in the protocol.
 The first source snapshot is
 `discovery/v0.1/snapshots/github-python-2024-medium-001/`. Its query was
 committed before capture. All eight API results were imported in source order.
-The snapshot and ledger certify `treatment_results_consulted: false`; every
-hard gate is `NOT_ASSESSED`, and no candidate is accepted, excluded, eligible,
-selected, reserved, or frozen.
+The snapshot and ledger certify `treatment_results_consulted: false`. Static
+Stage-1 screening resolved all eight immutable commits, passed six licence
+signals, and left two licence signals plus every setup, baseline-test,
+task-size, and service-independence gate at `NEEDS_REVIEW`. Mechanism gates are
+`NOT_ASSESSED`. All eight remain `DISCOVERED`; none is accepted, excluded,
+eligible, selected, reserved, or frozen.
