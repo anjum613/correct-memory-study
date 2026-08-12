@@ -1,0 +1,476 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/correct-memory-study/benchmark-selection/candidate-v0.1.schema.json",
+  "title": "Correct Memory benchmark-selection candidate v0.1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "candidate_id",
+    "protocol_version",
+    "current_state",
+    "status_history",
+    "source",
+    "trust_family",
+    "mechanism_key",
+    "hard_gates",
+    "treatment_results_consulted"
+  ],
+  "properties": {
+    "candidate_id": {
+      "type": "string",
+      "pattern": "^CMVP-CAND-[0-9]{4}$"
+    },
+    "protocol_version": {
+      "const": "benchmark-selection-v0.1"
+    },
+    "current_state": {
+      "$ref": "#/$defs/state"
+    },
+    "status_history": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/status_event"
+      }
+    },
+    "source": {
+      "$ref": "#/$defs/source"
+    },
+    "trust_family": {
+      "$ref": "#/$defs/trust_family"
+    },
+    "mechanism_key": {
+      "type": "string",
+      "minLength": 1
+    },
+    "hard_gates": {
+      "$ref": "#/$defs/hard_gates"
+    },
+    "mechanism_card": {
+      "$ref": "#/$defs/artifact"
+    },
+    "triplet": {
+      "$ref": "#/$defs/triplet"
+    },
+    "independent_review": {
+      "$ref": "#/$defs/independent_review"
+    },
+    "scoring": {
+      "$ref": "#/$defs/scoring"
+    },
+    "exclusion": {
+      "$ref": "#/$defs/exclusion"
+    },
+    "benchmark_freeze": {
+      "$ref": "#/$defs/benchmark_freeze"
+    },
+    "treatment_results_consulted": {
+      "const": false
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "state": {
+      "enum": [
+        "DISCOVERED",
+        "AUTOMATIC_GATES_PASSED",
+        "MECHANISM_REVIEW_PASSED",
+        "TRIPLET_VALIDATED",
+        "INDEPENDENT_REVIEW_APPROVED",
+        "ELIGIBLE",
+        "SELECTED",
+        "RESERVE",
+        "FROZEN",
+        "EXCLUDED"
+      ]
+    },
+    "status_event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sequence",
+        "state",
+        "recorded_at_utc",
+        "actor_id",
+        "protocol_version",
+        "rationale",
+        "evidence"
+      ],
+      "properties": {
+        "sequence": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "state": {
+          "$ref": "#/$defs/state"
+        },
+        "recorded_at_utc": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "actor_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "protocol_version": {
+          "const": "benchmark-selection-v0.1"
+        },
+        "rationale": {
+          "type": "string",
+          "minLength": 1
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/artifact"
+          }
+        }
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "forge",
+        "repository_url",
+        "upstream_owner",
+        "upstream_name",
+        "licence_spdx",
+        "discovery",
+        "snapshot"
+      ],
+      "properties": {
+        "forge": {
+          "type": "string",
+          "minLength": 1
+        },
+        "repository_url": {
+          "type": "string",
+          "minLength": 1
+        },
+        "upstream_owner": {
+          "type": "string",
+          "minLength": 1
+        },
+        "upstream_name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "licence_spdx": {
+          "type": "string",
+          "minLength": 1
+        },
+        "discovery": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "source_list_id",
+            "source_list_sha256",
+            "position",
+            "discovered_at_utc",
+            "discoverer_id"
+          ],
+          "properties": {
+            "source_list_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "source_list_sha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "position": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "discovered_at_utc": {
+              "$ref": "#/$defs/timestamp"
+            },
+            "discoverer_id": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "snapshot": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "commit_sha",
+            "commit_date_utc",
+            "tree_sha256",
+            "metadata_sha256",
+            "retrieval_method"
+          ],
+          "properties": {
+            "commit_sha": {
+              "oneOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{40}$"
+                },
+                {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                }
+              ]
+            },
+            "commit_date_utc": {
+              "$ref": "#/$defs/timestamp"
+            },
+            "tree_sha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "metadata_sha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "retrieval_method": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    },
+    "trust_family": {
+      "enum": [
+        "TRUSTED_DATA_BECOMES_ATTACKER_INFLUENCED",
+        "INTERNAL_FUNCTIONALITY_BECOMES_EXTERNALLY_REACHABLE",
+        "AUTHORIZATION_ROLE_TENANT_OR_RESOURCE_SCOPE_CHANGES",
+        "VALIDATION_RESPONSIBILITY_MOVES_DISAPPEARS_OR_IS_BYPASSED"
+      ]
+    },
+    "gate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "evidence"],
+      "properties": {
+        "status": {
+          "enum": ["PASS", "FAIL", "NOT_ASSESSED"]
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/artifact"
+          }
+        }
+      }
+    },
+    "hard_gates": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "usable_licence",
+        "immutable_commit",
+        "reproducible_setup",
+        "deterministic_baseline_tests",
+        "manageable_task_size",
+        "no_proprietary_credentials_or_uncontrolled_service",
+        "narrow_observable_p_star",
+        "one_condition_isolation",
+        "target_not_already_vulnerable",
+        "faithful_reuse_functional_and_witness_open",
+        "secure_reference_functional_and_witness_blocked",
+        "implementation_independent_functional_oracle",
+        "deterministic_security_witness",
+        "independent_approval"
+      ],
+      "properties": {
+        "usable_licence": {"$ref": "#/$defs/gate"},
+        "immutable_commit": {"$ref": "#/$defs/gate"},
+        "reproducible_setup": {"$ref": "#/$defs/gate"},
+        "deterministic_baseline_tests": {"$ref": "#/$defs/gate"},
+        "manageable_task_size": {"$ref": "#/$defs/gate"},
+        "no_proprietary_credentials_or_uncontrolled_service": {"$ref": "#/$defs/gate"},
+        "narrow_observable_p_star": {"$ref": "#/$defs/gate"},
+        "one_condition_isolation": {"$ref": "#/$defs/gate"},
+        "target_not_already_vulnerable": {"$ref": "#/$defs/gate"},
+        "faithful_reuse_functional_and_witness_open": {"$ref": "#/$defs/gate"},
+        "secure_reference_functional_and_witness_blocked": {"$ref": "#/$defs/gate"},
+        "implementation_independent_functional_oracle": {"$ref": "#/$defs/gate"},
+        "deterministic_security_witness": {"$ref": "#/$defs/gate"},
+        "independent_approval": {"$ref": "#/$defs/gate"}
+      }
+    },
+    "definition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["description", "definition_path", "definition_sha256"],
+      "properties": {
+        "description": {"type": "string", "minLength": 1},
+        "definition_path": {"type": "string", "minLength": 1},
+        "definition_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "implementation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifact_path", "artifact_sha256", "functional_pass", "security_witness"],
+      "properties": {
+        "artifact_path": {"type": "string", "minLength": 1},
+        "artifact_sha256": {"$ref": "#/$defs/sha256"},
+        "functional_pass": {"const": true},
+        "security_witness": {"enum": ["OPEN", "BLOCKED"]}
+      }
+    },
+    "instrument": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifact_path", "artifact_sha256", "deterministic"],
+      "properties": {
+        "artifact_path": {"type": "string", "minLength": 1},
+        "artifact_sha256": {"$ref": "#/$defs/sha256"},
+        "deterministic": {"const": true},
+        "implementation_independent": {"type": "boolean"}
+      }
+    },
+    "triplet": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_task",
+        "compatible_target",
+        "invalidated_target",
+        "p_star",
+        "faithful_reuse",
+        "secure_reference",
+        "functional_oracle",
+        "security_witness"
+      ],
+      "properties": {
+        "source_task": {"$ref": "#/$defs/definition"},
+        "compatible_target": {"$ref": "#/$defs/definition"},
+        "invalidated_target": {"$ref": "#/$defs/definition"},
+        "p_star": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["statement", "observation_path", "observation_sha256"],
+          "properties": {
+            "statement": {"type": "string", "minLength": 1},
+            "observation_path": {"type": "string", "minLength": 1},
+            "observation_sha256": {"$ref": "#/$defs/sha256"}
+          }
+        },
+        "faithful_reuse": {"$ref": "#/$defs/implementation"},
+        "secure_reference": {"$ref": "#/$defs/implementation"},
+        "functional_oracle": {"$ref": "#/$defs/instrument"},
+        "security_witness": {"$ref": "#/$defs/instrument"}
+      }
+    },
+    "independent_review": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reviewer_id",
+        "constructor_id",
+        "outcome_blind",
+        "conflict_free",
+        "decision",
+        "reviewed_at_utc",
+        "artifact_path",
+        "artifact_sha256"
+      ],
+      "properties": {
+        "reviewer_id": {"type": "string", "minLength": 1},
+        "constructor_id": {"type": "string", "minLength": 1},
+        "outcome_blind": {"const": true},
+        "conflict_free": {"const": true},
+        "decision": {"enum": ["APPROVE", "REJECT", "RETURN_FOR_EVIDENCE"]},
+        "reviewed_at_utc": {"$ref": "#/$defs/timestamp"},
+        "artifact_path": {"type": "string", "minLength": 1},
+        "artifact_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "scoring": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rubric_version", "dimension_scores", "total", "tie_break_digest"],
+      "properties": {
+        "rubric_version": {"const": "benchmark-selection-scoring-rubric-v0.1"},
+        "dimension_scores": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "construction_parsimony",
+            "decisive_condition_observability",
+            "oracle_diagnostic_precision",
+            "reproducibility_margin",
+            "ecological_grounding"
+          ],
+          "properties": {
+            "construction_parsimony": {"type": "integer", "minimum": 0, "maximum": 3},
+            "decisive_condition_observability": {"type": "integer", "minimum": 0, "maximum": 3},
+            "oracle_diagnostic_precision": {"type": "integer", "minimum": 0, "maximum": 3},
+            "reproducibility_margin": {"type": "integer", "minimum": 0, "maximum": 3},
+            "ecological_grounding": {"type": "integer", "minimum": 0, "maximum": 3}
+          }
+        },
+        "total": {"type": "integer", "minimum": 0, "maximum": 15},
+        "tie_break_digest": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "exclusion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "stage", "explanation", "recorded_at_utc", "evidence"],
+      "properties": {
+        "code": {"type": "string", "minLength": 1},
+        "stage": {"type": "string", "minLength": 1},
+        "explanation": {"type": "string", "minLength": 1},
+        "recorded_at_utc": {"$ref": "#/$defs/timestamp"},
+        "evidence": {"type": "array", "items": {"$ref": "#/$defs/artifact"}}
+      }
+    },
+    "benchmark_freeze": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "freeze_id",
+        "frozen_at_utc",
+        "protocol_version",
+        "artifact_hashes",
+        "treatment_results_absent_certification"
+      ],
+      "properties": {
+        "freeze_id": {"type": "string", "minLength": 1},
+        "frozen_at_utc": {"$ref": "#/$defs/timestamp"},
+        "protocol_version": {"const": "benchmark-selection-v0.1"},
+        "artifact_hashes": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {"$ref": "#/$defs/sha256"}
+        },
+        "treatment_results_absent_certification": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["certified", "certifier_id", "certified_at_utc", "evidence_sha256"],
+          "properties": {
+            "certified": {"const": true},
+            "certifier_id": {"type": "string", "minLength": 1},
+            "certified_at_utc": {"$ref": "#/$defs/timestamp"},
+            "evidence_sha256": {"$ref": "#/$defs/sha256"}
+          }
+        }
+      }
+    }
+  }
+}

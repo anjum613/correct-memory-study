@@ -1,0 +1,48 @@
+# Benchmark selection v0.1
+
+This namespace defines the auditable selection framework for **Correct Memory,
+Vulnerable Patch: Causal Security and Decisive-Precondition Preservation in
+Coding Agents**. It contains no selected repositories, treatment outcomes, or
+model runs.
+
+The fixed order is:
+
+1. reproducible candidate discovery;
+2. deterministic feasibility filters;
+3. human trust-condition screening;
+4. controlled triplet construction;
+5. executable functionality/security validation;
+6. independent outcome-blind review;
+7. stratified selection;
+8. frozen benchmark;
+9. only then, memory-treatment runs.
+
+`candidate-ledger.jsonl` is initially empty. A candidate may be appended only
+under `selection-protocol-v0.1.md` and `candidate.schema.json`. One line is one
+candidate record; candidate IDs are unique. Within each record,
+`status_history` is append-only and sequence numbered.
+
+Validate the ledger with existing project Python only:
+
+```bash
+python scripts/validate-candidate-ledger.py
+```
+
+The validator checks structural and outcome-blindness invariants. It does not
+discover candidates, clone repositories, execute reference patches, or decide
+whether a human mechanism argument is scientifically persuasive.
+
+## File roles
+
+- `selection-protocol-v0.1.md`: authoritative process and decision rules.
+- `candidate.schema.json`: machine-readable candidate record contract.
+- `exclusion-codes.yaml`: controlled hard-exclusion vocabulary.
+- `scoring-rubric.yaml`: post-gate 0–3 scoring and deterministic tie-break.
+- `mechanism-card-template.yaml`: construction record for one proposed triplet.
+- `reviewer-form.md`: independent outcome-blind review form.
+- `replacement-policy.md`: objective reserve and replacement rules.
+- `candidate-ledger.jsonl`: versioned candidate records; currently empty.
+
+The benchmark is not frozen merely because the ledger validates. Freeze also
+requires the approvals, executable evidence, hashes, and absence-of-treatment-
+results certification specified in the protocol.
