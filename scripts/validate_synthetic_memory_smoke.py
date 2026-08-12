@@ -38,6 +38,10 @@ SMOKE_ROOT = ROOT / "synthetic/memory-smoke-v1"
 MANIFEST_PATH = SMOKE_ROOT / "manifest.json"
 VALIDATION_RESULT_PATH = SMOKE_ROOT / "cpu-validation-result.json"
 QUALIFICATION_RESULT_PATH = ROOT / "qualification/qwen36-v1/qualification-result.json"
+QUALIFICATION_RESULT_PROVENANCE_PATH = Path(
+    "/home/s224049759/projects/worktrees/qwen32b-protocol-hardening/"
+    "qualification/qwen36-v1/qualification-result.json"
+)
 
 MEMORY_RECORDS = {
     "sms-applicable-source-valid-v1": {
@@ -146,7 +150,9 @@ def build_manifest() -> dict[str, Any]:
         "purpose": "CPU validation of treatment plumbing only",
         "qualification_result": {
             "decision": "PASS",
-            "path": str(QUALIFICATION_RESULT_PATH),
+            # Preserve where qualification was completed while validating the
+            # byte-identical checked-out copy in this worktree.
+            "path": str(QUALIFICATION_RESULT_PROVENANCE_PATH),
             "sha256": sha256_file(QUALIFICATION_RESULT_PATH),
         },
         "repositories": {

@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import subprocess
 import sys
+from types import SimpleNamespace
 
 import pytest
 
@@ -39,6 +40,7 @@ from cmpilot.synthetic_memory_gpu import (
     write_condition_result,
 )
 from cmpilot.synthetic_memory_smoke import CONDITIONS, load_json, prepare_run
+from scripts import run_synthetic_memory_gpu_smoke as gpu_runner
 
 
 ROOT = Path(__file__).parents[1]
@@ -345,6 +347,203 @@ def test_condition_finalizer_is_non_overwriting_and_manifested(tmp_path: Path) -
     assert (tmp_path / "SHA256SUMS").is_file()
     with pytest.raises(FileExistsError):
         write_condition_result(output, _result_record())
+
+
+def _runner_arguments(tmp_path: Path) -> SimpleNamespace:
+    return SimpleNamespace(
+        agent_timeout=10,
+        artifact_directory=tmp_path / "synthetic-run",
+        base_url="http://127.0.0.1:1/v1",
+        mini_python=sys.executable,
+        model=MODEL_ID,
+        project_root=ROOT,
+        tokenizer_path=Path("/tmp") / MODEL_REVISION,
+    )
+
+
+def _mock_runner_preflight(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        gpu_runner, "validate_gpu_freeze", lambda project: {"sha256": "f" * 64}
+    )
+    monkeypatch.setattr(
+        gpu_runner, "validate_source_inventory", lambda project: {"pass": True}
+    )
+    monkeypatch.setattr(
+        gpu_runner,
+        "validate_seed_schedule",
+        lambda project: {"seeds": dict(EXPECTED_CONDITION_SEEDS)},
+    )
+    monkeypatch.setattr(gpu_runner, "prompt_evidence", lambda project: {"pass": True})
+    monkeypatch.setattr(gpu_runner, "probe_models", lambda base_url: object())
+    monkeypatch.setattr(
+        gpu_runner,
+        "validate_model",
+        lambda probe, model: SimpleNamespace(
+            diagnostic="cpu fake", models=(MODEL_ID,), ok=True
+        ),
+    )
+    monkeypatch.setattr(
+        gpu_runner,
+        "mini_swe_info",
+        lambda python: SimpleNamespace(available=True, version="cpu-fake"),
+    )
+    monkeypatch.setattr(
+        gpu_runner, "contamination_check", lambda provenance: {"pass": True}
+    )
+
+
+def _successful_summary(
+    condition_root: Path, condition: str, seed: int
+) -> dict[str, object]:
+    return {
+        "artifact_directory": str(condition_root),
+        "artifact_manifest_sha256": "a" * 64,
+        "condition": condition,
+        "engineering_classification": "FUNCTIONAL_PASS_SECURITY_BLOCKED",
+        "provenance": {"condition": condition, "seed": seed},
+        "result_sha256": "b" * 64,
+        "seed": seed,
+        "technical_validity": True,
+    }
+
+
+def test_four_condition_runner_orchestration_uses_cpu_fakes_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _mock_runner_preflight(monkeypatch)
+    calls: list[tuple[int, str, str]] = []
+
+    def fake_condition(**values: object) -> dict[str, object]:
+        condition_root = values["artifact_root"] / "conditions" / (
+            f"{values['ordinal']:02d}-{values['condition']}"
+        )
+        condition_root.mkdir(parents=True)
+        (condition_root / "result.json").write_text(
+            json.dumps({"condition": values["condition"]}) + "\n",
+            encoding="utf-8",
+        )
+        calls.append(
+            (
+                values["ordinal"],
+                values["condition"],
+                values["base_url"],
+            )
+        )
+        return _successful_summary(
+            condition_root, values["condition"], values["seed"]
+        )
+
+    monkeypatch.setattr(gpu_runner, "_run_condition", fake_condition)
+    arguments = _runner_arguments(tmp_path)
+
+    assert gpu_runner.run(arguments) == 0
+    assert [condition for _, condition, _ in calls] == list(EXPECTED_EXECUTION_ORDER)
+    assert [ordinal for ordinal, _, _ in calls] == [1, 2, 3, 4]
+    assert {base_url for _, _, base_url in calls} == {arguments.base_url}
+    combined = load_json(arguments.artifact_directory / "combined-result.json")
+    assert combined["technical_condition_count"] == 4
+    assert combined["decision"] == "SYNTHETIC_TREATMENT_PIPELINE_PASS"
+    assert (arguments.artifact_directory / "SHA256SUMS").is_file()
+
+
+def test_transient_condition_result_write_failure_becomes_dimensional_result(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _mock_runner_preflight(monkeypatch)
+    real_write = gpu_runner.write_condition_result
+    write_count = 0
+
+    def flaky_write(output: Path, record: dict[str, object]) -> Path:
+        nonlocal write_count
+        write_count += 1
+        if write_count == 1:
+            raise OSError("injected transient result write failure")
+        return real_write(output, record)
+
+    def fake_condition(**values: object) -> dict[str, object]:
+        condition_root = values["artifact_root"] / "conditions" / (
+            f"{values['ordinal']:02d}-{values['condition']}"
+        )
+        condition_root.mkdir(parents=True)
+        record = _result_record()
+        record["treatment_condition"] = values["condition"]
+        gpu_runner.write_condition_result(condition_root / "result.json", record)
+        return _successful_summary(
+            condition_root, values["condition"], values["seed"]
+        )
+
+    monkeypatch.setattr(gpu_runner, "write_condition_result", flaky_write)
+    monkeypatch.setattr(gpu_runner, "_run_condition", fake_condition)
+    arguments = _runner_arguments(tmp_path)
+
+    assert gpu_runner.run(arguments) == 2
+    conditions = sorted((arguments.artifact_directory / "conditions").iterdir())
+    assert len(conditions) == 4
+    first = load_json(conditions[0] / "result.json")
+    assert first["technical_validity"] is False
+    assert first["technical_failure"]["error_type"] == "OSError"
+    assert all((condition / "result.json").is_file() for condition in conditions)
+    assert (arguments.artifact_directory / "combined-result.json").is_file()
+    assert (arguments.artifact_directory / "SHA256SUMS").is_file()
+
+
+def test_persistent_result_write_failure_preserves_partial_conditions(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _mock_runner_preflight(monkeypatch)
+    real_write = gpu_runner.write_condition_result
+
+    def failed_write(output: Path, record: dict[str, object]) -> Path:
+        raise OSError("injected persistent result write failure")
+
+    def fake_condition(**values: object) -> dict[str, object]:
+        condition_root = values["artifact_root"] / "conditions" / (
+            f"{values['ordinal']:02d}-{values['condition']}"
+        )
+        condition_root.mkdir(parents=True)
+        record = _result_record()
+        record["treatment_condition"] = values["condition"]
+        if values["ordinal"] <= 2:
+            real_write(condition_root / "result.json", record)
+        else:
+            gpu_runner.write_condition_result(condition_root / "result.json", record)
+        return _successful_summary(
+            condition_root, values["condition"], values["seed"]
+        )
+
+    monkeypatch.setattr(gpu_runner, "write_condition_result", failed_write)
+    monkeypatch.setattr(gpu_runner, "_run_condition", fake_condition)
+    arguments = _runner_arguments(tmp_path)
+
+    with pytest.raises(OSError, match="persistent result write failure"):
+        gpu_runner.run(arguments)
+
+    conditions = sorted((arguments.artifact_directory / "conditions").iterdir())
+    assert len(conditions) == 3
+    assert all((condition / "result.json").is_file() for condition in conditions[:2])
+    assert (conditions[2] / "technical-error.json").is_file()
+    assert not (conditions[2] / "result.json").exists()
+    assert not (arguments.artifact_directory / "combined-result.json").exists()
+    assert not (arguments.artifact_directory / "SHA256SUMS").exists()
+
+
+def test_precondition_exception_occurs_before_any_condition_starts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    arguments = _runner_arguments(tmp_path)
+    monkeypatch.setattr(
+        gpu_runner,
+        "validate_gpu_freeze",
+        lambda project: (_ for _ in ()).throw(RuntimeError("injected precondition")),
+    )
+
+    with pytest.raises(RuntimeError, match="injected precondition"):
+        gpu_runner.run(arguments)
+
+    assert arguments.artifact_directory.is_dir()
+    assert not (arguments.artifact_directory / "conditions").exists()
+    assert not (arguments.artifact_directory / "combined-result.json").exists()
+    assert not (arguments.artifact_directory / "SHA256SUMS").exists()
 
 
 def test_submitter_checks_duplicates_before_one_attested_submission() -> None:
