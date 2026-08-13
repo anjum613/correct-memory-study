@@ -1,0 +1,254 @@
+{
+  "amendment_id": "candidate-source-final-preexecution-v0.3",
+  "audit_path": "benchmark-selection/discovery/audits/source-specification-v0.2-final-preexecution-audit.json",
+  "base_protocol": {
+    "commit": "715592b8b96a689f7e532d5ad211bc9b5c7d82c1",
+    "protocol_version": "benchmark-selection-source-v0.2",
+    "specification_hashes": {
+      "README.md": "532359e15bc814c0edf805401237fbb5551a7973e469a73c5b8c2083044f2fd3",
+      "protocol.json": "8231a516f751953acb14593a157ecde8428cc012c38f5c8871c3fe1d12b60817",
+      "repository-repair-tasks.json": "7f251c7b89e7a61cbbfe248ff4843efd7c862eeb5f0e26e82376315a3b505979",
+      "security-advisory-repairs.json": "fe3c1b62d04dc2687ce619d814667e2daf04525eb80ab1a0f857c71fbe44b32a",
+      "source-priority-deduplication.json": "50c11a82eeb59ba8b1c2b0e7c371f16a6bf277179c5aa761225a3a10848d268e",
+      "source-record.schema.json": "1f84985072bc7e090381fb8fe2b2a2885f0442033436cad898d7a7427557d58c",
+      "source-rejection-codes.json": "de492d323e6a475aec34a7d88687384da663e0ae4090b6dc4ada14db1f10b92a",
+      "trust-boundary-issues-prs.json": "7ccf92717a470b5a1f234054d9231516f8b16c55908ac678d89886ec5528b388"
+    }
+  },
+  "candidate_identity_override": {
+    "canonical_candidate_id": {
+      "canonical_json": "UTF-8 JSON with sorted keys, no whitespace, ensure_ascii=false, allow_nan=false",
+      "digest": "sha256",
+      "envelope": {
+        "candidate_snapshot_commit_sha": "lowercase 40-hex exact pre-repair snapshot",
+        "github_repository_id": "positive GitHub repository numeric ID",
+        "protocol_version": "benchmark-selection-source-v0.3",
+        "repair_commit_sha": "lowercase 40-hex exact repair endpoint"
+      },
+      "format": "CMVP-CAND-03-{64 lowercase hex}",
+      "issued_after_normalization_and_exact_deduplication": true,
+      "record_ceiling": null,
+      "renumber_on_later_source": false
+    },
+    "edge_case_rules": {
+      "backport_or_cherry_pick": "Different repair SHA or different pre-repair snapshot means a distinct candidate; retain a POSSIBLE_DUPLICATE relation only when exact non-semantic patch evidence supports it.",
+      "branch_specific_fix": "The pre-repair snapshot is identity-bearing; equal repair endpoints with different snapshots remain distinct candidates.",
+      "equivalent_patch_different_sha": "Never auto-collapse; preserve both candidates. An exact deterministic patch digest may create POSSIBLE_DUPLICATE provenance but is not canonical identity.",
+      "multi_fix_commit": "One repository/snapshot/repair range remains one candidate episode; semantic narrowness is not decided during discovery.",
+      "one_commit_multiple_issues": "Retain every issue, advisory, benchmark, and query source record as provenance for one exact repair-range candidate; no source-task lead is discarded."
+    },
+    "reason_for_change": "Repository ID plus repair SHA can name more than one repair range when sources or branches supply different valid pre-repair snapshots.",
+    "source_record_id": {
+      "envelope": [
+        "protocol_version=benchmark-selection-source-v0.3",
+        "source_id",
+        "immutable_source_revision",
+        "source_native_identity"
+      ],
+      "format": "CMVP-SRC-03-{64 lowercase hex}"
+    }
+  },
+  "cross_source_provenance_override": {
+    "candidate_provenance_index": {
+      "candidate_key": "canonical_candidate_id",
+      "content": "sorted unique source_record_id values plus every source-native identity and raw-artifact hash",
+      "generation": "derive only after all source records are finalized; bytewise sort candidate IDs and source-record IDs",
+      "immutability": "append-only across later source additions; never delete or rewrite an earlier source record",
+      "manifest": "canonical JSON plus SHA-256"
+    },
+    "materialization_manifest": "After capture, write a separate canonical manifest binding the raw capture-manifest SHA-256, every encountered source-object ID, every MATERIALIZED or SOURCE_REJECTED source-record ID, candidate links, and the provenance-index SHA-256. Require exact one-to-one source-object accounting before ledger projection.",
+    "exact_duplicate": "Repository ID, pre-repair snapshot, and repair endpoint must all be equal. Same repository ID and PR number is exact only when those two SHAs also agree.",
+    "missing_metadata": "Absent, null, empty, unresolved, or inaccessible fields never imply equality and never substitute for a canonical identity field.",
+    "pr_commit_cross_source_match": "A PR-linked repair and an explicit commit repair collapse only when repository ID, pre-repair snapshot, and repair SHA are all exactly equal.",
+    "source_priority": "Affects provenance display order only; never identity, inclusion, score, rejection, or scientific rank."
+  },
+  "execution_status": "FROZEN_NOT_EXECUTED",
+  "experiment_accessed": false,
+  "failure_semantics": {
+    "atomicity": "Capture and normalization are separate transactions. Any batch-level failure finalizes CAPTURE_FAILED, preserves all raw attempts, and materializes zero candidates from that source execution.",
+    "cases": {
+      "deleted_or_inaccessible_repository": "After the bounded redirect rule, HTTP 404/410 or absent repository ID => SOURCE_REJECTED:GITHUB_REPOSITORY_UNAVAILABLE for the encountered source object.",
+      "inaccessible_commit": "HTTP 404/410 or unresolved exact SHA => SOURCE_REJECTED:GITHUB_COMMIT_UNAVAILABLE.",
+      "malformed_metadata": "Use the inherited exact BUGSINPY_* or ADVISORY_MALFORMED per-record disposition; preserve raw bytes first.",
+      "missing_issue_or_pr": "HTTP 404/410 or null required GraphQL node => SOURCE_REJECTED:GITHUB_ISSUE_OR_PR_UNAVAILABLE.",
+      "rate_limit_exhaustion": "HTTP 403/429 with rate-limit evidence => batch-level API_RATE_LIMIT_EXHAUSTED; do not retry in the same execution.",
+      "repository_rename_or_transfer": "Follow at most one recorded redirect, then require the final positive repository numeric ID to equal the ID captured in the search or source-resolution object. New owner/name/URL are capture metadata and do not change identity; conflicting IDs fail with GITHUB_REPOSITORY_IDENTITY_CHANGED.",
+      "source_schema_drift": "Missing or type-changed search envelope fields fail the entire query; missing detail fields reject that source record. Use SOURCE_SCHEMA_DRIFT and never infer a replacement field.",
+      "transient_api_failure": "Apply the bounded request policy. Exhaustion is batch-level API_TRANSIENT_FAILURE_EXHAUSTED with no partial materialization.",
+      "withdrawn_advisory": "Use inherited per-record SOURCE_REJECTED:ADVISORY_WITHDRAWN."
+    },
+    "reason_codes_added": {
+      "API_RATE_LIMIT_EXHAUSTED": "A 403/429 response carries primary or secondary rate-limit evidence.",
+      "API_REDIRECT_LIMIT_EXCEEDED": "More than one redirect is required for a logical request.",
+      "API_TRANSIENT_FAILURE_EXHAUSTED": "All three deterministic attempts failed transiently.",
+      "BENCHMARK_REPAIR_ANCESTRY_INVALID": "The declared buggy snapshot is not an ancestor of the declared fixed endpoint.",
+      "GITHUB_COMMIT_UNAVAILABLE": "An exact required commit cannot be retrieved and verified.",
+      "GITHUB_ISSUE_OR_PR_UNAVAILABLE": "A required issue or pull request cannot be retrieved.",
+      "GITHUB_PR_ENDPOINT_PARENT_MISMATCH": "A two-parent endpoint does not have the captured PR head as its second parent.",
+      "GITHUB_PR_MERGE_TOPOLOGY_AMBIGUOUS": "A merged PR has zero, more than two, or multi-commit single-parent endpoint topology.",
+      "GITHUB_REPOSITORY_IDENTITY_CHANGED": "A redirect resolves to a conflicting repository numeric ID.",
+      "GITHUB_REPOSITORY_UNAVAILABLE": "A required repository is deleted or inaccessible.",
+      "GITHUB_SEARCH_ATOMIC_PARTITION_OVERFLOW": "A one-second created-at partition still exceeds 1,000 results.",
+      "GITHUB_SEARCH_PARTITION_COUNT_MISMATCH": "A parent count does not equal its two disjoint child counts, or encountered parent items are absent from leaf captures.",
+      "RAW_ARTIFACT_HASH_MISMATCH": "Stored raw bytes do not match their declared SHA-256.",
+      "RAW_CAPTURE_INCOMPLETE": "A capture manifest is not durably finalized as CAPTURE_COMPLETE.",
+      "SOURCE_SCHEMA_DRIFT": "A source or API object differs from the frozen structural schema."
+    }
+  },
+  "freeze_requirements": {
+    "before_execution": [
+      "commit this amendment and its tests",
+      "record the final project commit and hashes of v0.2 plus v0.3 files",
+      "validate the eight unchanged root query templates statically",
+      "verify authentication exists without making a source request",
+      "create a new empty no-overwrite capture destination"
+    ],
+    "execution_must_not_begin_if": [
+      "any v0.2 base hash differs",
+      "any v0.3 file hash differs from the execution freeze",
+      "the capture destination already contains a manifest",
+      "authentication or durable storage preflight fails"
+    ]
+  },
+  "frozen_at_utc": "2026-08-13T02:51:08Z",
+  "github_created_partition_override": {
+    "atomic_overflow": "If start_utc equals end_utc and total_count is greater than 1,000, fail the entire eight-query source execution with GITHUB_SEARCH_ATOMIC_PARTITION_OVERFLOW. Do not add a semantic or identity-derived partition.",
+    "count_reconciliation": [
+      "For every split node require parent.total_count = left.total_count + right.total_count.",
+      "For every leaf require the union of page item node_id values to have cardinality exactly leaf.total_count; repeated or missing items fail closed.",
+      "Require every node_id encountered on a parent probe to occur in exactly one completed leaf capture or the deterministic rejected-object set.",
+      "Require node_id sets from disjoint leaves to be disjoint before query-level deduplication.",
+      "Any violation fails the entire source execution with GITHUB_SEARCH_PARTITION_COUNT_MISMATCH."
+    ],
+    "field": "created",
+    "leaf_capture": "When total_count is at most 1,000 and incomplete_results is false, retain the probe as page 1 and fetch exactly pages 2..ceil(total_count/100), with page 1 only for a zero-result leaf.",
+    "node_probe": {
+      "order": "asc",
+      "page": 1,
+      "per_page": 100,
+      "sort": "created"
+    },
+    "partition_order": "deterministic depth-first traversal, left child before right child",
+    "query_construction": "Replace the root template's single created qualifier with exactly created:{start_utc}..{end_utc}; change no other token or request parameter.",
+    "recursion": "If total_count exceeds 1,000 and start_utc is before end_utc, compute midpoint=floor((start_epoch_seconds+end_epoch_seconds)/2); recurse on inclusive [start,midpoint], then inclusive [midpoint+1 second,end].",
+    "result_cap": 1000,
+    "root_interval": {
+      "end_utc_inclusive": "2026-08-12T23:59:59Z",
+      "start_utc_inclusive": "2020-01-01T00:00:00Z"
+    },
+    "scientific_independence": "Partition only on frozen creation time and deterministic counts; never inspect titles, repositories, apparent quality, security relevance, or any candidate feature to choose a boundary.",
+    "source_transaction": "All eight root queries form one capture transaction. Any query-level failure prevents normalization for all eight while preserving raw attempts.",
+    "timestamp_resolution": "whole UTC seconds"
+  },
+  "identity_fetch_performed": false,
+  "protocol_version": "benchmark-selection-source-v0.3",
+  "raw_capture_override": {
+    "artifact_layout": "raw/sha256/{first-two-hex}/{remaining-62-hex}",
+    "capture_before_parse": true,
+    "failed_attempts_retained": true,
+    "manifest_schema": "benchmark-selection/discovery/prospective-v0.3/raw-capture-manifest.schema.json",
+    "manifest_write": "After every referenced artifact is durably written, write canonical JSON to a new temporary file, fsync, atomically rename to capture-manifest.json with no overwrite, then write capture-manifest.json.sha256. The raw manifest records encountered source objects with disposition_phase=NOT_STARTED; dispositions belong only to the later materialization manifest.",
+    "normalization_gate": "Normalization reads only a CAPTURE_COMPLETE manifest and re-hashes every artifact. CAPTURE_FAILED and any hash/path mismatch materialize zero candidates.",
+    "source_record_revision_mapping": "For pinned Git sources use the exact source commit. For API sources use the finalized capture-manifest sidecar SHA-256 as VERSIONED_API_CAPTURE; the query-specification hash remains inside the raw manifest and avoids self-reference.",
+    "pinned_git_sources": "Store exact source blobs, pinned tree-entry metadata, and any later resolution response in the same content-addressed layout before parsing.",
+    "raw_write": "Hash exact bytes first; create the content-addressed path without overwrite; if it exists, verify identical bytes; fsync file and parent directory before referencing it.",
+    "retention": "Raw bytes, all attempts, failed captures, manifests, and sidecar hashes are append-only and are never normalized in place.",
+    "sensitive_headers": "Never store Authorization, cookies, token-bearing URLs, or credential material."
+  },
+  "repair_anchor_override": {
+    "advisory_explicit_commit": {
+      "repair_endpoint": "the exact referenced commit SHA",
+      "snapshot": "the sole captured parent",
+      "validation": "Require the commit to resolve in the canonical repository and have exactly one parent; zero or multiple parents remain SOURCE_REJECTED:ADVISORY_COMMIT_PARENT_NOT_SINGLE."
+    },
+    "advisory_pull_request": "Apply the merged-PR topology rule; explicit PR and commit references collapse only under the v0.3 three-field exact identity.",
+    "ambiguous_advisory_references": "Materialize each independently resolvable explicit reference. Never infer an anchor from prose, issue text, release notes, branch names, or neighboring references. Reject unresolved accepted references per record.",
+    "benchmark_metadata": {
+      "repair_endpoint": "the exact fixed_commit_id",
+      "snapshot": "the exact buggy_commit_id",
+      "validation": "Capture both commit objects and trees and a deterministic ancestry proof that buggy_commit_id is an ancestor of fixed_commit_id; otherwise SOURCE_REJECTED:BENCHMARK_REPAIR_ANCESTRY_INVALID."
+    },
+    "issue_lead": "An issue remains a lead only. Materialize every deterministically linked merged PR under the merged-PR topology rule. A direct issue-linked commit without a qualifying merged PR is not a candidate anchor and is SOURCE_REJECTED:GITHUB_ISSUE_LEAD_NO_MERGED_PR.",
+    "merged_pull_request": {
+      "base_sha_role": "Capture PR base.sha as API metadata but do not use it alone as the pre-repair snapshot.",
+      "branch_deletion": "Branch names and continued branch existence are not required after exact head, endpoint, parent, and tree objects resolve.",
+      "capture": [
+        "merged=true and merged_at",
+        "PR number, base.sha, head.sha, and merge_commit_sha",
+        "complete paginated PR commit list and declared commit count",
+        "repair endpoint commit object, tree, and ordered parent SHAs",
+        "pre-repair snapshot commit object and tree"
+      ],
+      "ordinary_merge": "If the endpoint has exactly two parents, require parent[1] equals captured head.sha; candidate snapshot is parent[0], repair endpoint is merge_commit_sha. This supports one- or multi-commit ordinary merges.",
+      "single_commit_single_parent": "If the endpoint has exactly one parent and the complete PR commit count is exactly one, candidate snapshot is that parent and repair endpoint is merge_commit_sha; squash versus rebase does not alter the range.",
+      "single_parent_multi_commit": "If the endpoint has exactly one parent and PR commit count is greater than one, squash and rebase imply different pre-repair ranges but GitHub PR detail does not provide immutable merge-method evidence. Fail closed with GITHUB_PR_MERGE_TOPOLOGY_AMBIGUOUS.",
+      "unsupported_topology": "Zero parents, more than two parents, missing endpoint objects, or two-parent head mismatch fail closed; never guess from commit messages or branch names."
+    },
+    "repair_range": "The exact candidate repository state transition is candidate_snapshot_commit_sha..repair_commit_sha; both endpoint trees and all required ancestry/topology evidence are immutable capture artifacts."
+  },
+  "request_policy_override": {
+    "attempts": {
+      "maximum": 3,
+      "retry_count_definition": "attempt_number minus one",
+      "retry_delays_seconds": [
+        2,
+        4
+      ],
+      "retryable_http_statuses": [
+        500,
+        502,
+        503,
+        504
+      ],
+      "retryable_transport_errors": [
+        "CONNECT_TIMEOUT",
+        "READ_TIMEOUT",
+        "CONNECTION_RESET"
+      ]
+    },
+    "rate_limit": "Do not retry 403 or 429 in the same source execution. Record Retry-After and all available X-RateLimit fields, finalize CAPTURE_FAILED, and use API_RATE_LIMIT_EXHAUSTED.",
+    "record_for_every_logical_request": [
+      "HTTP method and endpoint",
+      "API version and Accept media type",
+      "exact query and ordered parameters",
+      "partition path and UTC bounds",
+      "page or GraphQL cursor",
+      "sort and order",
+      "logical-request and attempt numbers",
+      "attempt start and end UTC timestamps",
+      "connect, read, and total timeout values",
+      "HTTP status or frozen transport-error code",
+      "retry count and applied delay",
+      "total_count and incomplete_results when present",
+      "non-sensitive response headers including Date, Retry-After, ETag, X-GitHub-Api-Version-Selected, X-GitHub-Request-Id, and all available X-RateLimit fields",
+      "exact raw-response SHA-256 and content-addressed path when a body exists"
+    ],
+    "redirects": "Follow at most one 301, 302, 307, or 308 response for detail endpoints; preserve both responses and Location. Search and GraphQL endpoints must not redirect. A second redirect fails with API_REDIRECT_LIMIT_EXCEEDED.",
+    "timeouts_seconds": {
+      "connect": 10,
+      "read": 30,
+      "total_per_attempt": 45
+    }
+  },
+  "schema": "candidate-source-prospective-amendment-v0.3",
+  "scientific_separation_override": {
+    "discovery_forbidden_assignments": [
+      "trust_family",
+      "p_star",
+      "triplet_feasibility",
+      "security_relevance_score",
+      "benchmark_inclusion",
+      "model_feasibility",
+      "experimental_status"
+    ],
+    "query_family_basis": "Frozen query-design provenance only; never copy it into a candidate trust-family field.",
+    "ranking": "No ML model, language model, heuristic score, manual attractiveness judgment, or treatment/experiment signal may rank, omit, substitute, split, or prioritize discovered source objects.",
+    "treatment_or_experiment_access": "forbidden"
+  },
+  "source_id_overrides": {
+    "bugsinpy-repair-tasks-002": "bugsinpy-repair-tasks-003",
+    "github-advisory-pypi-repairs-002": "github-advisory-pypi-repairs-003",
+    "github-trust-boundary-issues-prs-002": "github-trust-boundary-issues-prs-003"
+  },
+  "treatment_results_consulted": false
+}

@@ -109,3 +109,56 @@ advisory predicates and repair-anchor rules, and merged-PR materialization for
 the eight public GitHub searches. It does not assess semantic bug suitability,
 assign a trust family, define `p*`, construct a triplet, score a candidate, or
 authorize source execution.
+
+## PC-005 — final pre-execution candidate-source amendment v0.3
+
+- Effective timestamp: `2026-08-13T02:51:08Z`
+- Applies to: prospective execution of the three additional discovery sources
+- Status: `FROZEN_NOT_EXECUTED`
+- Audited v0.2 commit: `715592b8b96a689f7e532d5ad211bc9b5c7d82c1`
+- v0.2 specification files modified: `NO`
+- Real discovery source executed: `NO`
+- Candidate identity fetched or inspected: `NO`
+- Experiment artifacts accessed: `NO`
+- Treatment assignments or outcomes viewed: `NO`
+
+The final pre-execution audit found four concrete ambiguities before any
+additional-source identity was observed. Repository ID plus repair SHA did not
+distinguish different valid pre-repair states. GitHub searches above 1,000
+results had no already-frozen partition procedure. Request retries and raw
+capture durability were not fully specified. Finally, a merged pull request's
+`merge_commit_sha` has merge-method-dependent topology, so `base.sha` alone
+did not define every repair range.
+
+Protocol v0.3 is an additive overlay on the hash-pinned v0.2 files. Candidate
+identity now includes GitHub repository numeric ID, exact pre-repair snapshot,
+and exact repair endpoint. One code range referenced by multiple issues or
+sources remains one candidate while every source-task record is preserved.
+Backports, cherry-picks, branch-specific ranges, and equivalent patches at
+different SHAs remain distinct unless all three immutable identity fields are
+equal.
+
+GitHub searches now recursively bisect only their frozen `created` interval at
+whole UTC-second midpoints when a partition exceeds 1,000 results. Child
+counts must reconcile exactly, traversal is left-first, and an overfull
+one-second partition fails the whole source capture. Partitioning cannot use
+repository identity, apparent quality, security relevance, or any scientific
+or experimental signal.
+
+Every request has fixed timeouts, at most three attempts, fixed retry delays,
+bounded redirects, explicit rate-limit failure, and attempt-level raw capture.
+Exact source bytes are written content-addressably before parsing and bound by
+an immutable capture manifest. Normalization begins only after a complete
+manifest re-hashes successfully; failed captures preserve raw evidence and
+materialize no candidates.
+
+Merged PR snapshots are derived from immutable endpoint topology. Verified
+two-parent ordinary merges use the first parent after checking the PR head is
+the second parent. A single-commit, single-parent endpoint uses its sole
+parent. Multi-commit single-parent squash/rebase topology is rejected as
+ambiguous rather than guessed. Explicit advisory commits still require one
+parent, and benchmark metadata now requires captured buggy-to-fixed ancestry.
+
+Discovery remains mechanical. It cannot assign trust family, `p*`, triplet
+feasibility, security relevance, benchmark inclusion, model feasibility, or
+experimental status, and it cannot apply ML or heuristic ranking.
