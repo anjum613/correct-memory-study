@@ -1,0 +1,98 @@
+{
+  "candidate_unit": "one advisory times one canonical GitHub repository repair episode",
+  "execution_status": "FROZEN_NOT_EXECUTED",
+  "experiment_accessed": false,
+  "filters": {
+    "cve_alias": "at least one alias matching ^CVE-[0-9]{4}-[0-9]+$; otherwise SOURCE_REJECTED:ADVISORY_CVE_ALIAS_MISSING",
+    "ecosystem": "affected.package.ecosystem must equal PyPI exactly",
+    "malware_predicate": {
+      "malformed": "database_specific present but not an object, or database_specific.malware present but not boolean => SOURCE_REJECTED:ADVISORY_MALFORMED",
+      "true_if": "source path is under advisories/malware/ OR database_specific.malware is exactly true",
+      "true_result": "SOURCE_REJECTED:ADVISORY_MALWARE"
+    },
+    "path_regex": "^advisories/github-reviewed/.+\\.json$",
+    "withdrawn_predicate": {
+      "active_if": "withdrawn is absent or JSON null",
+      "malformed": "withdrawn is present and is neither JSON null nor a non-empty string => SOURCE_REJECTED:ADVISORY_MALFORMED",
+      "withdrawn_if": "withdrawn is a non-empty string",
+      "withdrawn_result": "SOURCE_REJECTED:ADVISORY_WITHDRAWN"
+    }
+  },
+  "frozen_at_utc": "2026-08-13T02:07:39Z",
+  "identity_fetch_performed": false,
+  "multi_package_rules": {
+    "candidate_expansion": "emit one episode per distinct canonical repository numeric ID and exact repair commit SHA, not one episode per package",
+    "different_repository": "preserve a distinct repair episode for every repository; do not collapse across repository IDs",
+    "package_attachment": "attach the sorted unique set of every normalized affected PyPI package name to each advisory repair episode",
+    "package_normalization": "PEP 503: lowercase and collapse each run of hyphen, underscore, or dot to one hyphen",
+    "repeated_package": "collapse equal normalized package names",
+    "same_repository": "collapse references only when repository numeric ID and exact repair commit SHA are both equal"
+  },
+  "normalization": {
+    "accepted_github_forms": {
+      "commit": "^https://github\\.com/{owner}/{repository}/commit/{40-hex-SHA}/?$",
+      "pull_request": "^https://github\\.com/{owner}/{repository}/pull/{positive-canonical-decimal}/?$",
+      "repository": "^https://github\\.com/{owner}/{repository}(?:\\.git)?/?$"
+    },
+    "forbidden_url_components": [
+      "credentials",
+      "port",
+      "query",
+      "fragment"
+    ],
+    "github_repository_identity": "positive repository numeric ID from exact repository-detail capture",
+    "owner_name_url_role": "capture-time metadata only",
+    "repair_reference_case": "commit SHA normalized to lowercase; pull-request number parsed as canonical positive decimal",
+    "repository_form_role": "repository evidence only; never a repair anchor"
+  },
+  "pagination": {
+    "enumeration": "bytewise ascending complete pinned-tree walk",
+    "mode": "NOT_APPLICABLE_PINNED_GIT_TREE",
+    "result_cap": null,
+    "tree_walk": "every matching advisory JSON blob at the pinned commit exactly once"
+  },
+  "protocol_version": "benchmark-selection-source-v0.2",
+  "raw_capture": {
+    "raw_unit": "one advisory JSON blob",
+    "required_artifacts": [
+      "exact advisory bytes and SHA-256",
+      "pinned source-tree entry metadata",
+      "exact GitHub repository response and SHA-256 for each accepted repair repository",
+      "exact commit response and parent data or PR-detail response and SHA-256"
+    ],
+    "source_native_key": [
+      "source_relative_path",
+      "advisory_id"
+    ]
+  },
+  "repair_anchor_precedence": [
+    "An explicit commit URL supplies exactly that commit SHA; require one captured parent and use that parent as the candidate snapshot.",
+    "An explicit PR URL supplies its captured merge_commit_sha; require merged=true and use captured base.sha as the candidate snapshot.",
+    "If a PR merge_commit_sha exactly equals an explicit commit repair in the same repository, collapse them into one episode and retain both reference provenances.",
+    "Distinct repair SHAs remain distinct episodes even within one repository.",
+    "Repository-only and non-GitHub references never infer a repair anchor."
+  ],
+  "schema": "prospective-advisory-source-v0.2",
+  "source": {
+    "format": "OSV JSON",
+    "repository": "https://github.com/github/advisory-database.git",
+    "resolved_ref": "refs/heads/main",
+    "revision": "bfef29f8e04ad5037181f98a990572d825dff579",
+    "revision_immutable": true,
+    "source_kind": "SECURITY_ADVISORY_REPAIR"
+  },
+  "source_id": "github-advisory-pypi-repairs-002",
+  "source_rejected_rules": {
+    "accepted_reference_unresolved": "ADVISORY_REPAIR_REFERENCE_UNRESOLVED",
+    "commit_parent_count_not_one": "ADVISORY_COMMIT_PARENT_NOT_SINGLE",
+    "invalid_or_missing_repository_identity": "GITHUB_REPOSITORY_ID_MISSING",
+    "malformed_advisory": "ADVISORY_MALFORMED",
+    "malware": "ADVISORY_MALWARE",
+    "missing_cve_alias": "ADVISORY_CVE_ALIAS_MISSING",
+    "no_accepted_repair_reference": "ADVISORY_NO_ACCEPTED_REPAIR_REFERENCE",
+    "no_pypi_package": "ADVISORY_NO_PYPI_PACKAGE",
+    "pr_incomplete_or_unmerged": "ADVISORY_PR_DETAIL_INCOMPLETE or GITHUB_PR_NOT_MERGED",
+    "withdrawn": "ADVISORY_WITHDRAWN"
+  },
+  "treatment_results_consulted": false
+}

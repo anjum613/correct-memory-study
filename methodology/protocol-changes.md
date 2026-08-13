@@ -73,3 +73,39 @@ Only an exact hard-gate failure may move a candidate to `EXCLUDED`. Only six
 automatic `PASS` decisions may move it to `AUTOMATIC_GATES_PASSED`. This
 amendment does not assign a trust family, define `p*`, construct references,
 score, rank, select, or use treatment information.
+
+## PC-004 — raw source records and content-addressed candidate identity
+
+- Effective timestamp: `2026-08-13T02:07:39Z`
+- Applies to: prospective execution of the three additional discovery sources
+- Status: `FROZEN_NOT_EXECUTED`
+- Failed v0.1 audit commit: `4162f99d6b45615d8bad05631b5dd46c516d34f0`
+- Additional-source identity fetch performed: `NO`
+- Existing generic discovery identities changed: `NO`
+- Benchmark selection or treatment begun: `NO`
+- Experiment artifacts accessed: `NO`
+- Treatment assignments or outcomes viewed: `NO`
+
+The failed v0.1 source specifications remain immutable. Their finite
+source-range IDs, missing raw-record layer, and incomplete normalization rules
+are superseded prospectively by v0.2 only for later additional-source
+execution.
+
+Every later source object must receive an append-only source record, whether
+it is `MATERIALIZED` or `SOURCE_REJECTED`. A candidate-ledger record may be
+created only when positive immutable repository, pre-repair snapshot, repair,
+and artifact identity is present. Source-record IDs are content-addressed
+within an immutable source revision. Canonical candidate IDs are
+content-addressed from GitHub repository numeric ID plus exact repair commit
+SHA and are never renumbered when another source is added.
+
+Automatic cross-source collapse requires positive immutable equality. Missing
+values never act as wildcards; weaker overlap is preserved as
+`POSSIBLE_DUPLICATE`. Source priority controls provenance presentation only.
+It cannot affect scientific ranking, eligibility, replacement, or selection.
+
+The amendment also freezes a non-executable BugsInPy metadata grammar, exact
+advisory predicates and repair-anchor rules, and merged-PR materialization for
+the eight public GitHub searches. It does not assess semantic bug suitability,
+assign a trust family, define `p*`, construct a triplet, score a candidate, or
+authorize source execution.
