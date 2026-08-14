@@ -21,6 +21,7 @@ from .external_calculator_oracle import run_external_calculator_oracle
 from .job_25692_forensics import run_visible_test_investigation
 from .repository_manager import (
     copy_repository_tree,
+    git,
     prepare_working_copy,
     repository_content_digest,
 )
@@ -206,18 +207,14 @@ def run_job_25692_stagnation_replay(
         return result
 
     def patch_generation() -> dict[str, Any]:
-        completed = subprocess.run(
-            ["/usr/bin/git", "diff", "--binary", "HEAD", "--"],
-            cwd=working_copy,
-            text=True,
-            capture_output=True,
-            check=False,
+        completed = git(
+            working_copy, "diff", "--binary", "HEAD", "--", check=False
         )
-        changed = subprocess.run(
-            ["/usr/bin/git", "status", "--porcelain", "--untracked-files=all"],
-            cwd=working_copy,
-            text=True,
-            capture_output=True,
+        changed = git(
+            working_copy,
+            "status",
+            "--porcelain",
+            "--untracked-files=all",
             check=True,
         ).stdout.splitlines()
         allowed = completed.stdout

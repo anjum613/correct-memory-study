@@ -7,6 +7,7 @@ from dataclasses import dataclass
 import hashlib
 import json
 import os
+import secrets
 import shutil
 import stat
 import subprocess
@@ -19,7 +20,7 @@ if TYPE_CHECKING:
     from .task_file_policy import TaskFilePolicy
 
 
-REPOSITORY_COPY_POLICY = "isolated-repository-copy-v1"
+REPOSITORY_COPY_POLICY = "isolated-repository-copy-external-git-v2"
 REPOSITORY_CONTENT_SCHEMA = "isolated-repository-content-v1"
 WORKING_COPY_PERMISSION_FAILURE = "WORKING_COPY_PERMISSION_FAILURE"
 DIRECTORY_MODE = 0o700
@@ -55,7 +56,12 @@ def prepare_working_copy(
     destination: Path | None = None,
     task_policy: TaskFilePolicy | None = None,
 ) -> tuple[Path, str]:
-    """Copy a template into a fresh repository and create its initial commit."""
+    """Copy a template and create controller-only Git metadata beside it.
+
+    The returned task tree deliberately has neither a ``.git`` directory nor a
+    ``.git`` pointer.  Evaluator Git state is a hidden sibling so a filesystem
+    sandbox can grant the task tree without granting its metadata.
+    """
     if not template.is_dir():
         raise FileNotFoundError(f"smoke template does not exist: {template}")
     if destination is not None:
@@ -69,6 +75,7 @@ def prepare_working_copy(
             tempfile.mkdtemp(prefix="cmpilot-smoke-", dir=temporary_root)
         )
 
+    metadata = _new_evaluator_git_dir(working_copy)
     try:
         source_digest = repository_content_digest(template)
         if generated_destination:
@@ -81,26 +88,62 @@ def prepare_working_copy(
                 "isolated repository content differs from its source before Git initialization"
             )
         _verify_working_copy_permissions(working_copy)
-    except BaseException:
-        if generated_destination:
-            shutil.rmtree(working_copy)
-        raise
-    for arguments in (
-        ("init",),
+        subprocess.run(
+            ["git", "init", "--bare", str(metadata)],
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+        for arguments in (
         ("config", "user.name", "cmpilot smoke preparer"),
         ("config", "user.email", "cmpilot@example.invalid"),
         ("add", "."),
         ("commit", "-m", "Initial smoke-test repository"),
-    ):
-        git(working_copy, *arguments, check=True)
-    initial_commit = git(
-        working_copy, "rev-parse", "HEAD", check=True
-    ).stdout.strip()
-    if task_policy is not None:
-        from .task_file_policy import apply_task_file_permissions
+        ):
+            git(working_copy, *arguments, check=True)
+        initial_commit = git(
+            working_copy, "rev-parse", "HEAD", check=True
+        ).stdout.strip()
+        if task_policy is not None:
+            from .task_file_policy import apply_task_file_permissions
 
-        apply_task_file_permissions(working_copy, task_policy)
+            apply_task_file_permissions(working_copy, task_policy)
+    except BaseException:
+        if metadata.exists():
+            shutil.rmtree(metadata)
+        if generated_destination and working_copy.exists():
+            shutil.rmtree(working_copy)
+        raise
     return working_copy, initial_commit
+
+
+def evaluator_git_dir(repository: Path) -> Path:
+    """Return the controller-owned Git metadata path for a task tree."""
+    repository = Path(repository)
+    prefix = f".{repository.name}.cmpilot-evaluator-git-"
+    candidates = sorted(
+        path
+        for path in repository.parent.iterdir()
+        if path.name.startswith(prefix) and path.is_dir()
+    )
+    if not candidates:
+        raise FileNotFoundError(
+            f"controller-owned evaluator Git metadata is missing for: {repository}"
+        )
+    if len(candidates) != 1:
+        raise RepositoryCopyError(
+            f"multiple evaluator Git metadata directories exist for: {repository}"
+        )
+    return candidates[0]
+
+
+def _new_evaluator_git_dir(repository: Path) -> Path:
+    prefix = f".{repository.name}.cmpilot-evaluator-git-"
+    for _ in range(8):
+        candidate = repository.parent / f"{prefix}{secrets.token_hex(16)}"
+        if not candidate.exists() and not candidate.is_symlink():
+            return candidate
+    raise RepositoryCopyError("could not allocate a private evaluator Git path")
 
 
 def copy_repository_tree(source: Path, destination: Path) -> RepositoryContentDigest:
@@ -310,12 +353,18 @@ def repository_preparation_record(
             ),
         },
         "git": {
-            "directory_created": (destination / ".git").is_dir(),
+            "agent_visible_dot_git_present": (
+                (destination / ".git").exists()
+                or (destination / ".git").is_symlink()
+            ),
+            "directory_created": False,
+            "evaluator_git_directory": str(evaluator_git_dir(destination)),
+            "evaluator_git_directory_created": evaluator_git_dir(destination).is_dir(),
             "initial_commit": initial_commit,
             "status": git(destination, "status", "--short", check=True).stdout,
         },
         "policy": REPOSITORY_COPY_POLICY,
-        "schema": "isolated-repository-preparation-v1",
+        "schema": "isolated-repository-preparation-v2",
         "source": {
             "content_digest": source_digest.as_record(),
             "mode_inventory": repository_mode_inventory(source),
@@ -366,8 +415,23 @@ def _mode_value(value: object) -> int | None:
 
 
 def git(repository: Path, *arguments: str, check: bool = False) -> subprocess.CompletedProcess[str]:
+    try:
+        metadata = evaluator_git_dir(repository)
+    except FileNotFoundError:
+        metadata = None
+    if metadata is not None:
+        command = [
+            "git",
+            f"--git-dir={metadata}",
+            f"--work-tree={repository}",
+            *arguments,
+        ]
+    else:
+        # Compatibility for source repositories and historical fixtures that
+        # were not prepared by this version of the repository manager.
+        command = ["git", "-C", str(repository), *arguments]
     return subprocess.run(
-        ["git", "-C", str(repository), *arguments],
+        command,
         text=True,
         capture_output=True,
         check=check,

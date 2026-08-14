@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 
 from scripts.prepare_smoke_repo import prepare_working_copy
-from cmpilot.repository_manager import run_tests
+from cmpilot.repository_manager import git, run_tests
 
 
 def test_prepare_working_copy_creates_committed_copy_without_changing_template(
@@ -24,15 +23,7 @@ def test_prepare_working_copy_creates_committed_copy_without_changing_template(
         Path("calculator.py")
     ]
     assert len(commit_hash) == 40
-    assert (
-        subprocess.run(
-            ["git", "-C", str(working_copy), "rev-parse", "HEAD"],
-            check=True,
-            capture_output=True,
-            text=True,
-        ).stdout.strip()
-        == commit_hash
-    )
+    assert git(working_copy, "rev-parse", "HEAD", check=True).stdout.strip() == commit_hash
     assert {
         path.relative_to(template): path.read_bytes()
         for path in template.rglob("*")

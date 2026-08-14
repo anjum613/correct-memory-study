@@ -241,11 +241,12 @@ def test_job_25642_editor_fixture_is_now_policy_rejected() -> None:
 def test_policy_specification_is_versioned_and_records_shlex_limitations() -> None:
     specification = policy_specification()
 
-    assert specification["policy_version"] == "calculator-capability-policy-v3"
+    assert specification["policy_version"] == "calculator-capability-policy-v4"
     assert specification["default"] == "allow_repository_work"
     assert specification["complete_action_rejected_on_any_violation"] is True
     assert specification["shell_analysis"]["tokenizer"] == "python-shlex"
     assert specification["shell_analysis"]["opaque_constructs_fail_closed"] is True
+    assert specification["filesystem_enforcement"]["strict_isolation_fail_closed"] is True
     assert set(specification["categories"]) == {
         "allowed_repository_work",
         "prohibited_environment_mutation",
@@ -294,7 +295,7 @@ def test_job_25487_command_is_explicitly_classified() -> None:
         "command": "pip install pytest",
         "event": "ACTION_POLICY_VIOLATION",
         "matched_rule": "python-pip-package-management",
-        "policy_version": "calculator-capability-policy-v3",
+        "policy_version": "calculator-capability-policy-v4",
         "reason": "PACKAGE_MANAGEMENT_PROHIBITED",
     }
 

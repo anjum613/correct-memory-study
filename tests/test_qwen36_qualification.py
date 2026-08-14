@@ -32,6 +32,7 @@ from cmpilot.qwen36_qualification import (
     MAX_OUTPUT_TOKENS,
     PRIMARY_TASKS,
     QUALIFICATION_FREEZE,
+    Qwen36QualificationError,
     QWEN36_PYTHON,
     REASONING_PARSER,
     RESERVE_TASKS,
@@ -275,19 +276,20 @@ def test_smoke_result_builds_from_the_two_gpu_array_artifact() -> None:
     assert all(result["checks"].values())
 
 
-def test_final_freeze_validates_when_present() -> None:
+def test_historical_final_freeze_rejects_new_unfrozen_infrastructure() -> None:
     path = ROOT / QUALIFICATION_FREEZE
     if not path.is_file():
         pytest.skip("pre-outcome qualification freeze has not been emitted yet")
 
-    result = validate_freeze_manifest(
-        ROOT,
-        path,
-        infrastructure_amendment=ROOT / INFRASTRUCTURE_AMENDMENT,
-    )
-
-    assert result["pass"] is True
-    assert len(result["sha256"]) == 64
+    with pytest.raises(
+        Qwen36QualificationError,
+        match="invalid successor infrastructure amendment|qualification freeze mismatch",
+    ):
+        validate_freeze_manifest(
+            ROOT,
+            path,
+            infrastructure_amendment=ROOT / INFRASTRUCTURE_AMENDMENT,
+        )
 
 
 def test_post_freeze_cpu_gate_starts_with_repository_imports() -> None:

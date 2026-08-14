@@ -33,6 +33,7 @@ from .post_agent_pipeline import (
     analyze_task_repository,
 )
 from .repository_manager import (
+    evaluator_git_dir,
     final_patch,
     git,
     prepare_working_copy,
@@ -378,9 +379,13 @@ def _safe_agent_environment(
         "NO_PROXY": "127.0.0.1,localhost",
         "no_proxy": "127.0.0.1,localhost",
         "CMPILOT_REPOSITORY": str(working_copy),
+        "CMPILOT_EVALUATOR_GIT_DIR": str(evaluator_git_dir(working_copy)),
         "CMPILOT_TASK_FILE": str(task_instruction),
         "CMPILOT_TRAJECTORY": str(trajectory),
         "CMPILOT_PATCH_HISTORY": str(artifacts / "patch-history.jsonl"),
+        "CMPILOT_CONTROLLED_COMMAND_AUDIT": str(
+            artifacts / "controlled-command-audit.jsonl"
+        ),
         "CMPILOT_AGENT_CONFIG_SOURCE": str(config.agent_config_source),
         "CMPILOT_AGENT_CONFIG_ARTIFACT": str(artifacts / "agent-config.yaml"),
         "CMPILOT_AGENT_CONFIG_JSON_ARTIFACT": str(artifacts / "agent-config.json"),

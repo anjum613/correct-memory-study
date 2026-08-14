@@ -1,11 +1,9 @@
 """Explicit task-owned path policy and protected-file integrity checks.
 
-The mode restrictions applied here are defense in depth.  Every process in the
-current harness runs as the same Unix user, so that user can change modes or
-replace directory entries.  Command authorization is the first boundary and
-hash/mode checks are the deterministic detection boundary.  A later scientific
-deployment should additionally expose only designated writable paths through a
-container or filesystem mount boundary.
+The mode restrictions applied here are defense in depth.  Strict scientific
+runs combine this static task policy with a process filesystem boundary;
+command-text authorization remains an additional pre-execution check and
+hash/mode checks remain the deterministic detection boundary.
 """
 
 from __future__ import annotations

@@ -16,6 +16,7 @@ from cmpilot.qwen36_qualification import (
     ALL_TASKS,
     INFRASTRUCTURE_AMENDMENT,
     QUALIFICATION_FREEZE,
+    Qwen36QualificationError,
     SEED_SCHEDULE,
     SUITE_REFERENCE,
     validate_freeze_manifest,
@@ -77,22 +78,22 @@ def test_adapter_config_requires_an_existing_explicit_source(tmp_path: Path) -> 
         )
 
 
-def test_canonical_agent_config_is_explicit_and_freeze_validates_with_amendment() -> None:
+def test_canonical_agent_config_is_explicit_and_old_freeze_rejects_hardening() -> None:
     assert sha256_file(ROOT / AGENT_CONFIG) == (
         "efa280b845f78242eb82e2717967160e32b3ee6f053ee2a4f17e6f38cf672a77"
     )
-    result = validate_freeze_manifest(
-        ROOT,
-        ROOT / QUALIFICATION_FREEZE,
-        infrastructure_amendment=ROOT / INFRASTRUCTURE_AMENDMENT,
-    )
-    assert result["pass"] is True
-    assert result["infrastructure_amendment_sha256"] == sha256_file(
-        ROOT / INFRASTRUCTURE_AMENDMENT
-    )
+    with pytest.raises(
+        Qwen36QualificationError,
+        match="invalid successor infrastructure amendment|qualification freeze mismatch",
+    ):
+        validate_freeze_manifest(
+            ROOT,
+            ROOT / QUALIFICATION_FREEZE,
+            infrastructure_amendment=ROOT / INFRASTRUCTURE_AMENDMENT,
+        )
 
 
-def test_actual_qualification_runner_reaches_multiturn_model_boundary(
+def test_historical_qualification_runner_fails_closed_before_model_boundary(
     tmp_path: Path,
 ) -> None:
     mini_python = Path(
@@ -100,21 +101,11 @@ def test_actual_qualification_runner_reaches_multiturn_model_boundary(
     )
     if not mini_python.is_file() or not MODEL_SNAPSHOT.is_dir():
         pytest.skip("frozen HPC qualification environments are unavailable")
-    result = run_qualification_runner_preflight(ROOT, tmp_path / "actual-runner")
-
-    assert result["pass"] is True
-    assert result["runner_exit_code"] == 0
-    assert result["mock_request_count"] == 3
-    assert all(result["checks"].values())
-    requests = [
-        json.loads(line)
-        for line in (tmp_path / "actual-runner/mock-requests.jsonl")
-        .read_text(encoding="utf-8")
-        .splitlines()
-    ]
-    assert "merge_intervals" in json.dumps(requests[1]["request"])
-    assert "test_merges_overlapping" in json.dumps(requests[2]["request"])
-    assert all('"reasoning"' not in json.dumps(row["request"]) for row in requests)
+    with pytest.raises(
+        Qwen36QualificationError,
+        match="invalid successor infrastructure amendment|qualification freeze mismatch",
+    ):
+        run_qualification_runner_preflight(ROOT, tmp_path / "actual-runner")
 
 
 def _start_server(*, ignore_term: bool) -> subprocess.Popen[str]:

@@ -11,6 +11,8 @@ from pathlib import Path
 EXPECTED_VERSION = "2.4.6"
 RUNTIME_ACTION_PROTOCOL_MODULE = "cmpilot_action_protocol.py"
 RUNTIME_COMMAND_AUTHORIZATION_MODULE = "cmpilot_command_authorization.py"
+RUNTIME_COMMAND_GATEWAY_MODULE = "cmpilot_command_gateway.py"
+RUNTIME_FILESYSTEM_SANDBOX_MODULE = "cmpilot_filesystem_sandbox.py"
 RUNTIME_TASK_FILE_POLICY_MODULE = "cmpilot_task_file_policy.py"
 RUNTIME_HARDENED_AGENT_MODULE = "cmpilot_hardened_agent.py"
 RUNTIME_CONFIG_MODULE = "cmpilot_mini_swe_config.py"
@@ -82,6 +84,8 @@ def write_adapter(path: Path) -> None:
     sources = {
         RUNTIME_ACTION_PROTOCOL_MODULE: _INTEGRATION_ROOT / "action_protocol.py",
         RUNTIME_COMMAND_AUTHORIZATION_MODULE: _INTEGRATION_ROOT / "command_authorization.py",
+        RUNTIME_COMMAND_GATEWAY_MODULE: _INTEGRATION_ROOT / "command_gateway.py",
+        RUNTIME_FILESYSTEM_SANDBOX_MODULE: _INTEGRATION_ROOT / "filesystem_sandbox.py",
         RUNTIME_TASK_FILE_POLICY_MODULE: Path(__file__).with_name("task_file_policy.py"),
         RUNTIME_HARDENED_AGENT_MODULE: _INTEGRATION_ROOT / "hardened_agent.py",
         RUNTIME_CONFIG_MODULE: Path(__file__).with_name("mini_swe_config.py"),

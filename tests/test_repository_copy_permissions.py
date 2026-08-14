@@ -15,6 +15,8 @@ from cmpilot.repository_manager import (
     WORKING_COPY_PERMISSION_FAILURE,
     RepositoryCopyError,
     classify_working_copy_failure,
+    evaluator_git_dir,
+    git,
     prepare_working_copy,
     repository_content_digest,
     repository_preparation_record,
@@ -128,14 +130,17 @@ def test_read_only_source_produces_writable_committed_copy(tmp_path: Path) -> No
         assert _mode(destination) == 0o700
         assert _mode(destination / "nested") == 0o700
         assert os.access(destination, os.W_OK | os.X_OK)
-        assert (destination / ".git").is_dir()
+        assert not (destination / ".git").exists()
+        assert evaluator_git_dir(destination).is_dir()
         assert repository_content_digest(destination) == source_digest
         preparation = repository_preparation_record(source, destination, commit)
-        assert preparation["policy"] == "isolated-repository-copy-v1"
+        assert preparation["policy"] == "isolated-repository-copy-external-git-v2"
         assert preparation["content_digest_match"] is True
         assert preparation["source"]["root_mode"] == "0555"
         assert preparation["destination"]["root_mode"] == "0700"
-        assert preparation["git"]["directory_created"] is True
+        assert preparation["git"]["directory_created"] is False
+        assert preparation["git"]["agent_visible_dot_git_present"] is False
+        assert preparation["git"]["evaluator_git_directory_created"] is True
         assert preparation["git"]["status"] == ""
         assert {
             path.relative_to(source): _mode(path)
@@ -182,17 +187,10 @@ def test_existing_source_git_directory_is_not_copied(tmp_path: Path) -> None:
         source, destination=tmp_path / "working-copy"
     )
 
-    assert (destination / ".git").is_dir()
-    assert not (destination / ".git/prior-run-marker").exists()
-    assert (
-        subprocess.run(
-            ["git", "-C", str(destination), "status", "--short"],
-            check=True,
-            capture_output=True,
-            text=True,
-        ).stdout
-        == ""
-    )
+    assert not (destination / ".git").exists()
+    assert evaluator_git_dir(destination).is_dir()
+    assert not (evaluator_git_dir(destination) / "prior-run-marker").exists()
+    assert git(destination, "status", "--short", check=True).stdout == ""
 
 
 def test_safe_relative_symlink_is_preserved(tmp_path: Path) -> None:
@@ -356,7 +354,8 @@ def test_job_25514_old_failure_and_corrected_preparation(tmp_path: Path) -> None
             source, destination=tmp_path / "corrected-copy"
         )
         assert _mode(corrected) == 0o700
-        assert (corrected / ".git").is_dir()
+        assert not (corrected / ".git").exists()
+        assert evaluator_git_dir(corrected).is_dir()
     finally:
         _restore_source_directories(source)
         old_destination.chmod(0o700)

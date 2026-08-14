@@ -27,6 +27,7 @@ from cmpilot_action_protocol import (
     render_recovery_prompt,
 )
 from cmpilot_command_authorization import policy_specification
+from cmpilot_command_gateway import execute_controlled_command
 from cmpilot_hardened_agent import HardenedDefaultAgent
 from cmpilot_task_file_policy import calculator_task_policy
 from cmpilot_mini_swe_config import (
@@ -48,10 +49,22 @@ def emit_event(event: str, **details: object) -> None:
 
 
 class AuditedLocalEnvironment(LocalEnvironment):
-    def __init__(self, *, repository: Path, audit_path: Path, **kwargs: object):
+    def __init__(
+        self,
+        *,
+        repository: Path,
+        evaluator_git_directory: Path,
+        audit_path: Path,
+        controlled_command_audit_path: Path,
+        task_policy: object,
+        **kwargs: object,
+    ):
         super().__init__(**kwargs)
-        self.repository = repository
+        self.repository = repository.resolve(strict=True)
+        self.evaluator_git_directory = evaluator_git_directory.resolve(strict=True)
         self.audit_path = audit_path
+        self.controlled_command_audit_path = controlled_command_audit_path
+        self.task_policy = task_policy
         self.command_index = 0
 
     def execute(self, action: dict, cwd: str = "", *, timeout: int | None = None) -> dict:
@@ -60,17 +73,54 @@ class AuditedLocalEnvironment(LocalEnvironment):
         output = None
         exception_name = ""
         try:
-            output = super().execute(action, cwd=cwd, timeout=timeout)
+            configured_cwd = Path(self.config.cwd).resolve(strict=True)
+            requested_cwd = (configured_cwd / cwd).resolve(strict=True)
+            if requested_cwd != self.repository:
+                raise RuntimeError("model command cwd must remain the task repository root")
+            execution = execute_controlled_command(
+                str(action["command"]),
+                repository=self.repository,
+                evaluator_git_directory=self.evaluator_git_directory,
+                task_policy=self.task_policy,
+                environment=self.config.env,
+                timeout=timeout if timeout is not None else self.config.timeout,
+                audit_path=self.controlled_command_audit_path,
+            )
+            if not execution.isolation_established:
+                emit_event(
+                    "filesystem_isolation_failed_closed",
+                    diagnostic=execution.diagnostic,
+                )
+                raise RuntimeError(
+                    "strict model-command filesystem isolation could not be established"
+                )
+            output = {
+                "output": execution.output,
+                "returncode": execution.returncode,
+                "exception_info": "",
+            }
+            self._check_finished(output)
             return output
         except BaseException as error:
             exception_name = type(error).__name__
             raise
         finally:
             patch = subprocess.run(
-                ["git", "-C", str(self.repository), "diff", "--binary", "HEAD", "--"],
+                [
+                    "/usr/bin/git",
+                    f"--git-dir={self.evaluator_git_directory}",
+                    f"--work-tree={self.repository}",
+                    "--no-pager",
+                    "diff",
+                    "--binary",
+                    "--no-ext-diff",
+                    "HEAD",
+                    "--",
+                ],
                 text=True,
                 capture_output=True,
                 check=False,
+                close_fds=True,
             ).stdout
             record = {
                 "command_index": self.command_index,
@@ -108,10 +158,12 @@ Path(os.environ["CMPILOT_TASK_POLICY_ARTIFACT"]).write_text(
 emit_event("task_file_policy_loaded", task_policy_version=task_file_policy.version)
 
 repository = Path(os.environ["CMPILOT_REPOSITORY"])
+evaluator_git_directory = Path(os.environ["CMPILOT_EVALUATOR_GIT_DIR"])
 task_file = Path(os.environ["CMPILOT_TASK_FILE"])
 task = task_file.read_text(encoding="utf-8")
 trajectory = Path(os.environ["CMPILOT_TRAJECTORY"])
 patch_history = Path(os.environ["CMPILOT_PATCH_HISTORY"])
+controlled_command_audit = Path(os.environ["CMPILOT_CONTROLLED_COMMAND_AUDIT"])
 transport_artifact = Path(os.environ["CMPILOT_MODEL_TRANSPORT_ARTIFACT"])
 request_budget_artifact = Path(os.environ["CMPILOT_REQUEST_BUDGET_ARTIFACT"])
 event_path = Path(os.environ["CMPILOT_ADAPTER_EVENTS"])
@@ -132,6 +184,7 @@ endpoint_settings = MiniSWEEndpointSettings(
 artifact_metadata = {
     "trajectory": trajectory,
     "patch_history": patch_history,
+    "controlled_command_audit": controlled_command_audit,
     "model_transport": transport_artifact,
     "request_budgets": request_budget_artifact,
     "agent_config_yaml": Path(os.environ["CMPILOT_AGENT_CONFIG_ARTIFACT"]),
@@ -249,7 +302,10 @@ logging.basicConfig(level=logging.INFO)
 model = model_class(**model_settings)
 environment = AuditedLocalEnvironment(
     repository=repository,
+    evaluator_git_directory=evaluator_git_directory,
     audit_path=patch_history,
+    controlled_command_audit_path=controlled_command_audit,
+    task_policy=task_file_policy,
     **mini_config["environment"],
 )
 agent = HardenedDefaultAgent(

@@ -28,6 +28,7 @@ from cmpilot.synthetic_memory_gpu import (
     SOURCE_MANIFEST_SHA256,
     SOURCE_ROOT,
     SUBMISSION_GATE_SHA256,
+    SyntheticGPUError,
     engineering_classification,
     prompt_evidence,
     reasoning_isolation,
@@ -113,12 +114,11 @@ def test_synthetic_task_policy_is_one_file_writable() -> None:
     }
 
 
-def test_gpu_freeze_is_canonical_complete_and_non_scientific() -> None:
-    validation = validate_gpu_freeze(ROOT)
+def test_historical_gpu_freeze_rejects_new_unfrozen_infrastructure() -> None:
     freeze = load_json(ROOT / GPU_FREEZE_PATH)
 
-    assert validation["pass"] is True
-    assert len(validation["sha256"]) == 64
+    with pytest.raises(SyntheticGPUError, match="synthetic GPU freeze changed"):
+        validate_gpu_freeze(ROOT)
     assert freeze["scientific_evidence"] is False
     assert freeze["model"]["id"] == MODEL_ID
     assert freeze["model"]["revision"] == MODEL_REVISION

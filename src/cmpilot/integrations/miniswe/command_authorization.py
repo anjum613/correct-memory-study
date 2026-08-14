@@ -13,7 +13,7 @@ from __future__ import annotations
 import re
 import shlex
 from dataclasses import asdict, dataclass
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 try:
@@ -24,8 +24,16 @@ except ImportError:
         calculator_task_policy,
     )
 
+try:
+    from .command_gateway import CommandGatewayRejected, parse_gateway_request
+except ImportError:
+    from cmpilot_command_gateway import (  # type: ignore[no-redef]
+        CommandGatewayRejected,
+        parse_gateway_request,
+    )
 
-POLICY_VERSION = "calculator-capability-policy-v3"
+
+POLICY_VERSION = "calculator-capability-policy-v4"
 ACTION_POLICY_VIOLATION = "ACTION_POLICY_VIOLATION"
 REPEATED_POLICY_VIOLATION = "REPEATED_POLICY_VIOLATION"
 PACKAGE_MANAGEMENT_PROHIBITED = "PACKAGE_MANAGEMENT_PROHIBITED"
@@ -101,9 +109,7 @@ _SYSTEM_PACKAGE_EXECUTABLES = frozenset(
     }
 )
 _REMOTE_GIT_SUBCOMMANDS = frozenset({"clone", "fetch", "pull", "push"})
-_READ_ONLY_GIT_SUBCOMMANDS = frozenset(
-    {"diff", "grep", "log", "rev-parse", "show", "status"}
-)
+_READ_ONLY_GIT_SUBCOMMANDS = frozenset({"diff", "log", "show", "status"})
 _PACKAGE_OPERATIONS = {
     "pip": frozenset({"cache", "download", "install", "uninstall", "wheel"}),
     "uv-pip": frozenset({"install", "uninstall"}),
@@ -770,6 +776,19 @@ def _analyze_segment(
             command,
             "git-internals-mutation",
         )
+    if executable == "git" or (
+        executable == "sed" and any(argument == "-i" for argument in arguments)
+    ):
+        try:
+            request = parse_gateway_request(
+                shlex.join(stripped),
+                repository=Path("/task"),
+                writable_paths=task_policy.writable_paths,
+            )
+        except CommandGatewayRejected:
+            return _protected_write_rejection(command, "controlled-gateway-rejected")
+        if request is None:
+            return _protected_write_rejection(command, "controlled-gateway-required")
     if executable == "rsync" and any(
         argument.startswith("rsync://")
         or re.match(r"^(?:[^/:]+@)?[^/:]+:", argument)
@@ -839,6 +858,16 @@ def _analyze_segment(
     return _allowed(command)
 
 
+def _segment_requires_gateway(tokens: list[str]) -> bool:
+    stripped, _ = _strip_wrappers(tokens)
+    if not stripped:
+        return False
+    executable = _basename(stripped[0])
+    return executable == "git" or (
+        executable == "sed" and "-i" in stripped[1:]
+    )
+
+
 def authorize_command(
     command: str,
     *,
@@ -881,6 +910,11 @@ def authorize_command(
         return _unsafe(original, "trailing-shell-control-operator")
     segments.append(current)
 
+    if len(segments) > 1 and any(
+        _segment_requires_gateway(segment) for segment in segments
+    ):
+        return _unsafe(original, "controlled-gateway-composition")
+
     for segment in segments:
         decision = _analyze_segment(original, segment, _depth, task_policy)
         if not decision.authorized:
@@ -920,6 +954,12 @@ def policy_specification() -> dict[str, Any]:
             "limitation": "shlex is not a complete Bash parser",
             "opaque_constructs_fail_closed": True,
             "literal_shell_c_payloads_recursively_inspected": True,
+        },
+        "filesystem_enforcement": {
+            "authoritative_boundary": "landlock-abi1-plus-structural-compensating-controls",
+            "command_text_authorization": "defense_in_depth",
+            "strict_isolation_fail_closed": True,
+            "controlled_gateways": ["git", "sed-in-place"],
         },
         "task_file_policy": calculator_task_policy().as_dict(),
         "rules": {

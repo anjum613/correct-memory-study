@@ -16,7 +16,7 @@ from cmpilot.integrations.miniswe.command_authorization import (
     authorize_command,
     render_policy_recovery_prompt,
 )
-from cmpilot.repository_manager import prepare_working_copy
+from cmpilot.repository_manager import git, prepare_working_copy
 from cmpilot.task_file_policy import (
     CALCULATOR_TASK_POLICY_VERSION,
     apply_task_file_permissions,
@@ -194,12 +194,7 @@ def test_working_copy_applies_visible_file_permissions_after_git_init(
     assert stat.S_IMODE(repository.stat().st_mode) == 0o700
     assert stat.S_IMODE((repository / "calculator.py").stat().st_mode) == 0o600
     assert stat.S_IMODE((repository / "test_calculator.py").stat().st_mode) == 0o400
-    assert subprocess.run(
-        ["git", "-C", str(repository), "status", "--short"],
-        text=True,
-        capture_output=True,
-        check=True,
-    ).stdout == ""
+    assert git(repository, "status", "--short", check=True).stdout == ""
 
 
 def test_protected_hash_remains_stable_after_authorized_read(tmp_path: Path) -> None:
@@ -212,4 +207,3 @@ def test_protected_hash_remains_stable_after_authorized_read(tmp_path: Path) -> 
         ["cat", "test_calculator.py"], cwd=repository, capture_output=True, check=True
     )
     integrity = check_protected_path_integrity(repository, expected)
-

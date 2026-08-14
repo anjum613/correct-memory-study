@@ -63,5 +63,5 @@ def test_exact_adapter_reaches_first_request_before_dummy_connection_failure(tmp
     assert not (artifacts / "patch.diff").read_text(encoding="utf-8")
     assert not (artifacts / "git-status.txt").read_text(encoding="utf-8")
     assert not (artifacts / "patch-history.jsonl").exists()
-    assert policy["policy_version"] == "calculator-capability-policy-v3"
+    assert policy["policy_version"] == "calculator-capability-policy-v4"
     assert all(result["checks"].values())
