@@ -22,3 +22,12 @@ def test_smoke_dry_run_never_calls_live_runner() -> None:
 
     dry.assert_called_once()
     run.assert_not_called()
+
+
+def test_model_profile_arguments_print_exact_served_identity(capsys) -> None:
+    assert main(["model-profile-arguments", "--profile", "devstral-small-2507"]) == 0
+
+    arguments = capsys.readouterr().out.splitlines()
+    assert arguments[0] == "mistralai/Devstral-Small-2507"
+    assert arguments[arguments.index("--served-model-name") + 1] == "cmpilot-devstral-small-2507-bd165ab26ceb"
+    assert arguments[arguments.index("--tensor-parallel-size") + 1] == "2"

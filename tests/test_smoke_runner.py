@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import json
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
 from cmpilot.mini_swe_adapter import MiniSWEInfo
+from cmpilot.model_profiles import load_model_profile
 from cmpilot.smoke_runner import (
     AgentExecution,
     PreflightResult,
@@ -188,7 +190,7 @@ def test_execute_agent_terminates_a_timed_out_child_process() -> None:
 
 
 def test_resolve_config_uses_environment_values_when_cli_is_absent(tmp_path: Path) -> None:
-    arguments = SimpleNamespace(base_url=None, model=None, mini_python=None, runs_root=None, agent_timeout=600)
+    arguments = SimpleNamespace(base_url=None, model=None, profile=None, mini_python=None, runs_root=None, agent_timeout=600)
     config = resolve_config(
         arguments,
         {
@@ -203,3 +205,77 @@ def test_resolve_config_uses_environment_values_when_cli_is_absent(tmp_path: Pat
     assert config.model == "environment-model"
     assert config.mini_python == "/environment/python"
     assert config.runs_root == tmp_path / "runs"
+
+
+def test_resolve_profile_uses_exact_served_identity_and_isolated_root(tmp_path: Path) -> None:
+    arguments = SimpleNamespace(
+        base_url="http://server:8000/v1",
+        model=None,
+        profile="devstral-small-2507",
+        mini_python="/mini/python",
+        runs_root=str(tmp_path / "runs"),
+        agent_timeout=600,
+    )
+    config = resolve_config(arguments, {"VLLM_MODEL": "must-not-leak-into-profile"})
+    profile = load_model_profile("devstral-small-2507")
+
+    assert config.model == profile.served_model_name
+    assert config.model_profile == profile
+    assert config.runs_root == tmp_path / "runs" / "non-confirmatory" / profile.identity / profile.runtime_environment
+
+
+def test_profiled_smoke_manifest_and_run_id_are_model_isolated(tmp_path: Path) -> None:
+    profile = load_model_profile("devstral-small-2507")
+    base = smoke_config(tmp_path)
+    config = SmokeConfig(
+        base_url=base.base_url,
+        model=profile.served_model_name,
+        mini_python=base.mini_python,
+        runs_root=tmp_path / "runs" / "non-confirmatory" / profile.identity / profile.runtime_environment,
+        agent_timeout=base.agent_timeout,
+        template=base.template,
+        task_file=base.task_file,
+        model_profile=profile,
+    )
+    profiled_preflight = PreflightResult(
+        ok=True,
+        diagnostic="preflight passed",
+        probe=ModelProbe(
+            "http://127.0.0.1:8000/v1/models",
+            True,
+            "endpoint responded",
+            200,
+            (profile.served_model_name,),
+        ),
+        mini_swe=MiniSWEInfo(True, "2.4.6", "mini-SWE-agent 2.4.6"),
+    )
+    with patch("cmpilot.smoke_runner.preflight", return_value=profiled_preflight), patch(
+        "cmpilot.smoke_runner.execute_agent", side_effect=fake_successful_agent
+    ):
+        result = run_smoke(config)
+
+    run_directory = next(config.runs_root.iterdir())
+    run = json.loads((run_directory / "run.json").read_text())
+    model_info = json.loads((run_directory / "model-info.json").read_text())
+    resolved = json.loads((run_directory / "resolved-config.json").read_text())
+    assert result == 0
+    assert run["run_id"].startswith(f"smoke-{profile.identity}-")
+    assert run["model_profile"]["model_revision"] == profile.model_revision
+    assert model_info["model_profile"]["tokenizer_revision"] == profile.tokenizer_revision
+    assert resolved["model_profile"]["served_model_name"] == profile.served_model_name
+
+
+def test_unprofiled_resolved_config_keeps_original_output_shape(tmp_path: Path) -> None:
+    config = smoke_config(tmp_path)
+
+    from cmpilot.smoke_runner import _config_artifact
+
+    assert _config_artifact(config) == {
+        "base_url": config.base_url,
+        "model": config.model,
+        "mini_python": config.mini_python,
+        "runs_root": str(config.runs_root),
+        "agent_timeout": config.agent_timeout,
+        "template": str(config.template),
+        "task_file": str(config.task_file),
+    }

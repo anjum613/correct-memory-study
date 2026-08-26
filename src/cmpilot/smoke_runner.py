@@ -16,8 +16,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Callable
 
-from .artifact_logger import create_run_directory, write_json, write_text
+from .artifact_logger import create_profiled_run_directory, create_run_directory, write_json, write_text
 from .mini_swe_adapter import MiniSWEInfo, command, mini_swe_info, write_adapter
+from .model_profiles import ModelProfile, load_model_profile
 from .outcome_classifier import classify
 from .repository_manager import final_patch, git, prepare_working_copy, run_tests, template_snapshot
 from .vllm_client import ModelProbe, probe_models, validate_model
@@ -39,6 +40,7 @@ class SmokeConfig:
     agent_timeout: int = 600
     template: Path = DEFAULT_TEMPLATE
     task_file: Path = DEFAULT_TASK
+    model_profile: ModelProfile | None = None
 
 
 @dataclass(frozen=True)
@@ -61,12 +63,27 @@ class AgentExecution:
 def resolve_config(arguments, environment: dict[str, str] | None = None) -> SmokeConfig:
     """Resolve CLI options over environment variables without machine-specific defaults."""
     env = os.environ if environment is None else environment
+    profile_name = getattr(arguments, "profile", None)
+    profile = load_model_profile(profile_name) if profile_name else None
+    if profile is not None and not profile.launchable:
+        raise ValueError(f"model profile is attestation-only and cannot be launched: {profile.name}")
+    configured_model = getattr(arguments, "model", None)
+    if profile is not None and configured_model and configured_model != profile.served_model_name:
+        raise ValueError("--model must not override the exact served-model identity from --profile")
+    runs_root = Path(getattr(arguments, "runs_root", None) or env.get("CMPILOT_RUNS_ROOT", "experiment-runs"))
+    if profile is not None:
+        runs_root = runs_root / "non-confirmatory" / profile.identity / profile.runtime_environment
     return SmokeConfig(
         base_url=getattr(arguments, "base_url", None) or env.get("VLLM_BASE_URL", ""),
-        model=getattr(arguments, "model", None) or env.get("VLLM_MODEL", "Qwen/Qwen2.5-Coder-1.5B-Instruct"),
+        model=(
+            profile.served_model_name
+            if profile is not None
+            else configured_model or env.get("VLLM_MODEL", "Qwen/Qwen2.5-Coder-1.5B-Instruct")
+        ),
         mini_python=getattr(arguments, "mini_python", None) or env.get("MINI_SWE_PYTHON", ""),
-        runs_root=Path(getattr(arguments, "runs_root", None) or env.get("CMPILOT_RUNS_ROOT", "experiment-runs")),
+        runs_root=runs_root,
         agent_timeout=getattr(arguments, "agent_timeout", 600),
+        model_profile=profile,
     )
 
 
@@ -91,12 +108,17 @@ def preflight(config: SmokeConfig) -> PreflightResult:
 
 
 def _config_artifact(config: SmokeConfig) -> dict[str, object]:
-    return {
-        **asdict(config),
+    artifact = asdict(config)
+    artifact.pop("model_profile")
+    resolved: dict[str, object] = {
+        **artifact,
         "runs_root": str(config.runs_root),
         "template": str(config.template),
         "task_file": str(config.task_file),
     }
+    if config.model_profile is not None:
+        resolved["model_profile"] = config.model_profile.manifest_identity()
+    return resolved
 
 
 def _sha256(value: bytes) -> str:
@@ -296,7 +318,10 @@ def run_smoke(
     """Execute the isolated run once, preserving every outcome without retries."""
     started = datetime.now(UTC)
     try:
-        artifacts, run_id = create_run_directory(config.runs_root)
+        if config.model_profile is None:
+            artifacts, run_id = create_run_directory(config.runs_root)
+        else:
+            artifacts, run_id = create_profiled_run_directory(config.runs_root, config.model_profile.identity)
     except OSError as error:
         print(f"Could not create smoke artifacts under {config.runs_root}: {error}", file=sys.stderr)
         return EXIT_INFRASTRUCTURE_FAILURE
@@ -335,21 +360,30 @@ def run_smoke(
         "native_trajectory_path": None,
         "artifact_paths": {},
     }
+    if config.model_profile is not None:
+        run["model_profile"] = config.model_profile.manifest_identity()
     write_json(artifacts / "resolved-config.json", _config_artifact(config))
     if task_contents:
         write_text(artifacts / "task-instruction.md", task_contents.decode("utf-8"))
-    write_json(
-        artifacts / "model-info.json",
-        {
-            "endpoint": probe.endpoint if probe else None,
-            "models": list(probe.models) if probe else [],
-            "requested_model": config.model,
-            "diagnostic": preflight_result.diagnostic,
-        },
-    )
+    model_info: dict[str, object] = {
+        "endpoint": probe.endpoint if probe else None,
+        "models": list(probe.models) if probe else [],
+        "requested_model": config.model,
+        "diagnostic": preflight_result.diagnostic,
+    }
+    if config.model_profile is not None:
+        model_info["model_profile"] = config.model_profile.manifest_identity()
+    write_json(artifacts / "model-info.json", model_info)
+    environment_info: dict[str, object] = {
+        "python": sys.version,
+        "platform": platform.platform(),
+        "cmpilot_python": sys.executable,
+    }
+    if config.model_profile is not None:
+        environment_info["model_runtime_environment"] = config.model_profile.runtime_environment
     write_json(
         artifacts / "environment.json",
-        {"python": sys.version, "platform": platform.platform(), "cmpilot_python": sys.executable},
+        environment_info,
     )
     write_text(artifacts / "mini-swe-version.txt", (preflight_result.mini_swe.version or "unavailable") + "\n")
     write_json(artifacts / "dependency-versions.json", _runtime_dependency_versions(config.mini_python))
