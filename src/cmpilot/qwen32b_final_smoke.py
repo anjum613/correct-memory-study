@@ -20,7 +20,7 @@ PORT = 49788
 FROZEN_TAG = "qwen32b-qualification-v1"
 FROZEN_TAG_TARGET = "ba039a0eaddc358d6b7174260c3b3c36169c44c0"
 ARTIFACT_ROOT = Path(
-    "/home/s224049759/run-artifacts/qwen32b-final-technical-smoke/v1"
+    "/home/s224049759/final-experiment-artifacts/qwen32b-final-technical-smoke/v1"
 )
 SUITE_PATH = Path("qualification/qwen32b-v1/suite-manifest.json")
 TASK_PATH = Path("qualification/qwen32b-v1/tasks/qnm-p01-interval-merge.json")

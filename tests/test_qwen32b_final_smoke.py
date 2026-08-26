@@ -9,6 +9,7 @@ import pytest
 from cmpilot.experiment_models import QWEN32B_PROFILE
 from cmpilot.integrations.miniswe.command_authorization import POLICY_VERSION
 from cmpilot.qwen32b_final_smoke import (
+    ARTIFACT_ROOT,
     FROZEN_TAG_TARGET,
     PORT,
     SMOKE_ID,
@@ -83,6 +84,8 @@ def test_batch_is_thin_bounded_and_does_not_copy_server_argv() -> None:
     assert "technical-smoke-result.json" in text
     assert "mkdir \"$ARTIFACT_DIR\"" in text
     assert "mkdir -p \"$ARTIFACT_DIR\"" not in text
+    assert str(ARTIFACT_ROOT / "jobs") in text
+    assert "/run-artifacts/" not in str(ARTIFACT_ROOT)
 
 
 def test_runtime_integrity_requires_exact_qwen_environment(tmp_path: Path) -> None:
