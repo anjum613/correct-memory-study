@@ -1,5 +1,5 @@
 #!/usr/bin/bash
-#SBATCH --job-name=devstral-small-2507-smoke-v1
+#SBATCH --job-name=devstral-small-2507-smoke-v2
 #SBATCH --partition=gpu
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -8,8 +8,8 @@
 #SBATCH --gres=gpu:a100:2
 #SBATCH --time=01:00:00
 #SBATCH --no-requeue
-#SBATCH --output=/home/s224049759/slurm-logs/devstral-small-2507-smoke-v1-%j.out
-#SBATCH --error=/home/s224049759/slurm-logs/devstral-small-2507-smoke-v1-%j.err
+#SBATCH --output=/home/s224049759/slurm-logs/devstral-small-2507-smoke-v2-%j.out
+#SBATCH --error=/home/s224049759/slurm-logs/devstral-small-2507-smoke-v2-%j.err
 
 set -euo pipefail
 umask 077
@@ -22,7 +22,7 @@ MODEL_ID=mistralai/Devstral-Small-2507
 MODEL_REVISION=bd165ab26cebbcc2eea2c4ecbfc07f3ac42b3c39
 MODEL=/home/s224049759/model-cache/huggingface/hub/models--mistralai--Devstral-Small-2507/snapshots/$MODEL_REVISION
 MODEL_CACHE=/home/s224049759/model-cache/huggingface
-ARTIFACT_ROOT=/home/s224049759/final-experiment-artifacts/devstral-small-2507-technical-smoke/v1/jobs
+ARTIFACT_ROOT=/home/s224049759/final-experiment-artifacts/devstral-small-2507-technical-smoke/v2/jobs
 ARTIFACT_DIR="$ARTIFACT_ROOT/$SLURM_JOB_ID"
 RUNS_ROOT="$ARTIFACT_DIR/runs"
 PORT=49827
@@ -154,7 +154,7 @@ unset HF_TOKEN HUGGING_FACE_HUB_TOKEN
     --output-directory "$ARTIFACT_DIR" \
     > "$ARTIFACT_DIR/preflight.stdout" \
     2> "$ARTIFACT_DIR/preflight.stderr"
-"$CMPILOT_PY" "$PROJECT/scripts/extract_server_command.py" \
+"$CMPILOT_PY" "$PROJECT/scripts/extract_devstral_server_command.py" \
     --command-json "$ARTIFACT_DIR/server-command.json" \
     --result "$ARTIFACT_DIR/server-command-extraction.json" \
     > "$ARTIFACT_DIR/server-command.nul"

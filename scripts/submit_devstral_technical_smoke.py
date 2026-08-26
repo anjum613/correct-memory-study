@@ -68,7 +68,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         line
         for line in queue.stdout.splitlines()
         if len(line.split("|")) >= 2
-        and line.split("|")[1] == "devstral-small-2507-smoke-v1"
+        and line.split("|")[1] == "devstral-small-2507-smoke-v2"
     ]
     if active:
         raise RuntimeError(f"Devstral technical smoke already active: {active}")

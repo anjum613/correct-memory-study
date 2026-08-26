@@ -39,13 +39,13 @@ from .qwen32b_final_smoke import (
 )
 
 
-SCHEMA = "devstral-technical-smoke-v1"
-SMOKE_ID = "devstral-small-2507-technical-smoke-v1"
+SCHEMA = "devstral-technical-smoke-v2"
+SMOKE_ID = "devstral-small-2507-technical-smoke-v2"
 PORT = 49827
 BATCH_PATH = Path("slurm/devstral_small_2507_technical_smoke.sbatch")
 ARTIFACT_ROOT = Path(
     "/home/s224049759/final-experiment-artifacts/"
-    "devstral-small-2507-technical-smoke/v1"
+    "devstral-small-2507-technical-smoke/v2"
 )
 EXPECTED_SNAPSHOT_FREEZE_SHA256 = (
     "2486602a374814152283f8a48fb6a0108bc5c96eeabf17a6e911cf8107e4a011"
@@ -84,6 +84,10 @@ def validate_batch_contract(project: Path) -> dict[str, bool]:
         "context_not_duplicated": "--max-model-len" not in text,
         "direct_vllm_command_not_copied": (
             "vllm.entrypoints.openai.api_server" not in text
+        ),
+        "devstral_command_extractor": (
+            "extract_devstral_server_command.py" in text
+            and "extract_server_command.py" not in text
         ),
         "fixture_nonconfirmatory": 'printf \'%s\\n\' false > "$ARTIFACT_DIR/confirmatory.txt"' in text,
         "health": '"$BASE_URL/health"' in text,

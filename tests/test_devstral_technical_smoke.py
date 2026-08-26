@@ -9,6 +9,7 @@ from cmpilot.devstral_profile import (
     ENVIRONMENT_FINGERPRINT_SHA256,
     MODEL_ID,
     MODEL_REVISION,
+    build_devstral_server_argv,
 )
 from cmpilot.devstral_serialization import PINNED_TEKKEN_SHA256
 from cmpilot.devstral_technical_smoke import (
@@ -22,6 +23,7 @@ from cmpilot.devstral_technical_smoke import (
     validate_completion,
 )
 from scripts import submit_devstral_technical_smoke as submitter
+from cmpilot.server_command import encode_nul_delimited
 
 
 ROOT = Path(__file__).parents[1]
@@ -230,3 +232,55 @@ def test_batch_has_valid_bash_syntax_and_submitter_has_no_direct_sbatch() -> Non
     assert completed.returncode == 0, completed.stderr
     assert '"sbatch"' not in submit
     assert submit.count("submit_with_controller_attestation(") == 1
+
+
+def test_devstral_command_extractor_is_lossless_and_fail_closed(
+    tmp_path: Path,
+) -> None:
+    command = build_devstral_server_argv(port=49827)
+    source = tmp_path / "server-command.json"
+    source.write_text(json.dumps(list(command)) + "\n", encoding="utf-8")
+    result = tmp_path / "result.json"
+    extractor = ROOT / "scripts/extract_devstral_server_command.py"
+
+    completed = subprocess.run(
+        (
+            "/home/s224049759/environments/cmpilot-conda/bin/python",
+            str(extractor),
+            "--command-json",
+            str(source),
+            "--result",
+            str(result),
+        ),
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        timeout=20,
+    )
+
+    assert completed.returncode == 0, completed.stderr.decode()
+    assert completed.stdout == encode_nul_delimited(command)
+    assert json.loads(result.read_text())["label"] == (
+        "DEVSTRAL_SERVER_COMMAND_EXTRACTION_PASS"
+    )
+
+    mutated = list(command)
+    mutated.extend(("--quantization", "awq"))
+    source.write_text(json.dumps(mutated) + "\n", encoding="utf-8")
+    rejected = subprocess.run(
+        (
+            "/home/s224049759/environments/cmpilot-conda/bin/python",
+            str(extractor),
+            "--command-json",
+            str(source),
+            "--result",
+            str(tmp_path / "rejected.json"),
+        ),
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        timeout=20,
+    )
+
+    assert rejected.returncode == 79
+    assert rejected.stdout == b""
