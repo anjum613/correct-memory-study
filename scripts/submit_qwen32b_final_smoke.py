@@ -121,7 +121,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "model_revision": preflight["model_profile"]["model_revision"],
         "project_commit": commit.stdout.strip(),
         "requested_resources": preflight["resources"],
-        "schema": "qwen32b-final-technical-smoke-submission-v1",
+        "schema": "qwen32b-final-technical-smoke-submission-v2",
         "scientific_evidence": False,
         "slurm_job_id": job_id,
         "smoke_id": SMOKE_ID,

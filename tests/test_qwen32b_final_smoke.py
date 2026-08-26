@@ -84,6 +84,7 @@ def test_batch_is_thin_bounded_and_does_not_copy_server_argv() -> None:
     assert "technical-smoke-result.json" in text
     assert "mkdir \"$ARTIFACT_DIR\"" in text
     assert "mkdir -p \"$ARTIFACT_DIR\"" not in text
+    assert 'if ! process_state=$(/usr/bin/ps -o stat= -p "$SERVER_PID"' in text
     assert str(ARTIFACT_ROOT / "jobs") in text
     assert "/run-artifacts/" not in str(ARTIFACT_ROOT)
 

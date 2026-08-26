@@ -1,5 +1,5 @@
 #!/usr/bin/bash
-#SBATCH --job-name=qwen32b-final-smoke-v1
+#SBATCH --job-name=qwen32b-final-smoke-v2
 #SBATCH --partition=gpu
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -8,8 +8,8 @@
 #SBATCH --gres=gpu:a100:2
 #SBATCH --time=00:30:00
 #SBATCH --no-requeue
-#SBATCH --output=/home/s224049759/slurm-logs/qwen32b-final-smoke-v1-%j.out
-#SBATCH --error=/home/s224049759/slurm-logs/qwen32b-final-smoke-v1-%j.err
+#SBATCH --output=/home/s224049759/slurm-logs/qwen32b-final-smoke-v2-%j.out
+#SBATCH --error=/home/s224049759/slurm-logs/qwen32b-final-smoke-v2-%j.err
 
 set -euo pipefail
 umask 077
@@ -19,7 +19,7 @@ CMPILOT_PY=/home/s224049759/environments/cmpilot-conda/bin/python
 MINI_PY=/home/s224049759/environments/mini-swe-agent-smoke/bin/python
 MODEL=/home/s224049759/model-cache/huggingface/hub/models--Qwen--Qwen2.5-Coder-32B-Instruct/snapshots/381fc969f78efac66bc87ff7ddeadb7e73c218a7
 MODEL_CACHE=/home/s224049759/model-cache/huggingface
-ARTIFACT_ROOT=/home/s224049759/final-experiment-artifacts/qwen32b-final-technical-smoke/v1/jobs
+ARTIFACT_ROOT=/home/s224049759/final-experiment-artifacts/qwen32b-final-technical-smoke/v2/jobs
 ARTIFACT_DIR="$ARTIFACT_ROOT/$SLURM_JOB_ID"
 RUN_ARTIFACT="$ARTIFACT_DIR/run"
 RUNTIME_SCRATCH="/tmp/cmq-$SLURM_JOB_ID"
@@ -43,7 +43,10 @@ cleanup_server() {
     local observed_exit=not-started
     local process_state=
     if [ -n "$SERVER_PID" ]; then
-        process_state=$(/usr/bin/ps -o stat= -p "$SERVER_PID" 2>/dev/null | awk '{print substr($1,1,1)}')
+        if ! process_state=$(/usr/bin/ps -o stat= -p "$SERVER_PID" 2>/dev/null); then
+            process_state=
+        fi
+        process_state=${process_state:0:1}
     fi
     if [ "$process_state" = Z ]; then
         observed_exit=already-exited
@@ -66,7 +69,7 @@ cleanup_server() {
     if [ -n "$SERVER_PID" ]; then
         wait "$SERVER_PID" 2>/dev/null || true
     fi
-    printf '{"cleanup_status":%s,"observed_exit":"%s","pass":%s,"schema":"qwen32b-final-smoke-clean-shutdown-v1"}\n' \
+    printf '{"cleanup_status":%s,"observed_exit":"%s","pass":%s,"schema":"qwen32b-final-smoke-clean-shutdown-v2"}\n' \
         "$cleanup_status" "$observed_exit" \
         "$([ "$cleanup_status" -eq 0 ] && printf true || printf false)" \
         > "$ARTIFACT_DIR/server-cleanup.json"

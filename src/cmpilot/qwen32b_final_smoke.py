@@ -13,14 +13,14 @@ from .calculator_finalizer import validate_total_finalization_artifacts
 from .experiment_models import QWEN32B_PROFILE
 
 
-SCHEMA = "qwen32b-final-technical-smoke-v1"
-SMOKE_ID = "qwen32b-final-smoke-v1"
+SCHEMA = "qwen32b-final-technical-smoke-v2"
+SMOKE_ID = "qwen32b-final-smoke-v2"
 TASK_ID = "qnm-p01-interval-merge"
 PORT = 49788
 FROZEN_TAG = "qwen32b-qualification-v1"
 FROZEN_TAG_TARGET = "ba039a0eaddc358d6b7174260c3b3c36169c44c0"
 ARTIFACT_ROOT = Path(
-    "/home/s224049759/final-experiment-artifacts/qwen32b-final-technical-smoke/v1"
+    "/home/s224049759/final-experiment-artifacts/qwen32b-final-technical-smoke/v2"
 )
 SUITE_PATH = Path("qualification/qwen32b-v1/suite-manifest.json")
 TASK_PATH = Path("qualification/qwen32b-v1/tasks/qnm-p01-interval-merge.json")
@@ -239,7 +239,7 @@ def validate_runtime_integrity(
         "checks": checks,
         "environment_id": environment.environment_id,
         "pass": all(checks.values()),
-        "schema": "qwen32b-final-smoke-runtime-integrity-v1",
+        "schema": "qwen32b-final-smoke-runtime-integrity-v2",
     }
 
 
@@ -302,7 +302,7 @@ def validate_completion(
         "model_revision": QWEN32B_PROFILE.model_revision,
         "pass": all(checks.values()),
         "runner_exit_code": runner_exit_code,
-        "schema": "qwen32b-final-technical-smoke-result-v1",
+        "schema": "qwen32b-final-technical-smoke-result-v2",
         "scientific_evidence": False,
         "smoke_id": SMOKE_ID,
         "task_id": TASK_ID,
