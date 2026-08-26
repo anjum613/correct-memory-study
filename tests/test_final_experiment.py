@@ -14,6 +14,8 @@ from cmpilot.calculator_finalizer import (
     MANDATORY_FINALIZATION_STAGES,
     save_finalizer_state,
 )
+from cmpilot.devstral_profile import DEVSTRAL_PRODUCTION_PROFILE
+from cmpilot.experiment_models import QWEN32B_PROFILE
 from cmpilot.final_experiment import (
     ATTEMPT_PROVENANCE_SCHEMA,
     EXPERIMENT_SCHEMA,
@@ -404,6 +406,36 @@ def test_atomic_id_binds_runtime_and_evaluator_identity(mutation) -> None:
     before_qwen = [run["run_id"] for run in before if run["model_profile"] == "qwen"]
     after_qwen = [run["run_id"] for run in after if run["model_profile"] == "qwen"]
     assert before_qwen != after_qwen
+
+
+def test_qualified_model_profiles_share_dimensions_but_have_distinct_run_ids() -> None:
+    experiment = _experiment()
+    experiment["models"] = {
+        QWEN32B_PROFILE.profile_id: QWEN32B_PROFILE.final_experiment_record(
+            step_limit=15
+        ),
+        DEVSTRAL_PRODUCTION_PROFILE.profile_id: (
+            DEVSTRAL_PRODUCTION_PROFILE.final_experiment_record(step_limit=15)
+        ),
+    }
+
+    matrix = _build(experiment)
+    rows = {
+        run["model_profile"]: run
+        for run in matrix["runs"]
+        if run["family_id"] == "family-1"
+        and run["condition"] == "NO_MEMORY"
+        and run["repetition"] == 1
+    }
+    qwen = rows[QWEN32B_PROFILE.profile_id]
+    devstral = rows[DEVSTRAL_PRODUCTION_PROFILE.profile_id]
+    assert qwen["seed"] == devstral["seed"]
+    assert qwen["family_id"] == devstral["family_id"]
+    assert qwen["condition"] == devstral["condition"]
+    assert qwen["run_id"] != devstral["run_id"]
+    assert qwen["model_id"] != devstral["model_id"]
+    assert qwen["model_profile_sha256"] != devstral["model_profile_sha256"]
+    assert matrix["run_count"] == 6 * 2 * 2 * 2
 
 
 @pytest.mark.parametrize(

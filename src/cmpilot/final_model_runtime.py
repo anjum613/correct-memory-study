@@ -24,6 +24,20 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from .devstral_mini_swe_adapter import (
+    DEVSTRAL_SERIALIZATION_NAME,
+    PRODUCTION_POLICY_ADAPTER_NAME,
+    write_devstral_production_adapter,
+)
+from .devstral_profile import (
+    DEVSTRAL_PRODUCTION_PROFILE,
+    EXPECTED_CONSOLIDATED_SHA256,
+    EXPECTED_CONSOLIDATED_SIZE,
+    MODEL_ID as DEVSTRAL_MODEL_ID,
+    MODEL_REVISION as DEVSTRAL_MODEL_REVISION,
+    SNAPSHOT_FREEZE_SHA256,
+    SNAPSHOT_IDENTITY_SHA256,
+)
 from .experiment_models import ModelProfile, QWEN32B_PROFILE
 from .final_experiment import (
     FinalExperimentError,
@@ -71,9 +85,24 @@ SCIENTIFIC_AGENT_BINDING_SCHEMA = "cmpilot-final-scientific-agent-binding-v1"
 SCIENTIFIC_AGENT_BINDING_NAME = "scientific-agent-binding.json"
 MINI_SWE_RUNTIME_SCHEMA = "cmpilot-final-mini-swe-runtime-v1"
 QWEN_SERVICE_SCHEMA = "cmpilot-final-qwen32b-service-v1"
+DEVSTRAL_SERVICE_SCHEMA = "cmpilot-final-devstral-service-v1"
 QWEN_FROZEN_STEP_LIMIT = 15
 QWEN_AGENT_TIMEOUT_SECONDS = 600
 QWEN_SERVER_STARTUP_TIMEOUT_SECONDS = 600
+
+_BASE_GENERATED_RUNTIME_NAMES = (
+    "mini_swe_adapter.py",
+    "cmpilot_frozen_adapter_runtime.py",
+    "cmpilot_action_protocol.py",
+    "cmpilot_command_authorization.py",
+    "cmpilot_task_file_policy.py",
+    "cmpilot_hardened_agent.py",
+    "cmpilot_mini_swe_config.py",
+    "cmpilot_vllm_text_model.py",
+    "cmpilot_openai_transport.py",
+    "cmpilot_context_budget.py",
+    "cmpilot_mini_swe_sources.py",
+)
 
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _SAFE_ATTEMPT_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
@@ -366,10 +395,23 @@ class SharedMiniSWERuntime:
             [list[str], Path, dict[str, str], float], AgentExecution
         ] = execute_agent,
         agent_inspector: Callable[[str], MiniSWEInfo] = mini_swe_info,
+        adapter_writer: Callable[[Path], Mapping[str, str]] = (
+            write_qualification_adapter
+        ),
+        additional_generated_names: Sequence[str] = (),
     ) -> None:
         self.project_root = Path(project_root).resolve(strict=True)
         self.agent_executor = agent_executor
         self.agent_inspector = agent_inspector
+        self.adapter_writer = adapter_writer
+        self.generated_names = (
+            *_BASE_GENERATED_RUNTIME_NAMES,
+            *tuple(additional_generated_names),
+        )
+        if len(set(self.generated_names)) != len(self.generated_names):
+            raise FinalModelRuntimeError(
+                "mini-SWE generated artifact names must be unique"
+            )
         self._attempt: Path | None = None
 
     def prepare(
@@ -408,25 +450,19 @@ class SharedMiniSWERuntime:
         task_file = attempt / "rendered-task.md"
         _write_new_text(task_file, invocation.rendered_task)
         adapter = attempt / "mini_swe_adapter.py"
-        generated_names = (
-            "mini_swe_adapter.py",
-            "cmpilot_frozen_adapter_runtime.py",
-            "cmpilot_action_protocol.py",
-            "cmpilot_command_authorization.py",
-            "cmpilot_task_file_policy.py",
-            "cmpilot_hardened_agent.py",
-            "cmpilot_mini_swe_config.py",
-            "cmpilot_vllm_text_model.py",
-            "cmpilot_openai_transport.py",
-            "cmpilot_context_budget.py",
-            "cmpilot_mini_swe_sources.py",
-        )
-        conflicts = [name for name in generated_names if (attempt / name).exists()]
+        conflicts = [
+            name for name in self.generated_names if (attempt / name).exists()
+        ]
         if conflicts:
             raise FinalModelRuntimeError(
                 f"refusing to overwrite mini-SWE runtime artifacts: {conflicts}"
             )
-        adapter_record = write_qualification_adapter(adapter)
+        adapter_record = dict(self.adapter_writer(adapter))
+        frozen_adapter_sha256 = adapter_record.get("frozen_adapter_sha256")
+        if _SHA256.fullmatch(str(frozen_adapter_sha256)) is None:
+            raise FinalModelRuntimeError(
+                "mini-SWE adapter writer did not bind the frozen action runtime"
+            )
         write_new_canonical_json(attempt / "mini-swe-adapter.json", adapter_record)
 
         config = AdapterConfig(
@@ -445,9 +481,7 @@ class SharedMiniSWERuntime:
         )
         environment.update(
             {
-                "CMPILOT_FROZEN_ADAPTER_SHA256": adapter_record[
-                    "frozen_adapter_sha256"
-                ],
+                "CMPILOT_FROZEN_ADAPTER_SHA256": str(frozen_adapter_sha256),
                 "CMPILOT_TASK_POLICY_SHA256": prepared.binding.task_policy_sha256,
                 "CMPILOT_TASK_POLICY_SOURCE": str(
                     prepared.binding.task_policy_source
@@ -468,6 +502,11 @@ class SharedMiniSWERuntime:
                 "seed_note": (
                     "Recorded run identity only; the validated temperature-zero Qwen "
                     "request path has no request seed."
+                    if prepared.profile is QWEN32B_PROFILE
+                    else (
+                        "Recorded run identity only; the qualified temperature-zero "
+                        "Devstral request path has no request seed."
+                    )
                 ),
             },
         )
@@ -653,6 +692,107 @@ def _attest_qwen_runtime(
     return integrity
 
 
+def validate_devstral_environment_verification(
+    verification: Mapping[str, Any],
+) -> Mapping[str, Any]:
+    """Consume the repository verifier without reproducing its readiness logic."""
+
+    checks = verification.get("checks")
+    freeze = verification.get("snapshot_freeze")
+    weight = verification.get("runtime_weight")
+    validation = {
+        "all_verifier_checks": (
+            isinstance(checks, Mapping)
+            and bool(checks)
+            and all(value is True for value in checks.values())
+        ),
+        "environment_ready": (
+            verification.get("production_ready") is True
+            and verification.get("status") == "READY"
+        ),
+        "runtime_weight": (
+            isinstance(weight, Mapping)
+            and weight.get("size") == EXPECTED_CONSOLIDATED_SIZE
+            and weight.get("sha256") == EXPECTED_CONSOLIDATED_SHA256
+        ),
+        "snapshot_freeze": (
+            isinstance(freeze, Mapping)
+            and freeze.get("valid") is True
+            and freeze.get("status") == "READY"
+            and freeze.get("freeze_sha256") == SNAPSHOT_FREEZE_SHA256
+            and freeze.get("snapshot_identity_sha256")
+            == SNAPSHOT_IDENTITY_SHA256
+        ),
+    }
+    return {
+        "checks": validation,
+        "model_id": DEVSTRAL_MODEL_ID,
+        "model_revision": DEVSTRAL_MODEL_REVISION,
+        "pass": all(validation.values()),
+        "profile_id": DEVSTRAL_PRODUCTION_PROFILE.profile_id,
+        "schema": "cmpilot-final-devstral-runtime-integrity-v1",
+        "verifier_schema": verification.get("schema"),
+    }
+
+
+def _attest_devstral_runtime(
+    profile: ModelProfile,
+    *,
+    project_root: Path,
+    attempt: Path,
+    environment: Mapping[str, str],
+) -> Mapping[str, Any]:
+    """Run the exact repository readiness verifier before starting Devstral."""
+
+    if profile is not DEVSTRAL_PRODUCTION_PROFILE:
+        raise FinalModelRuntimeError(
+            "Devstral runtime attestation requires the qualified production profile"
+        )
+    verification_path = attempt / "devstral-environment-verification.json"
+    targets = (
+        verification_path,
+        attempt / "runtime-attestation-commands.json",
+        attempt / "runtime-attestation.stdout",
+        attempt / "runtime-attestation.stderr",
+        attempt / "runtime-integrity.json",
+    )
+    if any(path.exists() or path.is_symlink() for path in targets):
+        raise FinalModelRuntimeError("refusing to overwrite runtime attestation artifacts")
+    command_line = (
+        str(profile.environment.server_python),
+        str(project_root / "scripts/verify_devstral_environment.py"),
+        "--output",
+        str(verification_path),
+    )
+    result = _run_checked(command_line, environment=environment, timeout=1800)
+    write_new_canonical_json(
+        attempt / "runtime-attestation-commands.json", [list(command_line)]
+    )
+    _write_new_text(attempt / "runtime-attestation.stdout", result.stdout or "")
+    _write_new_text(attempt / "runtime-attestation.stderr", result.stderr or "")
+    if result.returncode != 0 or not verification_path.is_file():
+        raise FinalModelRuntimeError(
+            f"Devstral environment verifier did not report READY: {result.returncode}"
+        )
+    try:
+        verification = json.loads(verification_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise FinalModelRuntimeError(
+            "Devstral environment verifier output is invalid"
+        ) from error
+    if not isinstance(verification, Mapping):
+        raise FinalModelRuntimeError(
+            "Devstral environment verifier output is not an object"
+        )
+    integrity = validate_devstral_environment_verification(verification)
+    write_new_canonical_json(attempt / "runtime-integrity.json", integrity)
+    if integrity.get("pass") is not True:
+        raise FinalModelRuntimeError(
+            f"Devstral runtime identity mismatch: {integrity.get('checks')}"
+        )
+    return integrity
+
+
 def _inspect_a100_allocation(
     *,
     server_python: Path,
@@ -757,8 +897,14 @@ def _port_is_available(port: int) -> bool:
         return False
 
 
-class Qwen32BModelService:
-    """Attempt-owned lifecycle for the exact qualified Qwen vLLM server."""
+class _ProfileModelService:
+    """Attempt-owned lifecycle shared by exact qualified vLLM profiles."""
+
+    qualified_profile: ModelProfile
+    model_label: str
+    runtime_attestor_default: Callable[..., Mapping[str, Any]]
+    service_schema: str
+    shutdown_schema: str
 
     def __init__(
         self,
@@ -769,22 +915,24 @@ class Qwen32BModelService:
         process_factory: Callable[..., Any] = subprocess.Popen,
         health_probe: Callable[[str], HealthProbe] = _probe_health,
         models_probe: Callable[[str], ModelProbe] = probe_models,
-        runtime_attestor: Callable[..., Mapping[str, Any]] = _attest_qwen_runtime,
+        runtime_attestor: Callable[..., Mapping[str, Any]] | None = None,
         gpu_inspector: Callable[..., Mapping[str, Any]] = _inspect_a100_allocation,
         port_available: Callable[[int], bool] = _port_is_available,
         monotonic: Callable[[], float] = time.monotonic,
         sleeper: Callable[[float], None] = time.sleep,
         port: int | None = None,
     ) -> None:
-        if profile is not QWEN32B_PROFILE:
-            raise FinalModelRuntimeError("Qwen service requires the qualified Qwen profile")
+        if profile is not self.qualified_profile:
+            raise FinalModelRuntimeError(
+                f"{self.model_label} service requires its qualified production profile"
+            )
         self.profile = profile
         self.project_root = Path(project_root).resolve(strict=True)
         self.runtime_root = Path(runtime_root)
         self.process_factory = process_factory
         self.health_probe = health_probe
         self.models_probe = models_probe
-        self.runtime_attestor = runtime_attestor
+        self.runtime_attestor = runtime_attestor or self.runtime_attestor_default
         self.gpu_inspector = gpu_inspector
         self.port_available = port_available
         self.monotonic = monotonic
@@ -822,7 +970,9 @@ class Qwen32BModelService:
         self, *, attempt_directory: Path, run_id: str, slurm_job_id: str
     ) -> str:
         if self.process is not None or self.attempt is not None:
-            raise FinalModelRuntimeError("Qwen service instances are single-use")
+            raise FinalModelRuntimeError(
+                f"{self.model_label} service instances are single-use"
+            )
         attempt = _require_real_directory(attempt_directory, label="attempt directory")
         attempt_id = attempt.name
         _validate_attempt_identity(slurm_job_id, attempt_id)
@@ -843,7 +993,7 @@ class Qwen32BModelService:
             "pass": False,
             "port": port,
             "run_id": run_id,
-            "schema": QWEN_SERVICE_SCHEMA,
+            "schema": self.service_schema,
             "attempt_id": attempt_id,
             "runtime_owner_id": runtime_owner_id,
             "slurm_job_id": slurm_job_id,
@@ -894,7 +1044,9 @@ class Qwen32BModelService:
                 environment=environment,
             )
             if integrity.get("pass") is not True:
-                raise FinalModelRuntimeError("Qwen runtime attestation failed")
+                raise FinalModelRuntimeError(
+                    f"{self.model_label} runtime attestation failed"
+                )
             argv = self.profile.server_argv(port=port)
             write_new_canonical_json(attempt / "server-command.json", list(argv))
             stdout_handle = (attempt / "server.stdout").open("xb")
@@ -918,7 +1070,8 @@ class Qwen32BModelService:
             while self.monotonic() < deadline:
                 if self.process.poll() is not None:
                     raise FinalModelRuntimeError(
-                        f"Qwen vLLM server exited during startup: {self.process.poll()}"
+                        f"{self.model_label} vLLM server exited during startup: "
+                        f"{self.process.poll()}"
                     )
                 health = self.health_probe(base)
                 if health.ok:
@@ -926,7 +1079,7 @@ class Qwen32BModelService:
                 self.sleeper(1.0)
             else:
                 raise FinalModelRuntimeError(
-                    f"Qwen vLLM health timeout: {health.diagnostic}"
+                    f"{self.model_label} vLLM health timeout: {health.diagnostic}"
                 )
             write_new_canonical_json(
                 attempt / "server-health.json",
@@ -952,7 +1105,8 @@ class Qwen32BModelService:
             )
             if not model_probe.ok:
                 raise FinalModelRuntimeError(
-                    f"Qwen served-model identity failed: {model_probe.diagnostic}"
+                    f"{self.model_label} served-model identity failed: "
+                    f"{model_probe.diagnostic}"
                 )
             startup_record.update(
                 {
@@ -1039,7 +1193,7 @@ class Qwen32BModelService:
             "pass": not errors and scratch_record.get("pass") is True,
             "process": process_record,
             "runtime_scratch": dict(scratch_record),
-            "schema": "cmpilot-final-qwen32b-shutdown-v1",
+            "schema": self.shutdown_schema,
         }
         self._shutdown_record = record
         if self.attempt is not None:
@@ -1050,29 +1204,45 @@ class Qwen32BModelService:
         return record
 
 
-class Qwen32BFinalModelExecutor:
-    """Compose the Qwen service with the shared, model-neutral agent runtime."""
+class Qwen32BModelService(_ProfileModelService):
+    """Attempt-owned lifecycle for the exact qualified Qwen vLLM server."""
+
+    qualified_profile = QWEN32B_PROFILE
+    model_label = "Qwen"
+    runtime_attestor_default = staticmethod(_attest_qwen_runtime)
+    service_schema = QWEN_SERVICE_SCHEMA
+    shutdown_schema = "cmpilot-final-qwen32b-shutdown-v1"
+
+
+class DevstralModelService(_ProfileModelService):
+    """Attempt-owned lifecycle for the exact qualified Devstral vLLM server."""
+
+    qualified_profile = DEVSTRAL_PRODUCTION_PROFILE
+    model_label = "Devstral"
+    runtime_attestor_default = staticmethod(_attest_devstral_runtime)
+    service_schema = DEVSTRAL_SERVICE_SCHEMA
+    shutdown_schema = "cmpilot-final-devstral-shutdown-v1"
+
+
+class _ProfileFinalModelExecutor:
+    """Compose one model service with the shared scientific agent runtime."""
 
     def __init__(
         self,
         *,
+        profile: ModelProfile,
         project_root: Path,
-        shared_runtime: SharedMiniSWERuntime | None = None,
-        service_factory: Callable[[], Qwen32BModelService] | None = None,
+        shared_runtime: SharedMiniSWERuntime,
+        service_factory: Callable[[], _ProfileModelService],
     ) -> None:
+        self.profile = profile
         self.project_root = Path(project_root).resolve(strict=True)
-        self.shared_runtime = shared_runtime or SharedMiniSWERuntime(
-            project_root=self.project_root
-        )
-        self.service_factory = service_factory or (
-            lambda: Qwen32BModelService(
-                profile=QWEN32B_PROFILE, project_root=self.project_root
-            )
-        )
-        self.service: Qwen32BModelService | None = None
+        self.shared_runtime = shared_runtime
+        self.service_factory = service_factory
+        self.service: _ProfileModelService | None = None
 
     def execute_agent(self, invocation: AgentInvocation) -> AgentExecutionResult:
-        prepared = self.shared_runtime.prepare(invocation, profile=QWEN32B_PROFILE)
+        prepared = self.shared_runtime.prepare(invocation, profile=self.profile)
         # Service creation/startup happens only after the scientific binding and
         # frozen profile have passed every CPU-side check.
         self.service = self.service_factory()
@@ -1099,6 +1269,63 @@ class Qwen32BFinalModelExecutor:
         }
 
 
+class Qwen32BFinalModelExecutor(_ProfileFinalModelExecutor):
+    """Qualified Qwen service using the shared final scientific runtime."""
+
+    def __init__(
+        self,
+        *,
+        project_root: Path,
+        shared_runtime: SharedMiniSWERuntime | None = None,
+        service_factory: Callable[[], Qwen32BModelService] | None = None,
+    ) -> None:
+        root = Path(project_root).resolve(strict=True)
+        super().__init__(
+            profile=QWEN32B_PROFILE,
+            project_root=root,
+            shared_runtime=shared_runtime
+            or SharedMiniSWERuntime(project_root=root),
+            service_factory=service_factory
+            or (
+                lambda: Qwen32BModelService(
+                    profile=QWEN32B_PROFILE, project_root=root
+                )
+            ),
+        )
+
+
+class DevstralFinalModelExecutor(_ProfileFinalModelExecutor):
+    """Qualified Devstral service using the shared final scientific runtime."""
+
+    def __init__(
+        self,
+        *,
+        project_root: Path,
+        shared_runtime: SharedMiniSWERuntime | None = None,
+        service_factory: Callable[[], DevstralModelService] | None = None,
+    ) -> None:
+        root = Path(project_root).resolve(strict=True)
+        super().__init__(
+            profile=DEVSTRAL_PRODUCTION_PROFILE,
+            project_root=root,
+            shared_runtime=shared_runtime
+            or SharedMiniSWERuntime(
+                project_root=root,
+                adapter_writer=write_devstral_production_adapter,
+                additional_generated_names=(
+                    DEVSTRAL_SERIALIZATION_NAME,
+                    PRODUCTION_POLICY_ADAPTER_NAME,
+                ),
+            ),
+            service_factory=service_factory
+            or (
+                lambda: DevstralModelService(
+                    profile=DEVSTRAL_PRODUCTION_PROFILE, project_root=root
+                )
+            ),
+        )
+
+
 def build_qwen32b_model_executor(
     context: Mapping[str, Any],
 ) -> Qwen32BFinalModelExecutor:
@@ -1118,9 +1345,31 @@ def build_qwen32b_model_executor(
     return Qwen32BFinalModelExecutor(project_root=Path(__file__).parents[2])
 
 
+def build_devstral_model_executor(
+    context: Mapping[str, Any],
+) -> DevstralFinalModelExecutor:
+    """Registry builder requiring the exact qualified Devstral profile record."""
+
+    record = context.get("model_profile")
+    expected = DEVSTRAL_PRODUCTION_PROFILE.final_experiment_record(
+        step_limit=QWEN_FROZEN_STEP_LIMIT
+    )
+    if not isinstance(record, Mapping) or dict(record) != expected:
+        raise FinalModelRuntimeError(
+            "Devstral final executor requires the exact frozen step_limit=15 model profile"
+        )
+    key = context.get("model_profile_key")
+    if key != DEVSTRAL_PRODUCTION_PROFILE.profile_id:
+        raise FinalModelRuntimeError("Devstral final executor profile key mismatch")
+    return DevstralFinalModelExecutor(project_root=Path(__file__).parents[2])
+
+
 __all__ = [
     "FinalModelRuntimeError",
     "HealthProbe",
+    "DEVSTRAL_SERVICE_SCHEMA",
+    "DevstralFinalModelExecutor",
+    "DevstralModelService",
     "MINI_SWE_RUNTIME_SCHEMA",
     "QWEN_AGENT_TIMEOUT_SECONDS",
     "QWEN_FROZEN_STEP_LIMIT",
@@ -1131,9 +1380,11 @@ __all__ = [
     "SCIENTIFIC_AGENT_BINDING_SCHEMA",
     "ScientificAgentBinding",
     "SharedMiniSWERuntime",
+    "build_devstral_model_executor",
     "build_qwen32b_model_executor",
     "classify_mini_swe_execution",
     "load_scientific_agent_binding",
     "qwen_service_port",
+    "validate_devstral_environment_verification",
     "write_scientific_agent_binding",
 ]

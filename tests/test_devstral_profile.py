@@ -48,7 +48,7 @@ def test_candidate_records_exact_pinned_identity_without_claiming_readiness() ->
     assert profile.environment_path == ENVIRONMENT_PATH
     assert CANDIDATE_PYTHON_VERSION == "3.11.11"
     assert CANDIDATE_CUDA_WHEEL_RUNTIME == "12.8"
-    assert profile.verification_state == "SNAPSHOT_FROZEN_TECHNICAL_SMOKE_PENDING"
+    assert profile.verification_state == "TECHNICAL_SMOKE_PASSED"
     assert profile.server.dtype == "bfloat16"
     assert profile.server.tensor_parallel_size == 2
     assert profile.server.max_model_length == 4096
@@ -78,7 +78,9 @@ def test_checked_in_candidate_config_matches_frozen_snapshot_identity() -> None:
     freeze = ROOT / SNAPSHOT_FREEZE
 
     assert value["schema"] == "cmpilot-model-profile-candidate-v1"
-    assert value["status"] == "SNAPSHOT_FROZEN_TECHNICAL_SMOKE_PENDING"
+    assert value["status"] == "TECHNICAL_SMOKE_PASSED"
+    assert value["technical_smoke"]["job_id"] == "28589"
+    assert value["technical_smoke"]["status"] == "PASS"
     assert value["profile_id"] == PROFILE_ID
     assert value["model"]["id"] == MODEL_ID
     assert value["model"]["revision"] == MODEL_REVISION

@@ -9,6 +9,18 @@ from cmpilot.calculator_finalizer import (
     FINALIZER_CONTROL_FLOW_VERSION,
     FINALIZER_STATE_SCHEMA,
 )
+from cmpilot import devstral_profile
+from cmpilot.devstral_profile import (
+    AGENT_PYTHON,
+    DEVSTRAL_PRODUCTION_PROFILE,
+    EXPECTED_CONSOLIDATED_SHA256,
+    EXPECTED_CONSOLIDATED_SIZE,
+    MODEL_ID as DEVSTRAL_MODEL_ID,
+    MODEL_REVISION as DEVSTRAL_MODEL_REVISION,
+    SNAPSHOT_FREEZE_SHA256,
+    SNAPSHOT_IDENTITY_SHA256,
+    verify_devstral_production_qualification,
+)
 from cmpilot.experiment_models import (
     MODEL_PROFILES,
     PRODUCTION_AGENT_CONFIG,
@@ -171,12 +183,75 @@ def test_every_profile_uses_the_unoverrideable_production_boundary() -> None:
 
 def test_profile_is_immutable_registry_is_read_only_and_unknown_ids_fail() -> None:
     assert get_model_profile(QWEN32B_PROFILE.profile_id) is QWEN32B_PROFILE
+    assert (
+        get_model_profile(DEVSTRAL_PRODUCTION_PROFILE.profile_id)
+        is DEVSTRAL_PRODUCTION_PROFILE
+    )
     with pytest.raises(FrozenInstanceError):
         QWEN32B_PROFILE.model_id = "weakened"  # type: ignore[misc]
     with pytest.raises(TypeError):
         MODEL_PROFILES["weakened"] = QWEN32B_PROFILE  # type: ignore[index]
     with pytest.raises(ModelProfileError, match="unknown model profile"):
         get_model_profile("unknown")
+
+
+def test_devstral_production_profile_binds_qualified_runtime_and_evidence() -> None:
+    profile = DEVSTRAL_PRODUCTION_PROFILE
+    identity = profile.identity_record()
+    qualification = identity["qualification"]
+
+    assert tuple(MODEL_PROFILES) == (
+        QWEN32B_PROFILE.profile_id,
+        profile.profile_id,
+    )
+    assert profile.profile_id == "devstral-small-2507"
+    assert profile.model_id == DEVSTRAL_MODEL_ID
+    assert profile.model_revision == DEVSTRAL_MODEL_REVISION
+    assert profile.environment.agent_python == AGENT_PYTHON
+    assert profile.serialization.serialization_mode == "mistral-common-tekken"
+    assert profile.serialization.chat_template_source == "mistral-common/tekken.json"
+    assert profile.server.dtype == "bfloat16"
+    assert profile.server.tensor_parallel_size == 2
+    assert profile.server.max_model_length == 4096
+    assert profile.server.quantization is None
+    assert qualification["snapshot_freeze"] == {
+        "freeze_identity_sha256": (
+            "7341bd8b1c9f1556fa39465e9b51b931ba1433d2fa23d1253d5f71b0739b6128"
+        ),
+        "path": "qualification/devstral-small-2507-snapshot-freeze.json",
+        "runtime_weight": {
+            "file": "consolidated.safetensors",
+            "sha256": EXPECTED_CONSOLIDATED_SHA256,
+            "size": EXPECTED_CONSOLIDATED_SIZE,
+        },
+        "sha256": SNAPSHOT_FREEZE_SHA256,
+        "snapshot_identity_sha256": SNAPSHOT_IDENTITY_SHA256,
+    }
+    assert qualification["technical_smoke"]["job_id"] == "28589"
+    assert qualification["environment_verifier"]["required_status"] == "READY"
+    assert verify_devstral_production_qualification(ROOT)
+    assert profile.verify_static_inputs(ROOT)
+
+
+def test_devstral_production_profile_rejects_missing_or_wrong_freeze(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        devstral_profile,
+        "SNAPSHOT_FREEZE",
+        Path("qualification/synthetic-missing-devstral-freeze.json"),
+    )
+    with pytest.raises(OSError):
+        verify_devstral_production_qualification(ROOT)
+
+    monkeypatch.setattr(
+        devstral_profile,
+        "SNAPSHOT_FREEZE",
+        Path("qualification/devstral-small-2507-snapshot-freeze.json"),
+    )
+    monkeypatch.setattr(devstral_profile, "SNAPSHOT_FREEZE_SHA256", "0" * 64)
+    with pytest.raises(ModelProfileError, match="frozen project input changed"):
+        verify_devstral_production_qualification(ROOT)
 
 
 @pytest.mark.parametrize(

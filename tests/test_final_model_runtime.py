@@ -9,18 +9,27 @@ import tempfile
 import pytest
 
 from cmpilot import final_model_runtime
+from cmpilot.devstral_profile import (
+    DEVSTRAL_PRODUCTION_PROFILE,
+    TECHNICAL_SMOKE_ENVIRONMENT_VERIFICATION,
+)
+from cmpilot.devstral_mini_swe_adapter import write_devstral_production_adapter
 from cmpilot.experiment_models import QWEN32B_PROFILE
 from cmpilot.final_model_runtime import (
+    DevstralFinalModelExecutor,
+    DevstralModelService,
     FinalModelRuntimeError,
     HealthProbe,
     QWEN_FROZEN_STEP_LIMIT,
     Qwen32BFinalModelExecutor,
     Qwen32BModelService,
     SharedMiniSWERuntime,
+    build_devstral_model_executor,
     build_qwen32b_model_executor,
     classify_mini_swe_execution,
     load_scientific_agent_binding,
     qwen_service_port,
+    validate_devstral_environment_verification,
     write_scientific_agent_binding,
 )
 from cmpilot.final_runner import (
@@ -381,6 +390,118 @@ def test_partial_qwen_startup_preserves_failure_and_cleans_runtime(
     runtime_root.rmdir()
 
 
+def test_devstral_service_uses_qualified_profile_command_and_shared_lifecycle(
+    tmp_path: Path,
+) -> None:
+    attempt = tmp_path / "run-devstral" / "attempts" / "slurm-93-0"
+    attempt.mkdir(parents=True)
+    observed: dict[str, object] = {}
+    process = _FakeProcess()
+    runtime_root = Path(tempfile.mkdtemp(prefix="cmdfrt-"))
+
+    def fake_process(argv, **kwargs):
+        observed["argv"] = tuple(argv)
+        observed["environment"] = kwargs["env"]
+        return process
+
+    service = DevstralModelService(
+        profile=DEVSTRAL_PRODUCTION_PROFILE,
+        project_root=ROOT,
+        runtime_root=runtime_root,
+        process_factory=fake_process,
+        health_probe=lambda _base: HealthProbe(True, 200, "HTTP 200", "a" * 64),
+        models_probe=lambda _base: ModelProbe(
+            "http://127.0.0.1:47985/v1/models",
+            True,
+            "endpoint responded",
+            200,
+            (DEVSTRAL_PRODUCTION_PROFILE.served_model_name,),
+        ),
+        runtime_attestor=lambda *_args, **_kwargs: {"pass": True},
+        gpu_inspector=lambda **_kwargs: {
+            "pass": True,
+            "rows": ["0, NVIDIA A100", "1, NVIDIA A100"],
+        },
+        port_available=lambda _port: True,
+        monotonic=lambda: 1.0,
+        sleeper=lambda _seconds: None,
+        port=47985,
+    )
+
+    assert service.start(
+        attempt_directory=attempt, run_id="run-devstral", slurm_job_id="93"
+    ) == "http://127.0.0.1:47985/v1"
+    assert observed["argv"] == DEVSTRAL_PRODUCTION_PROFILE.server_argv(port=47985)
+    startup = json.loads((attempt / "server-startup.json").read_text())
+    assert startup["schema"] == "cmpilot-final-devstral-service-v1"
+    assert startup["served_model_name"] == "mistralai/Devstral-Small-2507"
+
+    process.returncode = 0
+    shutdown = service.shutdown()
+    assert shutdown["schema"] == "cmpilot-final-devstral-shutdown-v1"
+    assert shutdown["pass"] is True
+    runtime_root.rmdir()
+
+
+def test_devstral_runtime_requires_current_verifier_ready_and_exact_identities() -> None:
+    verification = json.loads(
+        TECHNICAL_SMOKE_ENVIRONMENT_VERIFICATION.read_text(encoding="utf-8")
+    )
+    assert validate_devstral_environment_verification(verification)["pass"] is True
+
+    not_ready = {**verification, "production_ready": False, "status": "NOT_READY"}
+    rejected = validate_devstral_environment_verification(not_ready)
+    assert rejected["pass"] is False
+    assert rejected["checks"]["environment_ready"] is False
+
+    wrong_freeze = json.loads(json.dumps(verification))
+    wrong_freeze["snapshot_freeze"]["freeze_sha256"] = "0" * 64
+    rejected = validate_devstral_environment_verification(wrong_freeze)
+    assert rejected["pass"] is False
+    assert rejected["checks"]["snapshot_freeze"] is False
+
+
+def test_devstral_runtime_attestor_reruns_repository_verifier_before_server(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    verification = json.loads(
+        TECHNICAL_SMOKE_ENVIRONMENT_VERIFICATION.read_text(encoding="utf-8")
+    )
+    observed: list[tuple[str, ...]] = []
+
+    def fake_run(argv, *, environment, timeout):
+        command_line = tuple(argv)
+        observed.append(command_line)
+        assert environment["HF_HUB_OFFLINE"] == "1"
+        assert timeout == 1800
+        output = Path(command_line[command_line.index("--output") + 1])
+        output.write_text(json.dumps(verification), encoding="utf-8")
+        return subprocess.CompletedProcess(
+            command_line, 0, stdout="READY\n", stderr=""
+        )
+
+    monkeypatch.setattr(final_model_runtime, "_run_checked", fake_run)
+    attempt = tmp_path / "attempt"
+    attempt.mkdir()
+    integrity = final_model_runtime._attest_devstral_runtime(
+        DEVSTRAL_PRODUCTION_PROFILE,
+        project_root=ROOT,
+        attempt=attempt,
+        environment={"HF_HUB_OFFLINE": "1"},
+    )
+
+    assert integrity["pass"] is True
+    assert observed == [
+        (
+            str(DEVSTRAL_PRODUCTION_PROFILE.environment.server_python),
+            str(ROOT / "scripts/verify_devstral_environment.py"),
+            "--output",
+            str(attempt / "devstral-environment-verification.json"),
+        )
+    ]
+    assert json.loads((attempt / "runtime-integrity.json").read_text())["pass"]
+
+
 def test_array_attempts_receive_distinct_deterministic_bounded_ports() -> None:
     first = qwen_service_port(slurm_job_id="28499", attempt_id="slurm-28499-0")
     second = qwen_service_port(slurm_job_id="28499", attempt_id="slurm-28499-1")
@@ -439,7 +560,10 @@ def test_gpu_gate_uses_two_visible_torch_a100s_not_all_physical_gpus(
 
 
 def test_qwen_registry_is_ready_but_scientific_registry_waits_for_families() -> None:
-    assert tuple(MODEL_EXECUTORS) == (QWEN32B_PROFILE.profile_id,)
+    assert tuple(MODEL_EXECUTORS) == (
+        QWEN32B_PROFILE.profile_id,
+        DEVSTRAL_PRODUCTION_PROFILE.profile_id,
+    )
     assert SCIENTIFIC_BACKENDS == {}
     context = {
         "model_profile_key": QWEN32B_PROFILE.profile_id,
@@ -451,3 +575,32 @@ def test_qwen_registry_is_ready_but_scientific_registry_waits_for_families() -> 
     context["model_profile"] = QWEN32B_PROFILE.final_experiment_record(step_limit=16)
     with pytest.raises(FinalModelRuntimeError, match="step_limit=15"):
         build_qwen32b_model_executor(context)
+
+    devstral_context = {
+        "model_profile_key": DEVSTRAL_PRODUCTION_PROFILE.profile_id,
+        "model_profile": DEVSTRAL_PRODUCTION_PROFILE.final_experiment_record(
+            step_limit=QWEN_FROZEN_STEP_LIMIT
+        ),
+    }
+    executor = build_devstral_model_executor(devstral_context)
+    assert isinstance(executor, DevstralFinalModelExecutor)
+    assert type(executor.shared_runtime) is SharedMiniSWERuntime
+    assert executor.shared_runtime.adapter_writer is write_devstral_production_adapter
+    qwen_executor = build_qwen32b_model_executor(
+        {
+            "model_profile_key": QWEN32B_PROFILE.profile_id,
+            "model_profile": QWEN32B_PROFILE.final_experiment_record(
+                step_limit=QWEN_FROZEN_STEP_LIMIT
+            ),
+        }
+    )
+    assert type(qwen_executor.shared_runtime) is type(executor.shared_runtime)
+    assert qwen_executor.shared_runtime.adapter_writer is not (
+        executor.shared_runtime.adapter_writer
+    )
+    devstral_context["model_profile"] = {
+        **devstral_context["model_profile"],
+        "revision": "0" * 40,
+    }
+    with pytest.raises(FinalModelRuntimeError, match="exact frozen"):
+        build_devstral_model_executor(devstral_context)

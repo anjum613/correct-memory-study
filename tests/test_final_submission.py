@@ -7,6 +7,8 @@ import sys
 
 import pytest
 
+from cmpilot.devstral_profile import DEVSTRAL_PRODUCTION_PROFILE
+from cmpilot.experiment_models import QWEN32B_PROFILE
 from cmpilot.final_experiment import (
     FinalExperimentError,
     canonical_json_bytes,
@@ -379,3 +381,62 @@ def test_synthetic_diagnostic_dry_run_makes_no_writes_or_scheduler_call(
     assert not plan_path.exists()
     assert not evidence.exists()
     assert not logs.exists()
+
+
+def test_qualified_devstral_uses_shared_array_dry_run_without_submission(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    experiment = _experiment()
+    experiment["models"] = {
+        QWEN32B_PROFILE.profile_id: QWEN32B_PROFILE.final_experiment_record(
+            step_limit=15
+        ),
+        DEVSTRAL_PRODUCTION_PROFILE.profile_id: (
+            DEVSTRAL_PRODUCTION_PROFILE.final_experiment_record(step_limit=15)
+        ),
+    }
+    matrix = _build(experiment)
+    manifest_path = tmp_path / "manifest.json"
+    matrix_path = tmp_path / "matrix.json"
+    manifest_sha256 = write_new_canonical_json(manifest_path, experiment)
+    matrix_sha256 = write_new_canonical_json(matrix_path, matrix)
+    runner = tmp_path / "synthetic-runner.py"
+    runner.write_text("raise SystemExit('must not execute')\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        submit_final_experiment,
+        "submit_attested_array",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("dry-run reached Slurm")
+        ),
+    )
+    result = submit_final_experiment.main(
+        (
+            "submit",
+            str(manifest_path),
+            str(matrix_path),
+            str(tmp_path / "runs"),
+            str(tmp_path / "plan.json"),
+            "--expected-manifest-sha256",
+            manifest_sha256,
+            "--expected-matrix-sha256",
+            matrix_sha256,
+            "--model-profile",
+            DEVSTRAL_PRODUCTION_PROFILE.profile_id,
+            "--concurrency",
+            "3",
+            "--controller-python",
+            sys.executable,
+            "--runner-script",
+            str(runner),
+            "--allow-synthetic-diagnostic",
+            "--dry-run",
+        )
+    )
+    preview = json.loads(capsys.readouterr().out)
+    assert result == 0
+    assert preview["plan"]["model_profile"] == "devstral-small-2507"
+    assert preview["plan"]["resources"] == RESOURCES
+    assert preview["plan"]["array_specification"] == "0-23%3"
+    assert preview["sbatch_argv"][-1] == "devstral-small-2507"
+    assert preview["production_submitted"] is False

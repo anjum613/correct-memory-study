@@ -14,7 +14,6 @@ import json
 import math
 from pathlib import Path
 import re
-from types import MappingProxyType
 from typing import Callable, Mapping, Sequence
 
 from .calculator_finalizer import (
@@ -590,9 +589,31 @@ QWEN32B_PROFILE = ModelProfile(
 )
 
 
-MODEL_PROFILES: Mapping[str, ModelProfile] = MappingProxyType(
-    {QWEN32B_PROFILE.profile_id: QWEN32B_PROFILE}
-)
+_DEVSTRAL_PROFILE_ID = "devstral-small-2507"
+
+
+class _ModelProfileRegistry(Mapping[str, ModelProfile]):
+    """Immutable two-model registry with a lazy import to avoid a type cycle."""
+
+    _keys = (QWEN32B_PROFILE.profile_id, _DEVSTRAL_PROFILE_ID)
+
+    def __getitem__(self, profile_id: str) -> ModelProfile:
+        if profile_id == QWEN32B_PROFILE.profile_id:
+            return QWEN32B_PROFILE
+        if profile_id == _DEVSTRAL_PROFILE_ID:
+            from .devstral_profile import DEVSTRAL_PRODUCTION_PROFILE
+
+            return DEVSTRAL_PRODUCTION_PROFILE
+        raise KeyError(profile_id)
+
+    def __iter__(self):
+        return iter(self._keys)
+
+    def __len__(self) -> int:
+        return len(self._keys)
+
+
+MODEL_PROFILES: Mapping[str, ModelProfile] = _ModelProfileRegistry()
 
 
 def get_model_profile(profile_id: str) -> ModelProfile:
@@ -605,6 +626,7 @@ def get_model_profile(profile_id: str) -> ModelProfile:
 
 __all__ = [
     "GenerationSettings",
+    "FrozenProjectFile",
     "MODEL_PROFILES",
     "ModelProfile",
     "ModelProfileError",

@@ -1,4 +1,4 @@
-"""Fail-closed candidate profile for the isolated Devstral replication.
+"""Fail-closed candidate and qualified production profiles for Devstral.
 
 The serving and agent environments, exact-revision tokenizer metadata, and
 the Mistral loader's consolidated runtime weight are staged.  Readiness still
@@ -10,15 +10,21 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import hashlib
+import json
+import os
 from pathlib import Path
 import re
 from typing import Mapping, Sequence
 
 from .experiment_models import (
+    FrozenProjectFile,
+    ModelProfile,
     PRODUCTION_AGENT_CONFIG,
     PRODUCTION_SCIENTIFIC_BOUNDARY,
     GenerationSettings,
+    RuntimeEnvironmentIdentity,
     ScientificBoundaryIdentity,
+    SerializationIdentity,
     ServerSettings,
 )
 
@@ -150,6 +156,60 @@ EXPECTED_CONSOLIDATED_SHA256 = (
     "ed57cdadcdfe28e026bafa56ee1b5c91866e1d85cd33b772c8216415926d5727"
 )
 ALTERNATIVE_SHARDS_TOTAL_SIZE = 47_144_806_400
+
+SNAPSHOT_FREEZE = Path("qualification/devstral-small-2507-snapshot-freeze.json")
+SNAPSHOT_FREEZE_SHA256 = (
+    "2486602a374814152283f8a48fb6a0108bc5c96eeabf17a6e911cf8107e4a011"
+)
+SNAPSHOT_FREEZE_IDENTITY_SHA256 = (
+    "7341bd8b1c9f1556fa39465e9b51b931ba1433d2fa23d1253d5f71b0739b6128"
+)
+SNAPSHOT_IDENTITY_SHA256 = (
+    "e90b3af5301c42112c1711c919851aefd4c366bfc237c022c641add7ab7c8eaf"
+)
+TECHNICAL_SMOKE_JOB_ID = "28589"
+TECHNICAL_SMOKE_RESULT = Path(
+    "/home/s224049759/final-experiment-artifacts/"
+    "devstral-small-2507-technical-smoke/v2/jobs/28589/"
+    "technical-smoke-result.json"
+)
+TECHNICAL_SMOKE_RESULT_SHA256 = (
+    "6d29850cdcc1e044a9381c8a1b2c166ff628a14c0930c49df5ff961f55cb3b52"
+)
+TECHNICAL_SMOKE_ENVIRONMENT_VERIFICATION = TECHNICAL_SMOKE_RESULT.with_name(
+    "environment-verification.json"
+)
+TECHNICAL_SMOKE_ENVIRONMENT_VERIFICATION_SHA256 = (
+    "886e83ff632021aef51df7a2a5b9a0ed0108df541083eedfa0f56bb686e4cdfe"
+)
+
+PRODUCTION_PROFILE_FILES = (
+    FrozenProjectFile(
+        Path("configs/models/devstral-small-2507.json"),
+        "92fad14e431589cf2c578022f62648f0a63b1fdfd8332a2fdc0d3dbceedf208e",
+    ),
+    FrozenProjectFile(
+        Path("scripts/verify_devstral_environment.py"),
+        "15e85505a790f5f593fae053e9bc8d989866593e3e952ae84c3694500ed1a712",
+    ),
+    FrozenProjectFile(
+        Path(
+            "src/cmpilot/integrations/miniswe/"
+            "devstral_serialization_adapter_runtime.py"
+        ),
+        "9aaa7877b43ee6ae265f17faa4ee10517ebfb9b8654316e651368fd389632ab4",
+    ),
+    FrozenProjectFile(
+        Path("src/cmpilot/devstral_serialization.py"),
+        "d63b15f44baabb4fb4d4fe8dd539b8d16f05b6bc2129eb069e18120a85f3fef6",
+    ),
+    FrozenProjectFile(
+        Path(
+            "src/cmpilot/integrations/miniswe/qualification_adapter_runtime.py"
+        ),
+        "12b7163c23b444f605db65dc7bd705720e61caa4a4a13bfc5359e7830b1ca631",
+    ),
+)
 
 SERVER_SETTINGS = ServerSettings(
     dtype="bfloat16",
@@ -298,7 +358,7 @@ class DevstralCandidateProfile:
     native_tool_call_parser: None = NATIVE_TOOL_CALL_PARSER
     server: ServerSettings = SERVER_SETTINGS
     generation: GenerationSettings = GENERATION_SETTINGS
-    verification_state: str = "SNAPSHOT_FROZEN_TECHNICAL_SMOKE_PENDING"
+    verification_state: str = "TECHNICAL_SMOKE_PASSED"
 
     @property
     def agent_config(self):
@@ -453,6 +513,225 @@ def verify_devstral_readiness(
     return tuple(verified_paths)
 
 
+def _load_exact_json(path: Path, *, expected_sha256: str) -> dict[str, object]:
+    if path.is_symlink() or not path.is_file():
+        raise DevstralProfileError(f"qualified evidence is missing or unsafe: {path}")
+    actual = _sha256_file(path)
+    if actual != expected_sha256:
+        raise DevstralProfileError(
+            f"qualified evidence changed: {path}; expected {expected_sha256}, "
+            f"found {actual}"
+        )
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise DevstralProfileError(
+            f"qualified evidence is invalid JSON: {path}"
+        ) from error
+    if not isinstance(value, dict):
+        raise DevstralProfileError(f"qualified evidence must be a JSON object: {path}")
+    return value
+
+
+def verify_devstral_production_qualification(project_root: Path) -> tuple[Path, ...]:
+    """Verify the frozen profile and already-passed technical qualification.
+
+    This is intentionally a cheap profile gate.  The live environment verifier,
+    including the 47 GB runtime-weight hash, is rerun by the model service before
+    vLLM is started for an actual production attempt.
+    """
+
+    root = Path(project_root).resolve(strict=True)
+    verified = [item.verify(root) for item in PRODUCTION_PROFILE_FILES]
+    freeze_path = FrozenProjectFile(
+        SNAPSHOT_FREEZE, SNAPSHOT_FREEZE_SHA256
+    ).verify(root)
+    freeze = _load_exact_json(freeze_path, expected_sha256=SNAPSHOT_FREEZE_SHA256)
+    snapshot = freeze.get("snapshot")
+    serving = freeze.get("serving_profile")
+    model = freeze.get("model")
+    if (
+        freeze.get("schema") != "devstral-snapshot-freeze-v1"
+        or freeze.get("freeze_identity_sha256")
+        != SNAPSHOT_FREEZE_IDENTITY_SHA256
+        or not isinstance(model, dict)
+        or model.get("id") != MODEL_ID
+        or model.get("revision") != MODEL_REVISION
+        or not isinstance(snapshot, dict)
+        or snapshot.get("identity_sha256") != SNAPSHOT_IDENTITY_SHA256
+        or snapshot.get("model_id") != MODEL_ID
+        or snapshot.get("revision") != MODEL_REVISION
+        or not isinstance(serving, dict)
+        or serving.get("profile_id") != PROFILE_ID
+        or serving.get("model_id") != MODEL_ID
+        or serving.get("model_revision") != MODEL_REVISION
+        or serving.get("served_model_name") != SERVED_MODEL_NAME
+    ):
+        raise DevstralProfileError("Devstral snapshot freeze identity is inconsistent")
+    frozen_server = serving.get("server")
+    if not isinstance(frozen_server, dict) or frozen_server != {
+        "dtype": SERVER_SETTINGS.dtype,
+        "gpu_memory_utilization": SERVER_SETTINGS.gpu_memory_utilization,
+        "max_model_length": SERVER_SETTINGS.max_model_length,
+        "max_num_sequences": SERVER_SETTINGS.max_num_sequences,
+        "quantization": SERVER_SETTINGS.quantization,
+        "seed": SERVER_SETTINGS.server_seed,
+        "tensor_parallel_size": SERVER_SETTINGS.tensor_parallel_size,
+    }:
+        raise DevstralProfileError("Devstral serving profile differs from its freeze")
+
+    smoke = _load_exact_json(
+        TECHNICAL_SMOKE_RESULT, expected_sha256=TECHNICAL_SMOKE_RESULT_SHA256
+    )
+    smoke_checks = smoke.get("checks")
+    serialization = smoke.get("serialization")
+    if (
+        smoke.get("schema") != "devstral-technical-smoke-v2"
+        or smoke.get("smoke_id") != "devstral-small-2507-technical-smoke-v2"
+        or smoke.get("model_id") != MODEL_ID
+        or smoke.get("model_revision") != MODEL_REVISION
+        or smoke.get("pass") is not True
+        or smoke.get("scientific_evidence") is not False
+        or not isinstance(smoke_checks, dict)
+        or not smoke_checks
+        or not all(value is True for value in smoke_checks.values())
+        or not isinstance(serialization, dict)
+        or serialization.get("response_conversion") is not None
+        or serialization.get("tekken_sha256")
+        != dict(STAGED_SNAPSHOT_FILE_SHA256)["tekken.json"]
+    ):
+        raise DevstralProfileError("Devstral technical-smoke evidence is not qualified")
+
+    environment = _load_exact_json(
+        TECHNICAL_SMOKE_ENVIRONMENT_VERIFICATION,
+        expected_sha256=TECHNICAL_SMOKE_ENVIRONMENT_VERIFICATION_SHA256,
+    )
+    environment_checks = environment.get("checks")
+    environment_freeze = environment.get("snapshot_freeze")
+    runtime_weight = environment.get("runtime_weight")
+    if (
+        environment.get("production_ready") is not True
+        or environment.get("status") != "READY"
+        or not isinstance(environment_checks, dict)
+        or not environment_checks
+        or not all(value is True for value in environment_checks.values())
+        or not isinstance(environment_freeze, dict)
+        or environment_freeze.get("freeze_sha256") != SNAPSHOT_FREEZE_SHA256
+        or environment_freeze.get("snapshot_identity_sha256")
+        != SNAPSHOT_IDENTITY_SHA256
+        or not isinstance(runtime_weight, dict)
+        or runtime_weight.get("size") != EXPECTED_CONSOLIDATED_SIZE
+        or runtime_weight.get("sha256") != EXPECTED_CONSOLIDATED_SHA256
+    ):
+        raise DevstralProfileError("qualified Devstral environment report is not READY")
+
+    for label, executable in (
+        ("server", SERVER_PYTHON),
+        ("controller", CONTROLLER_PYTHON),
+        ("agent", AGENT_PYTHON),
+    ):
+        if not executable.is_file() or not os.access(executable, os.X_OK):
+            raise DevstralProfileError(
+                f"qualified Devstral {label} interpreter is unavailable: {executable}"
+            )
+        verified.append(executable.resolve(strict=True))
+    return (
+        *verified,
+        freeze_path,
+        TECHNICAL_SMOKE_RESULT.resolve(strict=True),
+        TECHNICAL_SMOKE_ENVIRONMENT_VERIFICATION.resolve(strict=True),
+    )
+
+
+class DevstralProductionModelProfile(ModelProfile):
+    """Qualified Devstral identity for the shared final experiment runner."""
+
+    def verify_static_inputs(self, project_root: Path) -> tuple[Path, ...]:
+        shared = super().verify_static_inputs(project_root)
+        qualified = verify_devstral_production_qualification(project_root)
+        return (*shared, *qualified)
+
+    def identity_record(self) -> dict[str, object]:
+        record = super().identity_record()
+        record["schema"] = "cmpilot-model-profile-v2"
+        record["qualification"] = {
+            "agent_environment": {
+                "environment_id": AGENT_ENVIRONMENT_ID,
+                "freeze": str(CANDIDATE_AGENT_FREEZE),
+                "freeze_sha256": CANDIDATE_AGENT_FREEZE_SHA256,
+                "lock": str(CANDIDATE_AGENT_LOCK),
+                "lock_sha256": CANDIDATE_AGENT_LOCK_SHA256,
+            },
+            "environment_verifier": {
+                "qualified_output_path": str(
+                    TECHNICAL_SMOKE_ENVIRONMENT_VERIFICATION
+                ),
+                "qualified_output_sha256": (
+                    TECHNICAL_SMOKE_ENVIRONMENT_VERIFICATION_SHA256
+                ),
+                "required_production_ready": True,
+                "required_status": "READY",
+                "script": "scripts/verify_devstral_environment.py",
+            },
+            "profile_files": [
+                {"path": item.relative_path.as_posix(), "sha256": item.sha256}
+                for item in PRODUCTION_PROFILE_FILES
+            ],
+            "snapshot_freeze": {
+                "freeze_identity_sha256": SNAPSHOT_FREEZE_IDENTITY_SHA256,
+                "path": str(SNAPSHOT_FREEZE),
+                "sha256": SNAPSHOT_FREEZE_SHA256,
+                "snapshot_identity_sha256": SNAPSHOT_IDENTITY_SHA256,
+                "runtime_weight": {
+                    "file": "consolidated.safetensors",
+                    "sha256": EXPECTED_CONSOLIDATED_SHA256,
+                    "size": EXPECTED_CONSOLIDATED_SIZE,
+                },
+            },
+            "technical_smoke": {
+                "job_id": TECHNICAL_SMOKE_JOB_ID,
+                "result_path": str(TECHNICAL_SMOKE_RESULT),
+                "result_sha256": TECHNICAL_SMOKE_RESULT_SHA256,
+                "schema": "devstral-technical-smoke-v2",
+            },
+        }
+        return record
+
+
+def _build_devstral_production_server_argv(port: int) -> tuple[str, ...]:
+    return build_devstral_server_argv(port=port)
+
+
+DEVSTRAL_PRODUCTION_PROFILE = DevstralProductionModelProfile(
+    profile_id=PROFILE_ID,
+    model_id=MODEL_ID,
+    model_revision=MODEL_REVISION,
+    model_snapshot=MODEL_SNAPSHOT,
+    served_model_name=SERVED_MODEL_NAME,
+    environment=RuntimeEnvironmentIdentity(
+        environment_id=ENVIRONMENT_ID,
+        server_python=SERVER_PYTHON,
+        controller_python=CONTROLLER_PYTHON,
+        agent_python=AGENT_PYTHON,
+        environment_fingerprint=ENVIRONMENT_FINGERPRINT_SHA256,
+        environment_content_digest=ENVIRONMENT_CONTENT_DIGEST_SHA256,
+        package_versions=CANDIDATE_PACKAGE_VERSIONS,
+        offline_environment=OFFLINE_ENVIRONMENT,
+    ),
+    serialization=SerializationIdentity(
+        tokenizer_path=MODEL_SNAPSHOT,
+        assets=(("tekken.json", dict(STAGED_SNAPSHOT_FILE_SHA256)["tekken.json"]),),
+        serialization_mode="mistral-common-tekken",
+        chat_template_source=CHAT_TEMPLATE_SOURCE,
+        add_generation_prompt=True,
+    ),
+    server=SERVER_SETTINGS,
+    generation=GENERATION_SETTINGS,
+    _server_command_builder=_build_devstral_production_server_argv,
+    _server_command_validator=validate_devstral_server_argv,
+)
+
+
 __all__ = [
     "ALTERNATIVE_SHARDS_TOTAL_SIZE",
     "ALTERNATIVE_WEIGHT_SHARD_FILES",
@@ -474,7 +753,9 @@ __all__ = [
     "CONFIG_FORMAT",
     "CONTROLLER_PYTHON",
     "DEVSTRAL_CANDIDATE",
+    "DEVSTRAL_PRODUCTION_PROFILE",
     "DevstralCandidateProfile",
+    "DevstralProductionModelProfile",
     "DevstralProfileError",
     "ENVIRONMENT_ID",
     "ENVIRONMENT_PATH",
@@ -490,11 +771,21 @@ __all__ = [
     "NATIVE_TOOL_CALL_PARSER",
     "OFFLINE_ENVIRONMENT",
     "PROFILE_ID",
+    "PRODUCTION_PROFILE_FILES",
     "REQUIRED_SNAPSHOT_FILES",
     "SERVER_PYTHON",
     "SERVED_MODEL_NAME",
+    "SNAPSHOT_FREEZE",
+    "SNAPSHOT_FREEZE_IDENTITY_SHA256",
+    "SNAPSHOT_FREEZE_SHA256",
+    "SNAPSHOT_IDENTITY_SHA256",
     "TOKENIZER_MODE",
     "STAGED_SNAPSHOT_FILE_SHA256",
+    "TECHNICAL_SMOKE_ENVIRONMENT_VERIFICATION",
+    "TECHNICAL_SMOKE_ENVIRONMENT_VERIFICATION_SHA256",
+    "TECHNICAL_SMOKE_JOB_ID",
+    "TECHNICAL_SMOKE_RESULT",
+    "TECHNICAL_SMOKE_RESULT_SHA256",
     "VerifiedDevstralIdentity",
     "build_devstral_server_argv",
     "normalize_package_name",
@@ -502,4 +793,5 @@ __all__ = [
     "validate_candidate_environment",
     "validate_devstral_server_argv",
     "verify_devstral_readiness",
+    "verify_devstral_production_qualification",
 ]

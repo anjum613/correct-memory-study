@@ -20,7 +20,13 @@ from cmpilot.devstral_profile import (
     validate_devstral_server_argv,
 )
 from cmpilot.devstral_serialization import PINNED_TEKKEN_SHA256
-from cmpilot.devstral_mini_swe_adapter import write_devstral_adapter
+from cmpilot.devstral_mini_swe_adapter import (
+    DEVSTRAL_SERIALIZATION_NAME,
+    FROZEN_ADAPTER_NAME,
+    PRODUCTION_POLICY_ADAPTER_NAME,
+    write_devstral_adapter,
+    write_devstral_production_adapter,
+)
 
 
 ROOT = Path(__file__).parents[1]
@@ -170,3 +176,23 @@ print(json.dumps({{
     assert result["identity"]["adapter_schema"] == (
         "devstral-frozen-text-runtime-serialization-v1"
     )
+
+
+def test_production_adapter_composes_serialization_with_shared_task_policy(
+    tmp_path: Path,
+) -> None:
+    adapter = tmp_path / "mini_swe_adapter.py"
+    record = write_devstral_production_adapter(adapter)
+
+    wrapper = adapter.read_text(encoding="utf-8")
+    policy = (tmp_path / PRODUCTION_POLICY_ADAPTER_NAME).read_text(encoding="utf-8")
+    assert PRODUCTION_POLICY_ADAPTER_NAME in wrapper
+    assert "ExactDevstralChatTokenCounter" in wrapper
+    assert "CMPILOT_TASK_POLICY_SOURCE" in policy
+    assert "CMPILOT_TASK_POLICY_SHA256" in policy
+    assert FROZEN_ADAPTER_NAME in policy
+    assert (tmp_path / DEVSTRAL_SERIALIZATION_NAME).is_file()
+    assert record["frozen_adapter_sha256"]
+    assert record["policy_adapter_sha256"]
+    with pytest.raises(FileExistsError, match="already exists"):
+        write_devstral_production_adapter(adapter)

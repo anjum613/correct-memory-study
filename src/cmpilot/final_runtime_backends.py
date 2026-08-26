@@ -1,9 +1,9 @@
 """Checked-in runtime bindings for frozen final-family packages.
 
 No real family has been selected yet, so the scientific registry remains
-intentionally empty.  The qualified Qwen model executor is safe to register
-independently: it cannot start until a future scientific backend has written a
-hash-bound attempt-local task-policy handoff.
+intentionally empty.  The qualified Qwen and Devstral executors are safe to
+register independently: neither can start until a future scientific backend
+has written a hash-bound attempt-local task-policy handoff.
 """
 
 from __future__ import annotations
@@ -12,8 +12,12 @@ from collections.abc import Callable, Mapping
 from types import MappingProxyType
 from typing import Any
 
+from .devstral_profile import DEVSTRAL_PRODUCTION_PROFILE
 from .experiment_models import QWEN32B_PROFILE
-from .final_model_runtime import build_qwen32b_model_executor
+from .final_model_runtime import (
+    build_devstral_model_executor,
+    build_qwen32b_model_executor,
+)
 from .final_runner import ModelExecutor, ScientificOperations
 
 
@@ -23,7 +27,10 @@ ModelExecutorBuilder = Callable[[Mapping[str, Any]], ModelExecutor]
 
 SCIENTIFIC_BACKENDS: Mapping[str, ScientificBackendBuilder] = MappingProxyType({})
 MODEL_EXECUTORS: Mapping[str, ModelExecutorBuilder] = MappingProxyType(
-    {QWEN32B_PROFILE.profile_id: build_qwen32b_model_executor}
+    {
+        QWEN32B_PROFILE.profile_id: build_qwen32b_model_executor,
+        DEVSTRAL_PRODUCTION_PROFILE.profile_id: build_devstral_model_executor,
+    }
 )
 
 
