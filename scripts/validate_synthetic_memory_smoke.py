@@ -192,7 +192,29 @@ def build_manifest() -> dict[str, Any]:
 def validate_manifest() -> bool:
     manifest = load_json(MANIFEST_PATH)
     expected = build_manifest()
-    return MANIFEST_PATH.read_bytes() == canonical_json_bytes(manifest) and manifest == expected
+    recorded_qualification = manifest.get("qualification_result")
+    expected_qualification = expected.get("qualification_result")
+    if not isinstance(recorded_qualification, dict) or not isinstance(
+        expected_qualification, dict
+    ):
+        return False
+    recorded_path = Path(str(recorded_qualification.get("path", "")))
+    expected_suffix = Path("qualification/qwen36-v1/qualification-result.json")
+    if (
+        tuple(recorded_path.parts[-len(expected_suffix.parts) :])
+        != expected_suffix.parts
+        or recorded_qualification.get("sha256")
+        != expected_qualification.get("sha256")
+    ):
+        return False
+    # The manifest predates linked-worktree execution and records the source
+    # worktree's absolute root.  Relocation is metadata-only: the exact frozen
+    # qualification bytes remain bound by the SHA-256 above.
+    expected_qualification["path"] = recorded_qualification["path"]
+    return (
+        MANIFEST_PATH.read_bytes() == canonical_json_bytes(manifest)
+        and manifest == expected
+    )
 
 
 def run_visible_tests() -> dict[str, bool]:
