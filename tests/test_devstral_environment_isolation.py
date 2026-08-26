@@ -77,7 +77,7 @@ def test_exact_transitive_freezes_are_hash_bound() -> None:
     ).hexdigest() == CANDIDATE_AGENT_FREEZE_SHA256
 
 
-def test_environment_verifier_fails_closed_before_staging() -> None:
+def test_environment_verifier_accepts_only_the_frozen_complete_snapshot() -> None:
     completed = subprocess.run(
         (str(SERVER_PYTHON), str(ROOT / "scripts/verify_devstral_environment.py")),
         cwd=ROOT,
@@ -85,13 +85,13 @@ def test_environment_verifier_fails_closed_before_staging() -> None:
         capture_output=True,
         text=True,
         env={"PYTHONDONTWRITEBYTECODE": "1", "PYTHONNOUSERSITE": "1"},
-        timeout=180,
+        timeout=900,
     )
 
-    assert completed.returncode == 1
+    assert completed.returncode == 0, completed.stderr
     result = json.loads(completed.stdout)
-    assert result["status"] == "NOT_READY"
-    assert result["production_ready"] is False
+    assert result["status"] == "READY"
+    assert result["production_ready"] is True
     assert result["candidate_environment_matches"] is True
     assert result["checks"]["staged_metadata_hashes_match"] is True
     assert result["checks"]["server_live_freeze_matches"] is True
@@ -101,8 +101,9 @@ def test_environment_verifier_fails_closed_before_staging() -> None:
     assert result["checks"]["alternative_shard_index_matches"] is True
     assert result["checks"]["tokenizer_identity"] is True
     assert result["checks"]["chat_template"] is True
-    assert result["checks"]["snapshot_required_files_exist"] is False
-    assert result["checks"]["runtime_weight_identity"] is False
-    assert result["checks"]["snapshot_identity_frozen"] is False
-    assert result["snapshot_files"]["consolidated.safetensors"] is False
+    assert result["checks"]["snapshot_required_files_exist"] is True
+    assert result["checks"]["runtime_weight_identity"] is True
+    assert result["checks"]["snapshot_identity_frozen"] is True
+    assert result["snapshot_freeze"]["status"] == "READY"
+    assert result["snapshot_files"]["consolidated.safetensors"] is True
     assert result["alternative_index"]["present_shards"] == 0

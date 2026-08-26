@@ -44,6 +44,10 @@ from cmpilot.devstral_profile import (  # noqa: E402
     validate_candidate_environment,
 )
 from cmpilot.devstral_serialization import ExactMistralChatTokenCounter  # noqa: E402
+from cmpilot.devstral_snapshot_freeze import (  # noqa: E402
+    SNAPSHOT_FREEZE,
+    validate_devstral_snapshot_freeze_observation,
+)
 from cmpilot.environment_content_digest import (  # noqa: E402
     fingerprint_installed_distributions,
 )
@@ -116,19 +120,27 @@ def verification_result() -> dict[str, object]:
     actual_prefix = Path(sys.prefix).resolve()
     expected_interpreter = SERVER_PYTHON.resolve(strict=False)
     expected_prefix = ENVIRONMENT_PATH.resolve(strict=False)
+    observed_snapshot_files = {
+        name: {
+            "sha256": sha256_file((MODEL_SNAPSHOT / name).resolve(strict=True)),
+            "size": (MODEL_SNAPSHOT / name).resolve(strict=True).stat().st_size,
+        }
+        for name in REQUIRED_SNAPSHOT_FILES
+        if (MODEL_SNAPSHOT / name).is_file()
+    }
     snapshot_files = {
-        name: (MODEL_SNAPSHOT / name).is_file() for name in REQUIRED_SNAPSHOT_FILES
+        name: name in observed_snapshot_files for name in REQUIRED_SNAPSHOT_FILES
     }
     staged_hashes = {
-        name: sha256_file(MODEL_SNAPSHOT / name)
-        if (MODEL_SNAPSHOT / name).is_file()
-        else None
+        name: observed_snapshot_files.get(name, {}).get("sha256")
         for name, _ in STAGED_SNAPSHOT_FILE_SHA256
     }
     staged_hashes_match = staged_hashes == dict(STAGED_SNAPSHOT_FILE_SHA256)
-    runtime_weight = MODEL_SNAPSHOT / "consolidated.safetensors"
-    runtime_weight_size = runtime_weight.stat().st_size if runtime_weight.is_file() else None
-    runtime_weight_sha256 = sha256_file(runtime_weight) if runtime_weight.is_file() else None
+    runtime_weight_observation = observed_snapshot_files.get(
+        "consolidated.safetensors", {}
+    )
+    runtime_weight_size = runtime_weight_observation.get("size")
+    runtime_weight_sha256 = runtime_weight_observation.get("sha256")
     runtime_weight_matches = (
         runtime_weight_size == EXPECTED_CONSOLIDATED_SIZE
         and runtime_weight_sha256 == EXPECTED_CONSOLIDATED_SHA256
@@ -205,8 +217,18 @@ def verification_result() -> dict[str, object]:
         **dict(STAGED_SNAPSHOT_FILE_SHA256),
         "consolidated.safetensors": EXPECTED_CONSOLIDATED_SHA256,
     }
+    snapshot_freeze = validate_devstral_snapshot_freeze_observation(
+        ROOT / SNAPSHOT_FREEZE,
+        observed_snapshot_files,
+        snapshot_revision=MODEL_SNAPSHOT.name,
+    )
+    configured_freeze = config["model"].get("snapshot_freeze")
     snapshot_identity_frozen = (
         config["model"].get("snapshot_file_sha256") == expected_snapshot_hashes
+        and isinstance(configured_freeze, dict)
+        and configured_freeze.get("path") == str(SNAPSHOT_FREEZE)
+        and configured_freeze.get("sha256") == snapshot_freeze.freeze_sha256
+        and snapshot_freeze.valid
     )
     checks = {
         "candidate_lock_matches": lock_sha256 == CANDIDATE_LOCK_SHA256,
@@ -304,6 +326,7 @@ def verification_result() -> dict[str, object]:
             "sha256": runtime_weight_sha256,
             "size": runtime_weight_size,
         },
+        "snapshot_freeze": snapshot_freeze.as_record(),
         "status": "READY" if production_ready else "NOT_READY",
     }
 

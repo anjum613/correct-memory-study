@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import FrozenInstanceError
+import hashlib
 import json
 from pathlib import Path
 
@@ -18,6 +19,8 @@ from cmpilot.devstral_profile import (
     MODEL_SNAPSHOT,
     PROFILE_ID,
     REQUIRED_SNAPSHOT_FILES,
+    EXPECTED_CONSOLIDATED_SHA256,
+    STAGED_SNAPSHOT_FILE_SHA256,
     DevstralProfileError,
     verify_devstral_readiness,
 )
@@ -25,6 +28,7 @@ from cmpilot.experiment_models import (
     PRODUCTION_AGENT_CONFIG,
     PRODUCTION_SCIENTIFIC_BOUNDARY,
 )
+from cmpilot.devstral_snapshot_freeze import SNAPSHOT_FREEZE
 
 
 ROOT = Path(__file__).parents[1]
@@ -44,9 +48,7 @@ def test_candidate_records_exact_pinned_identity_without_claiming_readiness() ->
     assert profile.environment_path == ENVIRONMENT_PATH
     assert CANDIDATE_PYTHON_VERSION == "3.11.11"
     assert CANDIDATE_CUDA_WHEEL_RUNTIME == "12.8"
-    assert profile.verification_state == (
-        "PARTIAL_METADATA_TOKENIZER_STAGED_WEIGHTS_ABSENT"
-    )
+    assert profile.verification_state == "SNAPSHOT_FROZEN_TECHNICAL_SMOKE_PENDING"
     assert profile.server.dtype == "bfloat16"
     assert profile.server.tensor_parallel_size == 2
     assert profile.server.max_model_length == 4096
@@ -71,11 +73,12 @@ def test_candidate_is_immutable_and_default_server_gate_fails_closed() -> None:
         verify_devstral_readiness(verified_identity=None)
 
 
-def test_checked_in_candidate_config_matches_code_and_has_no_fabricated_hashes() -> None:
+def test_checked_in_candidate_config_matches_frozen_snapshot_identity() -> None:
     value = json.loads(CONFIG.read_text(encoding="utf-8"))
+    freeze = ROOT / SNAPSHOT_FREEZE
 
     assert value["schema"] == "cmpilot-model-profile-candidate-v1"
-    assert value["status"] == "PARTIAL_METADATA_TOKENIZER_STAGED_WEIGHTS_ABSENT"
+    assert value["status"] == "SNAPSHOT_FROZEN_TECHNICAL_SMOKE_PENDING"
     assert value["profile_id"] == PROFILE_ID
     assert value["model"]["id"] == MODEL_ID
     assert value["model"]["revision"] == MODEL_REVISION
@@ -83,10 +86,17 @@ def test_checked_in_candidate_config_matches_code_and_has_no_fabricated_hashes()
     assert tuple(value["model"]["snapshot_required_files"]) == (
         REQUIRED_SNAPSHOT_FILES
     )
-    assert value["model"]["snapshot_file_sha256"] is None
-    assert value["model"]["runtime_weight"]["present"] is False
+    assert value["model"]["snapshot_file_sha256"] == {
+        **dict(STAGED_SNAPSHOT_FILE_SHA256),
+        "consolidated.safetensors": EXPECTED_CONSOLIDATED_SHA256,
+    }
+    assert value["model"]["snapshot_freeze"] == {
+        "path": str(SNAPSHOT_FREEZE),
+        "sha256": hashlib.sha256(freeze.read_bytes()).hexdigest(),
+    }
+    assert value["model"]["runtime_weight"]["present"] is True
     assert value["model"]["alternative_hf_shards"]["present_count"] == 0
-    assert value["model"]["verified"] is False
+    assert value["model"]["verified"] is True
     assert value["environment"]["path"] == str(ENVIRONMENT_PATH)
     assert value["environment"]["candidate_lock_sha256"] == (
         CANDIDATE_LOCK_SHA256

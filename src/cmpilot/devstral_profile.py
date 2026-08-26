@@ -1,10 +1,9 @@
 """Fail-closed candidate profile for the isolated Devstral replication.
 
-The serving and agent environments plus exact-revision tokenizer metadata are
-staged.  The frozen vLLM Mistral loader's consolidated weight file is
-intentionally absent, so this module records the partial attestation but
-cannot expose a production-ready ``ModelProfile``.  The separately indexed
-ten Hugging Face shards are recorded as an unused alternative and are absent.
+The serving and agent environments, exact-revision tokenizer metadata, and
+the Mistral loader's consolidated runtime weight are staged.  Readiness still
+requires the repository-owned snapshot freeze and live environment verifier.
+The separately indexed Hugging Face shards remain an unused alternative.
 """
 
 from __future__ import annotations
@@ -299,7 +298,7 @@ class DevstralCandidateProfile:
     native_tool_call_parser: None = NATIVE_TOOL_CALL_PARSER
     server: ServerSettings = SERVER_SETTINGS
     generation: GenerationSettings = GENERATION_SETTINGS
-    verification_state: str = "PARTIAL_METADATA_TOKENIZER_STAGED_WEIGHTS_ABSENT"
+    verification_state: str = "SNAPSHOT_FROZEN_TECHNICAL_SMOKE_PENDING"
 
     @property
     def agent_config(self):
