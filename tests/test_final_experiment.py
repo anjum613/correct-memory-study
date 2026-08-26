@@ -9,17 +9,29 @@ import sys
 
 import pytest
 
-from cmpilot.calculator_finalizer import FinalizerState, MANDATORY_FINALIZATION_STAGES
+from cmpilot.calculator_finalizer import (
+    FinalizerState,
+    MANDATORY_FINALIZATION_STAGES,
+    save_finalizer_state,
+)
 from cmpilot.final_experiment import (
+    ATTEMPT_PROVENANCE_SCHEMA,
     EXPERIMENT_SCHEMA,
+    FROZEN,
+    PRODUCTION,
+    SYNTHETIC_ONLY,
+    SYNTHETIC_UNIT_TEST,
     FinalExperimentError,
     aggregate_run_results,
     build_run_matrix,
     canonical_json_bytes,
     classify_run_attempts,
     load_experiment_manifest,
+    reserve_run_attempt,
+    resolve_final_run_context,
     validate_experiment_manifest,
     validate_run_matrix,
+    validate_run_matrix_against_manifest,
     write_new_canonical_json,
 )
 
@@ -88,7 +100,9 @@ def _family(index: int, *, per_model: bool = False) -> dict[str, object]:
             "to": "requires-attestation",
         },
         "transition_type": "G6",
+        "tptm_provenance": _digest(f"tptm-{index}"),
         "selection_provenance": _digest(f"selection-{index}"),
+        "task_specification": _digest(f"task-specification-{index}"),
         "source_functionality_tests": _digest(f"source-tests-{index}"),
         "target_functionality_tests": _digest(f"target-tests-{index}"),
         "security_witness": _digest(f"witness-{index}"),
@@ -108,13 +122,31 @@ def _experiment(*, per_model: bool = False) -> dict[str, object]:
     )
     return {
         "schema": EXPERIMENT_SCHEMA,
+        "purpose": SYNTHETIC_UNIT_TEST,
+        "freeze_status": SYNTHETIC_ONLY,
         "protocol_version": "final-six-family-v1",
         "evaluator": {
             **_digest("evaluator"),
             "version": "executable-evaluator-v1",
         },
+        "finalizer": {
+            **_digest("total-finalizer"),
+            "version": "total-finalizer-v1",
+        },
         "memory_mode": "PER_MODEL_GENERATED" if per_model else "FIXED_EXTERNAL",
         "conditions": ["NO_MEMORY", "SOURCE_CORRECT_MEMORY"],
+        "condition_definitions": {
+            "NO_MEMORY": {
+                **_digest("condition-no-memory"),
+                "requires_memory": False,
+                "treatment_type": "NO_MEMORY",
+            },
+            "SOURCE_CORRECT_MEMORY": {
+                **_digest("condition-source-correct-memory"),
+                "requires_memory": True,
+                "treatment_type": "SOURCE_CORRECT_MEMORY",
+            },
+        },
         "repetitions": 2,
         "seeds": [104729, 130363],
         "models": {
@@ -145,9 +177,39 @@ def _experiment(*, per_model: bool = False) -> dict[str, object]:
     }
 
 
+def _build(
+    experiment: dict[str, object] | None = None,
+    *,
+    experiment_manifest_sha256: str | None = None,
+) -> dict[str, object]:
+    return build_run_matrix(
+        _experiment() if experiment is None else experiment,
+        experiment_manifest_sha256=experiment_manifest_sha256,
+        allow_synthetic=True,
+    )
+
+
 def _complete_attempt(path: Path, run: dict[str, object], *, witness: bool) -> None:
-    path.mkdir(parents=True)
-    write_new_canonical_json(path / "run-manifest.json", run)
+    path.mkdir(parents=True, exist_ok=True)
+    if not (path / "run-manifest.json").exists():
+        write_new_canonical_json(path / "run-manifest.json", run)
+    if path.parent.name == "attempts" and not (
+        path / "attempt-provenance.json"
+    ).exists():
+        job_id = path.name.removeprefix("slurm-")
+        write_new_canonical_json(
+            path / "attempt-provenance.json",
+            {
+                "schema": ATTEMPT_PROVENANCE_SCHEMA,
+                "attempt_id": path.name,
+                "slurm_job_id": job_id,
+                "run_id": run["run_id"],
+                "identity_sha256": run["identity_sha256"],
+                "experiment_manifest_sha256": run[
+                    "experiment_manifest_sha256"
+                ],
+            },
+        )
     state = FinalizerState(
         run_id=str(run["run_id"]),
         initialized_utc="2026-08-26T00:00:00Z",
@@ -156,11 +218,19 @@ def _complete_attempt(path: Path, run: dict[str, object], *, witness: bool) -> N
         final_exit_code=0,
         final_exit_chosen_after_all_stages=True,
     )
-    write_new_canonical_json(path / "finalizer-state.json", state.as_dict())
+    state_path = path / "finalizer-state.json"
+    if state_path.exists():
+        save_finalizer_state(state_path, state)
+    else:
+        write_new_canonical_json(state_path, state.as_dict())
     write_new_canonical_json(
         path / "result.json",
         {
             "run_id": run["run_id"],
+            "identity_sha256": run["identity_sha256"],
+            "experiment_manifest_sha256": run[
+                "experiment_manifest_sha256"
+            ],
             "functionality_result": {"pass": True, "test_count": 7},
             "witness_result": {"pass": witness, "executable": True},
             "model_run_termination": "NORMAL_COMPLETION",
@@ -188,8 +258,8 @@ def _complete_attempt(path: Path, run: dict[str, object], *, witness: bool) -> N
 
 def test_fixed_external_manifest_generates_complete_deterministic_matrix() -> None:
     experiment = _experiment()
-    first = build_run_matrix(experiment)
-    second = build_run_matrix(deepcopy(experiment))
+    first = _build(experiment)
+    second = _build(deepcopy(experiment))
 
     assert first == second
     assert first["run_count"] == 6 * 2 * 2 * 2
@@ -197,6 +267,16 @@ def test_fixed_external_manifest_generates_complete_deterministic_matrix() -> No
     assert first["dimensions"] == {
         "families": [f"family-{index}" for index in range(1, 7)],
         "conditions": ["NO_MEMORY", "SOURCE_CORRECT_MEMORY"],
+        "condition_definitions": {
+            "NO_MEMORY": {
+                "requires_memory": False,
+                "sha256": _hash("condition-no-memory"),
+            },
+            "SOURCE_CORRECT_MEMORY": {
+                "requires_memory": True,
+                "sha256": _hash("condition-source-correct-memory"),
+            },
+        },
         "models": ["devstral", "qwen"],
         "repetitions": 2,
         "seeds": [104729, 130363],
@@ -208,14 +288,59 @@ def test_fixed_external_manifest_generates_complete_deterministic_matrix() -> No
     validate_run_matrix(first)
 
 
+def test_additional_conditions_come_from_the_manifest() -> None:
+    experiment = _experiment()
+    extra_condition = "SYNTHETIC_ADDITIONAL_CONTROL"
+    experiment["conditions"].append(extra_condition)
+    experiment["condition_definitions"][extra_condition] = {
+        **_digest("condition-additional-control"),
+        "requires_memory": True,
+        "treatment_type": "SYNTHETIC_MEMORY_CONTROL",
+    }
+    for index, family in enumerate(experiment["families"]):
+        family["memories"][extra_condition] = {
+            "source_task": family["source_task_identity"],
+            "source_repository_revision": family["source_revision"],
+            "content_sha256": _hash(f"extra-memory-{index}"),
+            "provenance_manifest_sha256": _hash(f"extra-provenance-{index}"),
+        }
+
+    matrix = _build(experiment)
+
+    assert matrix["dimensions"]["conditions"] == [
+        "NO_MEMORY",
+        "SOURCE_CORRECT_MEMORY",
+        extra_condition,
+    ]
+    assert matrix["run_count"] == 6 * 3 * 2 * 2
+
+
+def test_additional_non_memory_control_does_not_require_a_fake_memory() -> None:
+    experiment = _experiment()
+    extra_condition = "SYNTHETIC_NON_MEMORY_CONTROL"
+    experiment["conditions"].append(extra_condition)
+    experiment["condition_definitions"][extra_condition] = {
+        **_digest("condition-non-memory-control"),
+        "requires_memory": False,
+        "treatment_type": "SYNTHETIC_PROMPT_NEUTRAL_CONTROL",
+    }
+
+    matrix = _build(experiment)
+
+    rows = [run for run in matrix["runs"] if run["condition"] == extra_condition]
+    assert len(rows) == 6 * 2 * 2
+    assert all(run["memory"] is None for run in rows)
+    assert all(run["condition_requires_memory"] is False for run in rows)
+
+
 def test_atomic_id_changes_with_relevant_memory_or_task_hash() -> None:
     original = _experiment()
-    original_matrix = build_run_matrix(original)
+    original_matrix = _build(original)
     changed = deepcopy(original)
     changed["families"][0]["memories"]["SOURCE_CORRECT_MEMORY"][
         "content_sha256"
     ] = _hash("changed-memory")
-    changed_matrix = build_run_matrix(changed)
+    changed_matrix = _build(changed)
 
     before = {
         (run["family_id"], run["condition"], run["model_profile"], run["seed"]): run[
@@ -230,8 +355,25 @@ def test_atomic_id_changes_with_relevant_memory_or_task_hash() -> None:
         for run in changed_matrix["runs"]
     }
     changed_keys = {key for key in before if before[key] != after[key]}
-    assert len(changed_keys) == 4
-    assert all(key[0:2] == ("family-1", "SOURCE_CORRECT_MEMORY") for key in changed_keys)
+    # The immutable manifest digest is part of every atomic identity, so any
+    # scientific-manifest change invalidates every run ID.
+    assert len(changed_keys) == 48
+    original_treated = next(
+        run
+        for run in original_matrix["runs"]
+        if run["family_id"] == "family-1"
+        and run["condition"] == "SOURCE_CORRECT_MEMORY"
+    )
+    changed_treated = next(
+        run
+        for run in changed_matrix["runs"]
+        if run["family_id"] == "family-1"
+        and run["condition"] == "SOURCE_CORRECT_MEMORY"
+    )
+    assert (
+        original_treated["condition_record_sha256"]
+        != changed_treated["condition_record_sha256"]
+    )
 
 
 @pytest.mark.parametrize(
@@ -248,14 +390,17 @@ def test_atomic_id_changes_with_relevant_memory_or_task_hash() -> None:
         lambda value: value["evaluator"].update(
             version="executable-evaluator-v2", sha256=_hash("evaluator-v2")
         ),
+        lambda value: value["finalizer"].update(
+            version="total-finalizer-v2", sha256=_hash("finalizer-v2")
+        ),
     ],
 )
 def test_atomic_id_binds_runtime_and_evaluator_identity(mutation) -> None:
     original = _experiment()
     changed = deepcopy(original)
     mutation(changed)
-    before = build_run_matrix(original)["runs"]
-    after = build_run_matrix(changed)["runs"]
+    before = _build(original)["runs"]
+    after = _build(changed)["runs"]
     before_qwen = [run["run_id"] for run in before if run["model_profile"] == "qwen"]
     after_qwen = [run["run_id"] for run in after if run["model_profile"] == "qwen"]
     assert before_qwen != after_qwen
@@ -272,6 +417,22 @@ def test_atomic_id_binds_runtime_and_evaluator_identity(mutation) -> None:
             "unique",
         ),
         (lambda value: value.update(conditions=["NO_MEMORY"]), "required conditions"),
+        (
+            lambda value: value["condition_definitions"].pop("NO_MEMORY"),
+            "exactly the declared conditions",
+        ),
+        (
+            lambda value: value["condition_definitions"]["NO_MEMORY"].update(
+                requires_memory=True
+            ),
+            "NO_MEMORY must not require memory",
+        ),
+        (
+            lambda value: value["condition_definitions"][
+                "SOURCE_CORRECT_MEMORY"
+            ].update(requires_memory=False),
+            "SOURCE_CORRECT_MEMORY must require memory",
+        ),
         (lambda value: value.update(seeds=[1]), "one seed per repetition"),
         (
             lambda value: value["families"][0]["security_witness"].update(sha256="bad"),
@@ -287,13 +448,47 @@ def test_atomic_id_binds_runtime_and_evaluator_identity(mutation) -> None:
             lambda value: value["models"]["qwen"].pop("profile_sha256"),
             "64 lowercase",
         ),
+        (
+            lambda value: value["families"][0].pop("tptm_provenance"),
+            "tptm_provenance must be an object",
+        ),
+        (
+            lambda value: value["families"][0].pop("task_specification"),
+            "task_specification must be an object",
+        ),
+        (lambda value: value.pop("finalizer"), "finalizer must be an object"),
+        (
+            lambda value: value["families"][0]["memories"].update(
+                UNKNOWN_CONTROL=None
+            ),
+            "conditions absent from the manifest",
+        ),
     ],
 )
 def test_manifest_rejects_incomplete_or_unfrozen_dimensions(mutation, message: str) -> None:
     value = _experiment()
     mutation(value)
     with pytest.raises(FinalExperimentError, match=message):
-        validate_experiment_manifest(value)
+        validate_experiment_manifest(value, allow_synthetic=True)
+
+
+def test_manifest_purpose_and_freeze_are_fail_closed() -> None:
+    synthetic = _experiment()
+    with pytest.raises(FinalExperimentError, match="explicit diagnostic flag"):
+        validate_experiment_manifest(synthetic)
+
+    malformed_production = deepcopy(synthetic)
+    malformed_production["purpose"] = PRODUCTION
+    malformed_production["freeze_status"] = "NOT_FROZEN"
+    with pytest.raises(FinalExperimentError, match="freeze_status=FROZEN"):
+        validate_experiment_manifest(malformed_production)
+
+    wrong_synthetic_status = deepcopy(synthetic)
+    wrong_synthetic_status["freeze_status"] = FROZEN
+    with pytest.raises(FinalExperimentError, match="freeze_status=SYNTHETIC_ONLY"):
+        validate_experiment_manifest(
+            wrong_synthetic_status, allow_synthetic=True
+        )
 
 
 def test_fixed_external_forbids_model_generation_provenance() -> None:
@@ -302,13 +497,13 @@ def test_fixed_external_forbids_model_generation_provenance() -> None:
         "generating_model"
     ] = "Qwen/example"
     with pytest.raises(FinalExperimentError, match="generation fields"):
-        validate_experiment_manifest(value)
+        validate_experiment_manifest(value, allow_synthetic=True)
 
 
 def test_per_model_memory_requires_exact_profiles_revisions_and_seeds() -> None:
     value = _experiment(per_model=True)
-    validated = validate_experiment_manifest(value)
-    matrix = build_run_matrix(validated)
+    validated = validate_experiment_manifest(value, allow_synthetic=True)
+    matrix = _build(validated)
     qwen = next(
         run
         for run in matrix["runs"]
@@ -327,41 +522,142 @@ def test_per_model_memory_requires_exact_profiles_revisions_and_seeds() -> None:
     missing = deepcopy(value)
     del missing["families"][0]["memories"]["SOURCE_CORRECT_MEMORY"]["devstral"]
     with pytest.raises(FinalExperimentError, match="exactly the evaluated model keys"):
-        validate_experiment_manifest(missing)
+        validate_experiment_manifest(missing, allow_synthetic=True)
     wrong_revision = deepcopy(value)
     wrong_revision["families"][0]["memories"]["SOURCE_CORRECT_MEMORY"]["qwen"][
         "model_revision"
     ] = _revision("wrong")
     with pytest.raises(FinalExperimentError, match="revision does not match"):
-        validate_experiment_manifest(wrong_revision)
+        validate_experiment_manifest(wrong_revision, allow_synthetic=True)
 
 
 def test_canonical_loader_verifies_exact_hash_and_rejects_overwrite(tmp_path: Path) -> None:
     path = tmp_path / "experiment.json"
     expected = write_new_canonical_json(path, _experiment())
-    loaded, actual = load_experiment_manifest(path, expected_sha256=expected)
+    loaded, actual = load_experiment_manifest(
+        path, expected_sha256=expected, allow_synthetic=True
+    )
     assert loaded == _experiment()
     assert actual == expected
     with pytest.raises(FinalExperimentError, match="overwrite"):
         write_new_canonical_json(path, _experiment())
     with pytest.raises(FinalExperimentError, match="hash mismatch"):
-        load_experiment_manifest(path, expected_sha256="0" * 64)
+        load_experiment_manifest(
+            path, expected_sha256="0" * 64, allow_synthetic=True
+        )
 
     noncanonical = tmp_path / "noncanonical.json"
     noncanonical.write_text(json.dumps(_experiment()), encoding="utf-8")
     with pytest.raises(FinalExperimentError, match="not canonical"):
-        load_experiment_manifest(noncanonical)
+        load_experiment_manifest(noncanonical, allow_synthetic=True)
 
 
 def test_matrix_validation_detects_identity_tampering() -> None:
-    matrix = build_run_matrix(_experiment())
+    matrix = _build()
     matrix["runs"][0]["seed"] += 1
     with pytest.raises(FinalExperimentError, match="identity hash changed"):
         validate_run_matrix(matrix)
 
 
+def test_matrix_generation_rejects_an_unrelated_supplied_manifest_hash() -> None:
+    with pytest.raises(FinalExperimentError, match="canonical manifest"):
+        _build(experiment_manifest_sha256="0" * 64)
+
+
+def test_matrix_validation_requires_complete_canonical_cartesian_order() -> None:
+    reordered = _build()
+    reordered["runs"][0], reordered["runs"][1] = (
+        reordered["runs"][1],
+        reordered["runs"][0],
+    )
+    reordered_ids = [run["run_id"] for run in reordered["runs"]]
+    reordered["run_ids_sha256"] = hashlib.sha256(
+        canonical_json_bytes(reordered_ids)
+    ).hexdigest()
+    with pytest.raises(FinalExperimentError, match="canonical Cartesian ordering"):
+        validate_run_matrix(reordered)
+
+    truncated = _build()
+    truncated["runs"].pop()
+    truncated["run_count"] = len(truncated["runs"])
+    truncated["run_ids_sha256"] = hashlib.sha256(
+        canonical_json_bytes([run["run_id"] for run in truncated["runs"]])
+    ).hexdigest()
+    with pytest.raises(FinalExperimentError, match="complete Cartesian product"):
+        validate_run_matrix(truncated)
+
+    wrong_seed_schedule = _build()
+    wrong_seed_schedule["dimensions"]["seeds"].reverse()
+    with pytest.raises(FinalExperimentError, match="seed assignment"):
+        validate_run_matrix(wrong_seed_schedule)
+
+    unsafe_no_memory = _build()
+    unsafe_no_memory["dimensions"]["condition_definitions"]["NO_MEMORY"][
+        "requires_memory"
+    ] = True
+    with pytest.raises(FinalExperimentError, match="NO_MEMORY must not require memory"):
+        validate_run_matrix(unsafe_no_memory)
+
+
+def test_matrix_validation_rejects_copied_memory_tampering() -> None:
+    matrix = _build()
+    treated = next(
+        run for run in matrix["runs"] if run["condition"] != "NO_MEMORY"
+    )
+    treated["memory"]["content_sha256"] = _hash("tampered-memory-copy")
+    with pytest.raises(FinalExperimentError, match="memory content hash changed"):
+        validate_run_matrix(matrix)
+
+
+def test_matrix_must_be_the_exact_expansion_of_its_manifest() -> None:
+    experiment = _experiment()
+    matrix = _build(experiment)
+    assert (
+        validate_run_matrix_against_manifest(
+            matrix, experiment, allow_synthetic=True
+        )
+        == matrix
+    )
+
+    changed = deepcopy(experiment)
+    changed["families"][0]["repository_identity"] = "example/other-repository"
+    with pytest.raises(FinalExperimentError, match="exact expansion"):
+        validate_run_matrix_against_manifest(
+            matrix, changed, allow_synthetic=True
+        )
+
+
+def test_shared_context_keeps_treatment_out_of_the_model_adapter() -> None:
+    experiment = _experiment()
+    run = next(
+        item
+        for item in _build(experiment)["runs"]
+        if item["condition"] == "SOURCE_CORRECT_MEMORY"
+    )
+    context = resolve_final_run_context(
+        experiment, run, allow_synthetic=True
+    )
+
+    assert context["family_manifest"]["family_id"] == run["family_id"]
+    assert context["condition"] == run["condition"]
+    assert context["seed"] == run["seed"]
+    assert context["run_identity"]["schema"].endswith("identity-v2")
+    assert context["treatment"]["memory"] == run["memory"]
+    assert context["treatment"]["condition_definition"] == experiment[
+        "condition_definitions"
+    ][run["condition"]]
+    assert "memory" not in context["model_profile"]
+
+    tampered = deepcopy(run)
+    tampered["memory"]["content_sha256"] = _hash("tampered-context-memory")
+    with pytest.raises(FinalExperimentError, match="exact atomic record"):
+        resolve_final_run_context(
+            experiment, tampered, allow_synthetic=True
+        )
+
+
 def test_resume_classification_preserves_interrupted_attempts(tmp_path: Path) -> None:
-    run = build_run_matrix(_experiment())["runs"][0]
+    run = _build()["runs"][0]
     assert classify_run_attempts(run, tmp_path)["state"] == "ABSENT"
 
     first = tmp_path / run["run_id"] / "attempts" / "slurm-100"
@@ -387,8 +683,59 @@ def test_resume_classification_preserves_interrupted_attempts(tmp_path: Path) ->
     assert completed["submission_allowed"] is False
 
 
+def test_attempt_reservation_is_immutable_and_refuses_completed_runs(
+    tmp_path: Path,
+) -> None:
+    run = _build()["runs"][0]
+    attempt = reserve_run_attempt(run, tmp_path, slurm_job_id="28493_7")
+
+    assert attempt.name == "slurm-28493_7"
+    provenance = json.loads(
+        (attempt / "attempt-provenance.json").read_text(encoding="utf-8")
+    )
+    assert provenance["slurm_job_id"] == "28493_7"
+    assert provenance["run_id"] == run["run_id"]
+    interrupted = classify_run_attempts(run, tmp_path)
+    assert interrupted["state"] == "INTERRUPTED"
+    assert interrupted["attempts"][0]["slurm_job_id"] == "28493_7"
+
+    with pytest.raises(FinalExperimentError, match="reuse immutable attempt"):
+        reserve_run_attempt(run, tmp_path, slurm_job_id="28493_7")
+
+    _complete_attempt(attempt, run, witness=True)
+    assert classify_run_attempts(run, tmp_path)["state"] == "COMPLETED"
+    with pytest.raises(FinalExperimentError, match="rerun completed"):
+        reserve_run_attempt(run, tmp_path, slurm_job_id="28494")
+
+
+def test_attempt_reservation_accepts_only_job_bound_array_attempt_ids(
+    tmp_path: Path,
+) -> None:
+    run = _build()["runs"][1]
+    with pytest.raises(FinalExperimentError, match="slurm-<job_id>"):
+        reserve_run_attempt(
+            run,
+            tmp_path,
+            slurm_job_id="28500",
+            attempt_id="slurm-99999-4",
+        )
+
+    attempt = reserve_run_attempt(
+        run,
+        tmp_path,
+        slurm_job_id="28500",
+        attempt_id="slurm-28500-4",
+    )
+    provenance = json.loads(
+        (attempt / "attempt-provenance.json").read_text(encoding="utf-8")
+    )
+    assert attempt.name == "slurm-28500-4"
+    assert provenance["attempt_id"] == "slurm-28500-4"
+    assert provenance["slurm_job_id"] == "28500"
+
+
 def test_attempt_identity_mismatch_is_not_treated_as_resumable(tmp_path: Path) -> None:
-    runs = build_run_matrix(_experiment())["runs"]
+    runs = _build()["runs"]
     directory = tmp_path / runs[0]["run_id"]
     directory.mkdir()
     write_new_canonical_json(directory / "run-manifest.json", runs[1])
@@ -397,7 +744,7 @@ def test_attempt_identity_mismatch_is_not_treated_as_resumable(tmp_path: Path) -
 
 
 def test_objective_aggregation_reports_run_condition_family_and_model(tmp_path: Path) -> None:
-    matrix = build_run_matrix(_experiment())
+    matrix = _build()
     run = matrix["runs"][0]
     _complete_attempt(tmp_path / run["run_id"], run, witness=False)
 
@@ -441,6 +788,7 @@ def test_matrix_and_aggregation_clis_are_exclusive_and_restartable(
             str(matrix_path),
             "--expected-manifest-sha256",
             manifest_sha256,
+            "--synthetic-unit-test",
         ),
         cwd=root,
         check=False,
@@ -470,9 +818,63 @@ def test_matrix_and_aggregation_clis_are_exclusive_and_restartable(
     assert aggregated.returncode == 0, aggregated.stderr
     aggregation = json.loads(aggregation_path.read_text(encoding="utf-8"))
     assert aggregation["run_count"] == 48
-    assert aggregation["runs"][0]["witness_outcome"] == "PASS"
+    assert aggregation["runs"][0]["security_witness_outcome"] == "PASS"
 
     duplicate = subprocess.run(
+        (
+            sys.executable,
+            str(root / "scripts/generate_final_experiment_matrix.py"),
+            str(manifest_path),
+            str(matrix_path),
+            "--synthetic-unit-test",
+        ),
+        cwd=root,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert duplicate.returncode == 2
+    assert "refusing to overwrite" in duplicate.stderr
+
+
+def test_matrix_cli_rejects_synthetic_input_without_diagnostic_flag(
+    tmp_path: Path,
+) -> None:
+    root = Path(__file__).parents[1]
+    manifest_path = tmp_path / "synthetic-experiment.json"
+    matrix_path = tmp_path / "matrix.json"
+    manifest_sha256 = write_new_canonical_json(manifest_path, _experiment())
+
+    rejected = subprocess.run(
+        (
+            sys.executable,
+            str(root / "scripts/generate_final_experiment_matrix.py"),
+            str(manifest_path),
+            str(matrix_path),
+            "--expected-manifest-sha256",
+            manifest_sha256,
+        ),
+        cwd=root,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert rejected.returncode == 2
+    assert "explicit diagnostic flag" in rejected.stderr
+    assert not matrix_path.exists()
+
+
+def test_matrix_cli_requires_expected_hash_for_production_mode(
+    tmp_path: Path,
+) -> None:
+    root = Path(__file__).parents[1]
+    manifest_path = tmp_path / "synthetic-experiment.json"
+    matrix_path = tmp_path / "matrix.json"
+    write_new_canonical_json(manifest_path, _experiment())
+
+    rejected = subprocess.run(
         (
             sys.executable,
             str(root / "scripts/generate_final_experiment_matrix.py"),
@@ -485,5 +887,6 @@ def test_matrix_and_aggregation_clis_are_exclusive_and_restartable(
         text=True,
         timeout=60,
     )
-    assert duplicate.returncode == 2
-    assert "refusing to overwrite" in duplicate.stderr
+    assert rejected.returncode == 2
+    assert "production generation requires --expected-manifest-sha256" in rejected.stderr
+    assert not matrix_path.exists()

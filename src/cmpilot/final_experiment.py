@@ -9,6 +9,7 @@ selection or deriving seeds at execution time.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+import fcntl
 import hashlib
 import json
 import os
@@ -18,16 +19,26 @@ from typing import Any
 
 from .calculator_finalizer import (
     CalculatorFinalizerError,
+    initialize_finalizer_state,
     load_finalizer_state,
     validate_total_finalization_artifacts,
 )
 
 
-EXPERIMENT_SCHEMA = "cmpilot-final-experiment-v1"
-MATRIX_SCHEMA = "cmpilot-final-run-matrix-v1"
-RUN_SCHEMA = "cmpilot-final-run-v1"
-RUN_IDENTITY_SCHEMA = "cmpilot-final-run-identity-v1"
+EXPERIMENT_SCHEMA = "cmpilot-final-experiment-v2"
+MATRIX_SCHEMA = "cmpilot-final-run-matrix-v2"
+RUN_SCHEMA = "cmpilot-final-run-v2"
+RUN_IDENTITY_SCHEMA = "cmpilot-final-run-identity-v2"
+CONDITION_IDENTITY_SCHEMA = "cmpilot-final-condition-identity-v1"
+RUN_CONTEXT_SCHEMA = "cmpilot-final-run-context-v1"
+ATTEMPT_PROVENANCE_SCHEMA = "cmpilot-final-run-attempt-provenance-v1"
 AGGREGATION_SCHEMA = "cmpilot-final-experiment-aggregation-v1"
+
+PRODUCTION = "PRODUCTION"
+SYNTHETIC_UNIT_TEST = "SYNTHETIC_UNIT_TEST"
+FROZEN = "FROZEN"
+SYNTHETIC_ONLY = "SYNTHETIC_ONLY"
+MANIFEST_PURPOSES = frozenset({PRODUCTION, SYNTHETIC_UNIT_TEST})
 
 NO_MEMORY = "NO_MEMORY"
 SOURCE_CORRECT_MEMORY = "SOURCE_CORRECT_MEMORY"
@@ -48,7 +59,14 @@ def canonical_json_bytes(value: Any) -> bytes:
     """Return the repository's canonical, human-readable JSON representation."""
 
     return (
-        json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+        json.dumps(
+            value,
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
+            allow_nan=False,
+        )
+        + "\n"
     ).encode("utf-8")
 
 
@@ -142,6 +160,33 @@ def _digest_record(value: Any, name: str) -> Mapping[str, Any]:
     if not evidence or all(item in (None, "", [], {}) for item in evidence):
         raise FinalExperimentError(f"{name} must include provenance beside its hash")
     return record
+
+
+def _manifest_purpose(
+    record: Mapping[str, Any], *, allow_synthetic: bool
+) -> tuple[str, str]:
+    purpose = record.get("purpose")
+    if purpose not in MANIFEST_PURPOSES:
+        raise FinalExperimentError(
+            f"purpose must be one of {sorted(MANIFEST_PURPOSES)}"
+        )
+    freeze_status = _nonempty_string(record.get("freeze_status"), "freeze_status")
+    if purpose == PRODUCTION:
+        if freeze_status != FROZEN:
+            raise FinalExperimentError(
+                "a PRODUCTION manifest must have freeze_status=FROZEN"
+            )
+    else:
+        if freeze_status != SYNTHETIC_ONLY:
+            raise FinalExperimentError(
+                "a SYNTHETIC_UNIT_TEST manifest must have "
+                "freeze_status=SYNTHETIC_ONLY"
+            )
+        if not allow_synthetic:
+            raise FinalExperimentError(
+                "SYNTHETIC_UNIT_TEST manifests require an explicit diagnostic flag"
+            )
+    return str(purpose), freeze_status
 
 
 def _validate_models(value: Any) -> dict[str, Mapping[str, Any]]:
@@ -265,7 +310,9 @@ def _validate_family(
     )
     _nonempty_string(family.get("transition_type"), f"{name}.transition_type")
     for field in (
+        "tptm_provenance",
         "selection_provenance",
+        "task_specification",
         "source_functionality_tests",
         "target_functionality_tests",
         "security_witness",
@@ -274,6 +321,16 @@ def _validate_family(
         _digest_record(family.get(field), f"{name}.{field}")
 
     memories = _mapping(family.get("memories"), f"{name}.memories")
+    for condition_key in memories:
+        _identifier(condition_key, f"{name}.memories condition")
+    unexpected_memory_keys = sorted(
+        set(memories) - (memory_conditions | {NO_MEMORY})
+    )
+    if unexpected_memory_keys:
+        raise FinalExperimentError(
+            f"{name}.memories contains conditions absent from the manifest: "
+            f"{unexpected_memory_keys}"
+        )
     if NO_MEMORY in memories and memories[NO_MEMORY] is not None:
         raise FinalExperimentError(f"{name}.memories must not inject NO_MEMORY")
     actual_conditions = {key for key, item in memories.items() if item is not None}
@@ -313,15 +370,44 @@ def _validate_family(
     return family
 
 
-def validate_experiment_manifest(value: Any) -> dict[str, Any]:
+def _validate_condition_definitions(
+    value: Any, *, conditions: Sequence[str]
+) -> dict[str, Mapping[str, Any]]:
+    definitions = _mapping(value, "condition_definitions")
+    if set(definitions) != set(conditions):
+        raise FinalExperimentError(
+            "condition_definitions must contain exactly the declared conditions"
+        )
+    validated: dict[str, Mapping[str, Any]] = {}
+    for condition in conditions:
+        name = f"condition_definitions.{condition}"
+        definition = _digest_record(definitions[condition], name)
+        _nonempty_string(definition.get("treatment_type"), f"{name}.treatment_type")
+        requires_memory = definition.get("requires_memory")
+        if not isinstance(requires_memory, bool):
+            raise FinalExperimentError(f"{name}.requires_memory must be Boolean")
+        validated[condition] = definition
+    if validated[NO_MEMORY]["requires_memory"] is not False:
+        raise FinalExperimentError("NO_MEMORY must not require memory")
+    if validated[SOURCE_CORRECT_MEMORY]["requires_memory"] is not True:
+        raise FinalExperimentError("SOURCE_CORRECT_MEMORY must require memory")
+    return validated
+
+
+def validate_experiment_manifest(
+    value: Any, *, allow_synthetic: bool = False
+) -> dict[str, Any]:
     """Validate and return an independent JSON copy of a frozen experiment."""
 
     record = _mapping(value, "experiment manifest")
     if record.get("schema") != EXPERIMENT_SCHEMA:
         raise FinalExperimentError(f"unsupported experiment schema: {record.get('schema')}")
+    _manifest_purpose(record, allow_synthetic=allow_synthetic)
     _nonempty_string(record.get("protocol_version"), "protocol_version")
     evaluator = _digest_record(record.get("evaluator"), "evaluator")
     _nonempty_string(evaluator.get("version"), "evaluator.version")
+    finalizer = _digest_record(record.get("finalizer"), "finalizer")
+    _nonempty_string(finalizer.get("version"), "finalizer.version")
     memory_mode = record.get("memory_mode")
     if memory_mode not in MEMORY_MODES:
         raise FinalExperimentError(
@@ -339,6 +425,9 @@ def validate_experiment_manifest(value: Any) -> dict[str, Any]:
         raise FinalExperimentError(
             f"required conditions are absent: {missing_conditions}"
         )
+    condition_definitions = _validate_condition_definitions(
+        record.get("condition_definitions"), conditions=conditions
+    )
 
     repetitions = _positive_int(record.get("repetitions"), "repetitions")
     raw_seeds = record.get("seeds")
@@ -354,7 +443,11 @@ def validate_experiment_manifest(value: Any) -> dict[str, Any]:
     families = record.get("families")
     if not isinstance(families, list) or len(families) != 6:
         raise FinalExperimentError("families must contain exactly six records")
-    memory_conditions = set(conditions) - {NO_MEMORY}
+    memory_conditions = {
+        condition
+        for condition, definition in condition_definitions.items()
+        if definition["requires_memory"] is True
+    }
     validated_families = [
         _validate_family(
             family,
@@ -378,7 +471,10 @@ def validate_experiment_manifest(value: Any) -> dict[str, Any]:
 
 
 def load_experiment_manifest(
-    path: Path, *, expected_sha256: str | None = None
+    path: Path,
+    *,
+    expected_sha256: str | None = None,
+    allow_synthetic: bool = False,
 ) -> tuple[dict[str, Any], str]:
     """Load a canonical frozen manifest and return it with its exact file hash."""
 
@@ -396,7 +492,9 @@ def load_experiment_manifest(
     record = _parse_json_object(payload, source=str(path))
     if payload != canonical_json_bytes(record):
         raise FinalExperimentError(f"experiment manifest is not canonical JSON: {path}")
-    return validate_experiment_manifest(record), digest
+    return validate_experiment_manifest(
+        record, allow_synthetic=allow_synthetic
+    ), digest
 
 
 def _memory_for_run(
@@ -406,7 +504,7 @@ def _memory_for_run(
     model_key: str,
     memory_mode: str,
 ) -> Mapping[str, Any] | None:
-    if condition == NO_MEMORY:
+    if condition not in family["memories"]:
         return None
     memory = family["memories"][condition]
     if memory_mode == "PER_MODEL_GENERATED":
@@ -414,27 +512,75 @@ def _memory_for_run(
     return _mapping(memory, "run memory")
 
 
+def _condition_identity_record(
+    *,
+    condition: str,
+    condition_definition_sha256: str,
+    condition_requires_memory: bool,
+    memory_mode: str,
+    memory: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    return {
+        "schema": CONDITION_IDENTITY_SCHEMA,
+        "condition": condition,
+        "condition_definition_sha256": condition_definition_sha256,
+        "condition_requires_memory": condition_requires_memory,
+        "memory_mode": memory_mode,
+        "memory": None if memory is None else dict(memory),
+    }
+
+
 def _run_identity(
     experiment: Mapping[str, Any],
     family: Mapping[str, Any],
     *,
+    experiment_manifest_sha256: str,
     condition: str,
     model_key: str,
     repetition: int,
     seed: int,
 ) -> dict[str, Any]:
     profile = experiment["models"][model_key]
+    condition_definition = experiment["condition_definitions"][condition]
     memory = _memory_for_run(
         family,
         condition=condition,
         model_key=model_key,
         memory_mode=experiment["memory_mode"],
     )
+    family_manifest_sha256 = sha256_bytes(canonical_json_bytes(family))
+    memory_record_sha256 = (
+        None if memory is None else sha256_bytes(canonical_json_bytes(memory))
+    )
+    condition_record_sha256 = sha256_bytes(
+        canonical_json_bytes(
+            _condition_identity_record(
+                condition=condition,
+                condition_definition_sha256=condition_definition["sha256"],
+                condition_requires_memory=condition_definition["requires_memory"],
+                memory_mode=experiment["memory_mode"],
+                memory=memory,
+            )
+        )
+    )
     identity = {
         "schema": RUN_IDENTITY_SCHEMA,
+        "experiment_manifest_sha256": experiment_manifest_sha256,
+        "experiment_purpose": experiment["purpose"],
+        "manifest_freeze_status": experiment["freeze_status"],
         "protocol_version": experiment["protocol_version"],
         "family_id": family["family_id"],
+        "family_manifest_sha256": family_manifest_sha256,
+        "repository_identity": family["repository_identity"],
+        "source_task_identity": family["source_task_identity"],
+        "target_task_identity": family["target_task_identity"],
+        "transition_type": family["transition_type"],
+        "tptm_provenance_sha256": family["tptm_provenance"]["sha256"],
+        "task_specification_sha256": family["task_specification"]["sha256"],
         "condition": condition,
+        "condition_definition_sha256": condition_definition["sha256"],
+        "condition_requires_memory": condition_definition["requires_memory"],
+        "condition_record_sha256": condition_record_sha256,
         "memory_mode": experiment["memory_mode"],
         "model_profile": model_key,
         "model_id": profile["model_id"],
@@ -447,6 +593,8 @@ def _run_identity(
         "generation_parameters_sha256": profile["generation_parameters_sha256"],
         "evaluator_version": experiment["evaluator"]["version"],
         "evaluator_sha256": experiment["evaluator"]["sha256"],
+        "finalizer_version": experiment["finalizer"]["version"],
+        "finalizer_sha256": experiment["finalizer"]["sha256"],
         "source_revision": family["source_revision"],
         "target_revision": family["target_revision"],
         "repetition": repetition,
@@ -463,6 +611,7 @@ def _run_identity(
         "memory_provenance_manifest_sha256": (
             None if memory is None else memory["provenance_manifest_sha256"]
         ),
+        "memory_record_sha256": memory_record_sha256,
         "memory_generating_model": (
             None if memory is None else memory.get("generating_model")
         ),
@@ -479,7 +628,6 @@ def _run_identity(
 def _run_from_identity(
     identity: Mapping[str, Any],
     *,
-    experiment_sha256: str,
     memory: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
     identity_sha256 = sha256_bytes(canonical_json_bytes(identity))
@@ -487,23 +635,34 @@ def _run_from_identity(
         "schema": RUN_SCHEMA,
         "run_id": f"run-{identity_sha256}",
         "identity_sha256": identity_sha256,
-        "experiment_manifest_sha256": experiment_sha256,
         "memory": None if memory is None else dict(memory),
         **{key: value for key, value in identity.items() if key != "schema"},
     }
 
 
 def build_run_matrix(
-    value: Any, *, experiment_manifest_sha256: str | None = None
+    value: Any,
+    *,
+    experiment_manifest_sha256: str | None = None,
+    allow_synthetic: bool = False,
 ) -> dict[str, Any]:
     """Generate the complete deterministic matrix from a validated freeze."""
 
-    experiment = validate_experiment_manifest(value)
-    manifest_sha256 = (
-        sha256_bytes(canonical_json_bytes(experiment))
-        if experiment_manifest_sha256 is None
-        else _sha256(experiment_manifest_sha256, "experiment_manifest_sha256")
+    experiment = validate_experiment_manifest(
+        value, allow_synthetic=allow_synthetic
     )
+    actual_manifest_sha256 = sha256_bytes(canonical_json_bytes(experiment))
+    if experiment_manifest_sha256 is not None:
+        supplied_manifest_sha256 = _sha256(
+            experiment_manifest_sha256, "experiment_manifest_sha256"
+        )
+        if supplied_manifest_sha256 != actual_manifest_sha256:
+            raise FinalExperimentError(
+                "experiment_manifest_sha256 does not match the canonical manifest: "
+                f"expected={actual_manifest_sha256}, "
+                f"actual={supplied_manifest_sha256}"
+            )
+    manifest_sha256 = actual_manifest_sha256
     families = sorted(experiment["families"], key=lambda item: item["family_id"])
     conditions = sorted(experiment["conditions"])
     model_keys = sorted(experiment["models"])
@@ -521,6 +680,7 @@ def build_run_matrix(
                     identity = _run_identity(
                         experiment,
                         family,
+                        experiment_manifest_sha256=manifest_sha256,
                         condition=condition,
                         model_key=model_key,
                         repetition=repetition_index,
@@ -529,19 +689,29 @@ def build_run_matrix(
                     runs.append(
                         _run_from_identity(
                             identity,
-                            experiment_sha256=manifest_sha256,
                             memory=memory,
                         )
                     )
     run_ids = [run["run_id"] for run in runs]
     matrix = {
         "schema": MATRIX_SCHEMA,
+        "purpose": experiment["purpose"],
+        "freeze_status": experiment["freeze_status"],
         "protocol_version": experiment["protocol_version"],
         "experiment_manifest_sha256": manifest_sha256,
         "memory_mode": experiment["memory_mode"],
         "dimensions": {
             "families": [family["family_id"] for family in families],
             "conditions": conditions,
+            "condition_definitions": {
+                condition: {
+                    "requires_memory": experiment["condition_definitions"][condition][
+                        "requires_memory"
+                    ],
+                    "sha256": experiment["condition_definitions"][condition]["sha256"],
+                }
+                for condition in conditions
+            },
             "models": model_keys,
             "repetitions": experiment["repetitions"],
             "seeds": list(experiment["seeds"]),
@@ -555,9 +725,22 @@ def build_run_matrix(
 
 def _identity_from_run(run: Mapping[str, Any]) -> dict[str, Any]:
     keys = (
+        "experiment_manifest_sha256",
+        "experiment_purpose",
+        "manifest_freeze_status",
         "protocol_version",
         "family_id",
+        "family_manifest_sha256",
+        "repository_identity",
+        "source_task_identity",
+        "target_task_identity",
+        "transition_type",
+        "tptm_provenance_sha256",
+        "task_specification_sha256",
         "condition",
+        "condition_definition_sha256",
+        "condition_requires_memory",
+        "condition_record_sha256",
         "memory_mode",
         "model_profile",
         "model_id",
@@ -570,6 +753,8 @@ def _identity_from_run(run: Mapping[str, Any]) -> dict[str, Any]:
         "generation_parameters_sha256",
         "evaluator_version",
         "evaluator_sha256",
+        "finalizer_version",
+        "finalizer_sha256",
         "source_revision",
         "target_revision",
         "repetition",
@@ -580,6 +765,7 @@ def _identity_from_run(run: Mapping[str, Any]) -> dict[str, Any]:
         "task_environment_sha256",
         "memory_content_sha256",
         "memory_provenance_manifest_sha256",
+        "memory_record_sha256",
         "memory_generating_model",
         "memory_model_revision",
         "memory_generation_seed",
@@ -590,39 +776,334 @@ def _identity_from_run(run: Mapping[str, Any]) -> dict[str, Any]:
     return {"schema": RUN_IDENTITY_SCHEMA, **{key: run[key] for key in keys}}
 
 
+def _sorted_identifier_list(value: Any, name: str) -> list[str]:
+    if not isinstance(value, list) or not value:
+        raise FinalExperimentError(f"{name} must be a non-empty list")
+    items = [_identifier(item, f"{name}[{index}]") for index, item in enumerate(value)]
+    if len(set(items)) != len(items):
+        raise FinalExperimentError(f"{name} must contain unique identifiers")
+    if items != sorted(items):
+        raise FinalExperimentError(f"{name} must use canonical sorted order")
+    return items
+
+
+def _validate_run_memory(run: Mapping[str, Any], *, name: str) -> None:
+    condition = _identifier(run.get("condition"), f"{name}.condition")
+    memory_mode = run.get("memory_mode")
+    if memory_mode not in MEMORY_MODES:
+        raise FinalExperimentError(
+            f"{name}.memory_mode must be one of {sorted(MEMORY_MODES)}"
+        )
+    memory = run.get("memory")
+    condition_definition_sha256 = _sha256(
+        run.get("condition_definition_sha256"),
+        f"{name}.condition_definition_sha256",
+    )
+    condition_requires_memory = run.get("condition_requires_memory")
+    if not isinstance(condition_requires_memory, bool):
+        raise FinalExperimentError(
+            f"{name}.condition_requires_memory must be Boolean"
+        )
+    memory_identity_fields = (
+        "memory_content_sha256",
+        "memory_provenance_manifest_sha256",
+        "memory_record_sha256",
+        "memory_generating_model",
+        "memory_model_revision",
+        "memory_generation_seed",
+    )
+    if not condition_requires_memory:
+        if memory is not None or any(
+            run.get(field) is not None for field in memory_identity_fields
+        ):
+            raise FinalExperimentError(f"{name} injects memory under NO_MEMORY")
+        condition_record = _condition_identity_record(
+            condition=condition,
+            condition_definition_sha256=condition_definition_sha256,
+            condition_requires_memory=False,
+            memory_mode=str(memory_mode),
+            memory=None,
+        )
+    else:
+        memory_record = _mapping(memory, f"{name}.memory")
+        content_sha256 = _sha256(
+            memory_record.get("content_sha256"), f"{name}.memory.content_sha256"
+        )
+        provenance_sha256 = _sha256(
+            memory_record.get("provenance_manifest_sha256"),
+            f"{name}.memory.provenance_manifest_sha256",
+        )
+        if run.get("memory_content_sha256") != content_sha256:
+            raise FinalExperimentError(f"{name} memory content hash changed")
+        if run.get("memory_provenance_manifest_sha256") != provenance_sha256:
+            raise FinalExperimentError(f"{name} memory provenance hash changed")
+        if memory_record.get("source_task") != run.get("source_task_identity"):
+            raise FinalExperimentError(f"{name} memory names a different source task")
+        if memory_record.get("source_repository_revision") != run.get("source_revision"):
+            raise FinalExperimentError(
+                f"{name} memory names a different source revision"
+            )
+        actual_memory_sha256 = sha256_bytes(canonical_json_bytes(memory_record))
+        if run.get("memory_record_sha256") != actual_memory_sha256:
+            raise FinalExperimentError(f"{name} memory record hash changed")
+        generation_fields = (
+            "generating_model",
+            "model_revision",
+            "generation_seed",
+        )
+        if memory_mode == "FIXED_EXTERNAL":
+            if any(field in memory_record for field in generation_fields) or any(
+                run.get(field) is not None
+                for field in (
+                    "memory_generating_model",
+                    "memory_model_revision",
+                    "memory_generation_seed",
+                )
+            ):
+                raise FinalExperimentError(
+                    f"{name} FIXED_EXTERNAL memory has model-generation provenance"
+                )
+        else:
+            generating_model = _nonempty_string(
+                memory_record.get("generating_model"),
+                f"{name}.memory.generating_model",
+            )
+            model_revision = _revision(
+                memory_record.get("model_revision"),
+                f"{name}.memory.model_revision",
+            )
+            generation_seed = _seed(
+                memory_record.get("generation_seed"),
+                f"{name}.memory.generation_seed",
+            )
+            if (
+                run.get("memory_generating_model") != generating_model
+                or run.get("memory_model_revision") != model_revision
+                or run.get("memory_generation_seed") != generation_seed
+            ):
+                raise FinalExperimentError(
+                    f"{name} memory generation provenance changed"
+                )
+        condition_record = _condition_identity_record(
+            condition=condition,
+            condition_definition_sha256=condition_definition_sha256,
+            condition_requires_memory=True,
+            memory_mode=str(memory_mode),
+            memory=memory_record,
+        )
+    expected_condition_sha256 = sha256_bytes(canonical_json_bytes(condition_record))
+    if run.get("condition_record_sha256") != expected_condition_sha256:
+        raise FinalExperimentError(f"{name} condition record hash changed")
+
+
+def _validate_atomic_run_record(
+    value: Any, *, name: str = "run"
+) -> tuple[Mapping[str, Any], str]:
+    run = _mapping(value, name)
+    if run.get("schema") != RUN_SCHEMA:
+        raise FinalExperimentError(f"{name} has an unsupported schema")
+    purpose = run.get("experiment_purpose")
+    freeze_status = run.get("manifest_freeze_status")
+    if purpose not in MANIFEST_PURPOSES:
+        raise FinalExperimentError(f"{name} has an invalid experiment purpose")
+    if (purpose == PRODUCTION and freeze_status != FROZEN) or (
+        purpose == SYNTHETIC_UNIT_TEST and freeze_status != SYNTHETIC_ONLY
+    ):
+        raise FinalExperimentError(f"{name} has an invalid manifest freeze status")
+    _sha256(run.get("experiment_manifest_sha256"), f"{name}.experiment_manifest_sha256")
+    _nonempty_string(run.get("protocol_version"), f"{name}.protocol_version")
+    for field in ("family_id", "condition", "model_profile"):
+        _identifier(run.get(field), f"{name}.{field}")
+    for field in (
+        "repository_identity",
+        "source_task_identity",
+        "target_task_identity",
+        "transition_type",
+        "model_id",
+        "environment_id",
+        "evaluator_version",
+        "finalizer_version",
+    ):
+        _nonempty_string(run.get(field), f"{name}.{field}")
+    for field in (
+        "family_manifest_sha256",
+        "tptm_provenance_sha256",
+        "task_specification_sha256",
+        "condition_record_sha256",
+        "condition_definition_sha256",
+        "environment_sha256",
+        "model_profile_sha256",
+        "generation_parameters_sha256",
+        "evaluator_sha256",
+        "finalizer_sha256",
+        "source_functionality_tests_sha256",
+        "target_functionality_tests_sha256",
+        "security_witness_sha256",
+        "task_environment_sha256",
+    ):
+        _sha256(run.get(field), f"{name}.{field}")
+    for field in ("model_revision", "source_revision", "target_revision"):
+        _revision(run.get(field), f"{name}.{field}")
+    if not isinstance(run.get("condition_requires_memory"), bool):
+        raise FinalExperimentError(f"{name}.condition_requires_memory must be Boolean")
+    _positive_int(run.get("context_limit"), f"{name}.context_limit")
+    _positive_int(run.get("step_limit"), f"{name}.step_limit")
+    _positive_int(run.get("repetition"), f"{name}.repetition")
+    _seed(run.get("seed"), f"{name}.seed")
+    _validate_run_memory(run, name=name)
+    identity = _identity_from_run(run)
+    identity_sha256 = sha256_bytes(canonical_json_bytes(identity))
+    if run.get("identity_sha256") != identity_sha256:
+        raise FinalExperimentError(f"{name} identity hash changed")
+    expected_id = f"run-{identity_sha256}"
+    if run.get("run_id") != expected_id:
+        raise FinalExperimentError(f"{name} run ID changed")
+    return run, expected_id
+
+
 def validate_run_matrix(value: Any) -> dict[str, Any]:
     record = _mapping(value, "run matrix")
     if record.get("schema") != MATRIX_SCHEMA:
         raise FinalExperimentError(f"unsupported run matrix schema: {record.get('schema')}")
-    _sha256(record.get("experiment_manifest_sha256"), "experiment_manifest_sha256")
+    purpose, freeze_status = _manifest_purpose(record, allow_synthetic=True)
+    protocol_version = _nonempty_string(
+        record.get("protocol_version"), "protocol_version"
+    )
+    experiment_sha256 = _sha256(
+        record.get("experiment_manifest_sha256"), "experiment_manifest_sha256"
+    )
+    memory_mode = record.get("memory_mode")
+    if memory_mode not in MEMORY_MODES:
+        raise FinalExperimentError(
+            f"memory_mode must be one of {sorted(MEMORY_MODES)}"
+        )
+    dimensions = _mapping(record.get("dimensions"), "dimensions")
+    families = _sorted_identifier_list(dimensions.get("families"), "dimensions.families")
+    if len(families) != 6:
+        raise FinalExperimentError("matrix dimensions must contain exactly six families")
+    conditions = _sorted_identifier_list(
+        dimensions.get("conditions"), "dimensions.conditions"
+    )
+    missing_conditions = sorted(REQUIRED_CONDITIONS - set(conditions))
+    if missing_conditions:
+        raise FinalExperimentError(
+            f"matrix dimensions omit required conditions: {missing_conditions}"
+        )
+    raw_condition_definitions = _mapping(
+        dimensions.get("condition_definitions"), "dimensions.condition_definitions"
+    )
+    if set(raw_condition_definitions) != set(conditions):
+        raise FinalExperimentError(
+            "matrix condition definitions differ from its condition dimension"
+        )
+    condition_dimensions: dict[str, tuple[str, bool]] = {}
+    for condition in conditions:
+        definition = _mapping(
+            raw_condition_definitions[condition],
+            f"dimensions.condition_definitions.{condition}",
+        )
+        digest = _sha256(
+            definition.get("sha256"),
+            f"dimensions.condition_definitions.{condition}.sha256",
+        )
+        requires_memory = definition.get("requires_memory")
+        if not isinstance(requires_memory, bool):
+            raise FinalExperimentError(
+                f"dimensions.condition_definitions.{condition}.requires_memory "
+                "must be Boolean"
+            )
+        if set(definition) != {"requires_memory", "sha256"}:
+            raise FinalExperimentError(
+                f"dimensions.condition_definitions.{condition} has unexpected fields"
+            )
+        condition_dimensions[condition] = (digest, requires_memory)
+    if condition_dimensions[NO_MEMORY][1] is not False:
+        raise FinalExperimentError("matrix NO_MEMORY must not require memory")
+    if condition_dimensions[SOURCE_CORRECT_MEMORY][1] is not True:
+        raise FinalExperimentError(
+            "matrix SOURCE_CORRECT_MEMORY must require memory"
+        )
+    models = _sorted_identifier_list(dimensions.get("models"), "dimensions.models")
+    repetitions = _positive_int(
+        dimensions.get("repetitions"), "dimensions.repetitions"
+    )
+    raw_seeds = dimensions.get("seeds")
+    if not isinstance(raw_seeds, list):
+        raise FinalExperimentError("dimensions.seeds must be an exact JSON list")
+    seeds = [
+        _seed(item, f"dimensions.seeds[{index}]")
+        for index, item in enumerate(raw_seeds)
+    ]
+    if len(seeds) != repetitions:
+        raise FinalExperimentError(
+            "matrix dimensions must contain one seed per repetition"
+        )
+    if len(set(seeds)) != len(seeds):
+        raise FinalExperimentError("matrix repetition seeds must be unique")
+    expected_coordinates = [
+        (family, condition, repetition, seed, model)
+        for family in families
+        for condition in conditions
+        for repetition, seed in enumerate(seeds, start=1)
+        for model in models
+    ]
     runs = record.get("runs")
     if not isinstance(runs, list):
         raise FinalExperimentError("run matrix runs must be a list")
-    if record.get("run_count") != len(runs):
+    run_count = _positive_int(record.get("run_count"), "run_count")
+    if run_count != len(runs):
         raise FinalExperimentError("run_count does not match the run inventory")
+    if len(runs) != len(expected_coordinates):
+        raise FinalExperimentError(
+            "run inventory is not the complete Cartesian product of its dimensions"
+        )
     run_ids: list[str] = []
-    for index, raw_run in enumerate(runs):
-        run = _mapping(raw_run, f"runs[{index}]")
-        if run.get("schema") != RUN_SCHEMA:
-            raise FinalExperimentError(f"runs[{index}] has an unsupported schema")
-        identity = _identity_from_run(run)
-        identity_sha256 = sha256_bytes(canonical_json_bytes(identity))
-        if run.get("identity_sha256") != identity_sha256:
-            raise FinalExperimentError(f"runs[{index}] identity hash changed")
-        expected_id = f"run-{identity_sha256}"
-        if run.get("run_id") != expected_id:
-            raise FinalExperimentError(f"runs[{index}] run ID changed")
-        if run.get("experiment_manifest_sha256") != record[
-            "experiment_manifest_sha256"
-        ]:
-            raise FinalExperimentError(f"runs[{index}] names a different experiment")
+    for index, (raw_run, expected_coordinate) in enumerate(
+        zip(runs, expected_coordinates, strict=True)
+    ):
+        name = f"runs[{index}]"
+        run, expected_id = _validate_atomic_run_record(raw_run, name=name)
+        if run.get("experiment_manifest_sha256") != experiment_sha256:
+            raise FinalExperimentError(f"{name} names a different experiment")
+        if run.get("experiment_purpose") != purpose:
+            raise FinalExperimentError(f"{name} names a different experiment purpose")
+        if run.get("manifest_freeze_status") != freeze_status:
+            raise FinalExperimentError(f"{name} names a different freeze status")
+        if run.get("protocol_version") != protocol_version:
+            raise FinalExperimentError(f"{name} names a different protocol")
+        if run.get("memory_mode") != memory_mode:
+            raise FinalExperimentError(f"{name} names a different memory mode")
+        run_condition = str(run.get("condition"))
+        if run_condition not in condition_dimensions:
+            raise FinalExperimentError(f"{name} names an undeclared condition")
+        expected_condition_identity = condition_dimensions[run_condition]
+        if (
+            run.get("condition_definition_sha256"),
+            run.get("condition_requires_memory"),
+        ) != expected_condition_identity:
+            raise FinalExperimentError(f"{name} names a different condition definition")
+        coordinate = (
+            run.get("family_id"),
+            run.get("condition"),
+            run.get("repetition"),
+            run.get("seed"),
+            run.get("model_profile"),
+        )
+        if coordinate != expected_coordinate:
+            raise FinalExperimentError(
+                f"{name} violates canonical Cartesian ordering or seed assignment: "
+                f"expected={expected_coordinate}, actual={coordinate}"
+            )
         run_ids.append(expected_id)
     if len(set(run_ids)) != len(run_ids):
         raise FinalExperimentError("run matrix contains duplicate atomic run IDs")
     expected_inventory_hash = sha256_bytes(canonical_json_bytes(run_ids))
     if record.get("run_ids_sha256") != expected_inventory_hash:
         raise FinalExperimentError("run ID inventory hash changed")
-    return json.loads(canonical_json_bytes(record))
+    try:
+        return json.loads(canonical_json_bytes(record))
+    except (TypeError, ValueError) as error:
+        raise FinalExperimentError(f"run matrix is not pure JSON: {error}") from error
 
 
 def load_run_matrix(
@@ -643,6 +1124,77 @@ def load_run_matrix(
     if payload != canonical_json_bytes(record):
         raise FinalExperimentError(f"run matrix is not canonical JSON: {path}")
     return validate_run_matrix(record), digest
+
+
+def validate_run_matrix_against_manifest(
+    matrix: Any,
+    experiment_manifest: Any,
+    *,
+    allow_synthetic: bool = False,
+) -> dict[str, Any]:
+    """Require a matrix to be the exact canonical expansion of its manifest."""
+
+    actual = validate_run_matrix(matrix)
+    expected = build_run_matrix(
+        experiment_manifest, allow_synthetic=allow_synthetic
+    )
+    if actual != expected:
+        raise FinalExperimentError(
+            "run matrix is not the exact expansion of the supplied experiment manifest"
+        )
+    return actual
+
+
+def resolve_final_run_context(
+    experiment_manifest: Any,
+    run: Any,
+    *,
+    allow_synthetic: bool = False,
+) -> dict[str, Any]:
+    """Resolve one shared scientific-run context without executing a workflow.
+
+    The returned treatment and family records belong to the shared runner.  A
+    model adapter receives only the separately returned model profile record.
+    """
+
+    experiment = validate_experiment_manifest(
+        experiment_manifest, allow_synthetic=allow_synthetic
+    )
+    matrix = build_run_matrix(experiment, allow_synthetic=allow_synthetic)
+    supplied_run = _mapping(run, "run")
+    run_id = _nonempty_string(supplied_run.get("run_id"), "run.run_id")
+    matches = [item for item in matrix["runs"] if item["run_id"] == run_id]
+    if len(matches) != 1 or matches[0] != supplied_run:
+        raise FinalExperimentError(
+            "run is not the exact atomic record generated by the supplied manifest"
+        )
+    resolved_run = matches[0]
+    family = next(
+        item
+        for item in experiment["families"]
+        if item["family_id"] == resolved_run["family_id"]
+    )
+    model_profile = experiment["models"][resolved_run["model_profile"]]
+    context = {
+        "schema": RUN_CONTEXT_SCHEMA,
+        "experiment_manifest_sha256": matrix["experiment_manifest_sha256"],
+        "family_manifest": family,
+        "condition": resolved_run["condition"],
+        "treatment": {
+            "condition": resolved_run["condition"],
+            "condition_definition": experiment["condition_definitions"][
+                resolved_run["condition"]
+            ],
+            "memory": resolved_run["memory"],
+        },
+        "model_profile_key": resolved_run["model_profile"],
+        "model_profile": model_profile,
+        "seed": resolved_run["seed"],
+        "repetition": resolved_run["repetition"],
+        "run_identity": _identity_from_run(resolved_run),
+        "run": resolved_run,
+    }
+    return json.loads(canonical_json_bytes(context))
 
 
 def write_new_canonical_json(path: Path, value: Any) -> str:
@@ -666,6 +1218,105 @@ def write_new_canonical_json(path: Path, value: Any) -> str:
     return sha256_bytes(payload)
 
 
+def reserve_run_attempt(
+    run: Any,
+    output_root: Path,
+    *,
+    slurm_job_id: str,
+    attempt_id: str | None = None,
+) -> Path:
+    """Atomically reserve one immutable Slurm attempt for an incomplete run."""
+
+    run, _ = _validate_atomic_run_record(run)
+    job_id = _identifier(slurm_job_id, "slurm_job_id")
+    default_attempt_id = f"slurm-{job_id}"
+    if attempt_id is None:
+        attempt_id = default_attempt_id
+    else:
+        attempt_id = _identifier(attempt_id, "attempt_id")
+        if attempt_id != default_attempt_id and not attempt_id.startswith(
+            f"{default_attempt_id}-"
+        ):
+            raise FinalExperimentError(
+                "attempt_id must equal slurm-<job_id> or begin with "
+                "slurm-<job_id>-"
+            )
+    output_root = Path(output_root)
+    output_root.mkdir(parents=True, exist_ok=True)
+    if output_root.is_symlink() or not output_root.is_dir():
+        raise FinalExperimentError(f"output root is not a real directory: {output_root}")
+    initial_status = classify_run_attempts(run, output_root)
+    if not initial_status["submission_allowed"]:
+        raise FinalExperimentError(
+            f"refusing to rerun completed atomic run: {run['run_id']}"
+        )
+    run_directory = output_root / str(run["run_id"])
+    run_directory.mkdir(mode=0o755, exist_ok=True)
+    if run_directory.is_symlink() or not run_directory.is_dir():
+        raise FinalExperimentError(
+            f"run artifact path is not a real directory: {run_directory}"
+        )
+    lock_path = run_directory / ".attempt-reservation.lock"
+    descriptor = os.open(
+        lock_path,
+        os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0),
+        0o600,
+    )
+    with os.fdopen(descriptor, "rb+") as lock_stream:
+        fcntl.flock(lock_stream.fileno(), fcntl.LOCK_EX)
+        status = classify_run_attempts(run, output_root)
+        if not status["submission_allowed"]:
+            raise FinalExperimentError(
+                f"refusing to rerun completed atomic run: {run['run_id']}"
+            )
+        direct_markers = (
+            "run-manifest.json",
+            "attempt-provenance.json",
+            "finalizer-state.json",
+            "result.json",
+            "classification.json",
+        )
+        if any((run_directory / name).exists() for name in direct_markers):
+            raise FinalExperimentError(
+                "cannot add immutable attempts beside a direct legacy attempt: "
+                f"{run_directory}"
+            )
+        attempts = run_directory / "attempts"
+        attempts.mkdir(mode=0o755, exist_ok=True)
+        if attempts.is_symlink() or not attempts.is_dir():
+            raise FinalExperimentError(
+                f"attempt inventory is not a real directory: {attempts}"
+            )
+        attempt = attempts / attempt_id
+        try:
+            attempt.mkdir(mode=0o755)
+        except FileExistsError as error:
+            raise FinalExperimentError(
+                f"refusing to reuse immutable attempt: {attempt}"
+            ) from error
+        # Initialization artifacts use exclusive creation.  If a process dies
+        # between these writes, the incomplete attempt remains preserved and a
+        # later Slurm job receives a different immutable attempt directory.
+        write_new_canonical_json(attempt / "run-manifest.json", run)
+        write_new_canonical_json(
+            attempt / "attempt-provenance.json",
+            {
+                "schema": ATTEMPT_PROVENANCE_SCHEMA,
+                "attempt_id": attempt_id,
+                "slurm_job_id": job_id,
+                "run_id": run["run_id"],
+                "identity_sha256": run["identity_sha256"],
+                "experiment_manifest_sha256": run[
+                    "experiment_manifest_sha256"
+                ],
+            },
+        )
+        initialize_finalizer_state(
+            attempt / "finalizer-state.json", run_id=str(run["run_id"])
+        )
+        return attempt
+
+
 def _load_optional_object(path: Path) -> Mapping[str, Any] | None:
     if not path.is_file():
         return None
@@ -679,6 +1330,7 @@ def _attempt_directories(run_directory: Path) -> list[Path]:
     attempts = run_directory / "attempts"
     direct_markers = (
         "run-manifest.json",
+        "attempt-provenance.json",
         "finalizer-state.json",
         "result.json",
         "classification.json",
@@ -700,16 +1352,47 @@ def _attempt_directories(run_directory: Path) -> list[Path]:
 
 def _inspect_attempt(run: Mapping[str, Any], attempt: Path) -> dict[str, Any]:
     manifest = _load_optional_object(attempt / "run-manifest.json")
-    if manifest is None:
-        return {"path": str(attempt), "state": "INTERRUPTED", "reason": "RUN_MANIFEST_MISSING_OR_INVALID"}
-    if (
+    if manifest is not None and (
         manifest.get("run_id") != run["run_id"]
         or manifest.get("identity_sha256") != run["identity_sha256"]
         or manifest.get("experiment_manifest_sha256")
         != run["experiment_manifest_sha256"]
     ):
-        raise FinalExperimentError(f"attempt belongs to a different atomic run: {attempt}")
-
+        raise FinalExperimentError(
+            f"attempt belongs to a different atomic run: {attempt}"
+        )
+    slurm_job_id: str | None = None
+    if attempt.parent.name == "attempts":
+        provenance = _load_optional_object(attempt / "attempt-provenance.json")
+        if provenance is None:
+            return {
+                "path": str(attempt),
+                "state": "INTERRUPTED",
+                "reason": "ATTEMPT_PROVENANCE_MISSING_OR_INVALID",
+                "slurm_job_id": None,
+            }
+        if (
+            provenance.get("schema") != ATTEMPT_PROVENANCE_SCHEMA
+            or provenance.get("attempt_id") != attempt.name
+            or provenance.get("run_id") != run["run_id"]
+            or provenance.get("identity_sha256") != run["identity_sha256"]
+            or provenance.get("experiment_manifest_sha256")
+            != run["experiment_manifest_sha256"]
+        ):
+            raise FinalExperimentError(
+                f"attempt provenance belongs to a different atomic run: {attempt}"
+            )
+        slurm_job_id = _identifier(
+            provenance.get("slurm_job_id"),
+            f"{attempt}.attempt-provenance.slurm_job_id",
+        )
+    if manifest is None:
+        return {
+            "path": str(attempt),
+            "state": "INTERRUPTED",
+            "reason": "RUN_MANIFEST_MISSING_OR_INVALID",
+            "slurm_job_id": slurm_job_id,
+        }
     result = _load_optional_object(attempt / "result.json")
     classification = _load_optional_object(attempt / "classification.json")
     try:
@@ -719,6 +1402,7 @@ def _inspect_attempt(run: Mapping[str, Any], attempt: Path) -> dict[str, Any]:
             "path": str(attempt),
             "state": "INTERRUPTED",
             "reason": "FINALIZER_STATE_MISSING_OR_INVALID",
+            "slurm_job_id": slurm_job_id,
         }
     if state.run_id != run["run_id"]:
         raise FinalExperimentError(f"finalizer state belongs to another run: {attempt}")
@@ -730,19 +1414,23 @@ def _inspect_attempt(run: Mapping[str, Any], attempt: Path) -> dict[str, Any]:
         finalization.get("pass") is True
         and result is not None
         and result.get("run_id") == run["run_id"]
+        and result.get("identity_sha256") == run["identity_sha256"]
+        and result.get("experiment_manifest_sha256")
+        == run["experiment_manifest_sha256"]
         and classification is not None
     )
     return {
         "path": str(attempt),
         "state": "COMPLETED" if completed else "INTERRUPTED",
         "reason": "TOTAL_FINALIZER_COMPLETE" if completed else "TOTAL_FINALIZER_INCOMPLETE",
+        "slurm_job_id": slurm_job_id,
     }
 
 
 def classify_run_attempts(run: Mapping[str, Any], output_root: Path) -> dict[str, Any]:
     """Classify preserved attempts without modifying or reusing any artifact."""
 
-    _identity_from_run(run)
+    run, _ = _validate_atomic_run_record(run)
     run_directory = Path(output_root) / str(run["run_id"])
     if not run_directory.exists():
         return {
@@ -830,7 +1518,7 @@ def aggregate_run_results(matrix: Any, output_root: Path) -> dict[str, Any]:
             result_sha256 = sha256_bytes(result_path.read_bytes())
             classification_sha256 = sha256_bytes(classification_path.read_bytes())
         functionality = result.get("functionality_result")
-        witness = result.get("witness_result")
+        witness = result.get("security_witness_result", result.get("witness_result"))
         rows.append(
             {
                 "run_id": run["run_id"],
