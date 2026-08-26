@@ -3,9 +3,14 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import subprocess
-import sys
 
 from cmpilot.devstral_profile import (
+    AGENT_ENVIRONMENT_PATH,
+    AGENT_PYTHON,
+    CANDIDATE_AGENT_FREEZE,
+    CANDIDATE_AGENT_FREEZE_SHA256,
+    CANDIDATE_FREEZE,
+    CANDIDATE_FREEZE_SHA256,
     CANDIDATE_LOCK,
     CANDIDATE_LOCK_SHA256,
     CANDIDATE_PACKAGE_VERSIONS,
@@ -28,6 +33,9 @@ def test_devstral_paths_are_isolated_from_validated_qwen_runtime() -> None:
     assert MODEL_SNAPSHOT != QWEN_MODEL_SNAPSHOT
     assert "devstral" in str(ENVIRONMENT_PATH).lower()
     assert "Devstral-Small-2507" in str(MODEL_SNAPSHOT)
+    assert AGENT_PYTHON.parent.parent == AGENT_ENVIRONMENT_PATH
+    assert AGENT_PYTHON != QWEN_VLLM_PYTHON
+    assert "devstral" in str(AGENT_ENVIRONMENT_PATH).lower()
 
 
 def test_direct_candidate_pins_are_exact_and_mismatches_fail() -> None:
@@ -58,20 +66,43 @@ def test_candidate_lock_contains_only_the_recorded_direct_pins() -> None:
     assert requirements == dict(CANDIDATE_PACKAGE_VERSIONS)
 
 
+def test_exact_transitive_freezes_are_hash_bound() -> None:
+    import hashlib
+
+    assert hashlib.sha256((ROOT / CANDIDATE_FREEZE).read_bytes()).hexdigest() == (
+        CANDIDATE_FREEZE_SHA256
+    )
+    assert hashlib.sha256(
+        (ROOT / CANDIDATE_AGENT_FREEZE).read_bytes()
+    ).hexdigest() == CANDIDATE_AGENT_FREEZE_SHA256
+
+
 def test_environment_verifier_fails_closed_before_staging() -> None:
     completed = subprocess.run(
-        (sys.executable, str(ROOT / "scripts/verify_devstral_environment.py")),
+        (str(SERVER_PYTHON), str(ROOT / "scripts/verify_devstral_environment.py")),
         cwd=ROOT,
         check=False,
         capture_output=True,
         text=True,
         env={"PYTHONDONTWRITEBYTECODE": "1", "PYTHONNOUSERSITE": "1"},
-        timeout=60,
+        timeout=180,
     )
 
     assert completed.returncode == 1
     result = json.loads(completed.stdout)
     assert result["status"] == "NOT_READY"
     assert result["production_ready"] is False
-    assert result["checks"]["environment_identity_frozen"] is False
+    assert result["candidate_environment_matches"] is True
+    assert result["checks"]["staged_metadata_hashes_match"] is True
+    assert result["checks"]["server_live_freeze_matches"] is True
+    assert result["checks"]["agent_live_freeze_matches"] is True
+    assert result["checks"]["environment_fingerprint_matches"] is True
+    assert result["checks"]["environment_content_digest_matches"] is True
+    assert result["checks"]["alternative_shard_index_matches"] is True
+    assert result["checks"]["tokenizer_identity"] is True
+    assert result["checks"]["chat_template"] is True
+    assert result["checks"]["snapshot_required_files_exist"] is False
+    assert result["checks"]["runtime_weight_identity"] is False
     assert result["checks"]["snapshot_identity_frozen"] is False
+    assert result["snapshot_files"]["consolidated.safetensors"] is False
+    assert result["alternative_index"]["present_shards"] == 0

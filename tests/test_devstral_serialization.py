@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+import subprocess
+
 import pytest
 
 from cmpilot.devstral_profile import (
+    AGENT_PYTHON,
     CONFIG_FORMAT,
     DEVSTRAL_CANDIDATE,
     LOAD_FORMAT,
@@ -14,6 +19,9 @@ from cmpilot.devstral_profile import (
     build_devstral_server_argv,
     validate_devstral_server_argv,
 )
+
+
+ROOT = Path(__file__).parents[1]
 
 
 def option(command: tuple[str, ...], name: str) -> str:
@@ -77,3 +85,41 @@ def test_candidate_serialization_does_not_create_a_second_action_boundary() -> N
     )
     assert DEVSTRAL_CANDIDATE.model_system_prompt is None
     assert DEVSTRAL_CANDIDATE.native_tool_call_parser is None
+
+
+def test_exact_mistral_common_serialization_and_malformed_input_rejection() -> None:
+    program = f"""
+import json, sys
+sys.path.insert(0, {str(ROOT / 'src')!r})
+from cmpilot.devstral_serialization import ExactMistralChatTokenCounter, DevstralSerializationError
+counter = ExactMistralChatTokenCounter({str(MODEL_SNAPSHOT)!r})
+encoding = counter.encode([
+    {{'role': 'system', 'content': 'You are exact.'}},
+    {{'role': 'user', 'content': 'Reply with one word.'}},
+])
+rejected = False
+try:
+    counter.count([{{'role': 'user', 'content': 'x', 'tool_calls': []}}])
+except DevstralSerializationError:
+    rejected = True
+print(json.dumps({{'count': encoding.token_count, 'rendered': encoding.rendered,
+                  'identity': counter.identity, 'rejected': rejected}}))
+"""
+    completed = subprocess.run(
+        (str(AGENT_PYTHON), "-c", program),
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+        env={"PYTHONDONTWRITEBYTECODE": "1", "PYTHONNOUSERSITE": "1"},
+        timeout=60,
+    )
+    result = json.loads(completed.stdout)
+    assert result["count"] == 14
+    assert result["rendered"] == (
+        "<s>[SYSTEM_PROMPT]You are exact.[/SYSTEM_PROMPT]"
+        "[INST]Reply with one word.[/INST]"
+    )
+    assert result["identity"]["response_conversion"] is None
+    assert result["identity"]["tools"] is None
+    assert result["rejected"] is True

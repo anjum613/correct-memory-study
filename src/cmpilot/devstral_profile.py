@@ -1,10 +1,10 @@
 """Fail-closed candidate profile for the isolated Devstral replication.
 
-The model snapshot and serving environment are not present on the HPC yet.
-Consequently this module records the intended immutable identity and launch
-contract, but deliberately does not expose a production-ready ``ModelProfile``.
-Readiness requires real hashes captured after the pinned snapshot and separate
-environment have been staged.
+The serving and agent environments plus exact-revision tokenizer metadata are
+staged.  The frozen vLLM Mistral loader's consolidated weight file is
+intentionally absent, so this module records the partial attestation but
+cannot expose a production-ready ``ModelProfile``.  The separately indexed
+ten Hugging Face shards are recorded as an unused alternative and are absent.
 """
 
 from __future__ import annotations
@@ -40,14 +40,32 @@ ENVIRONMENT_PATH = Path("/home/s224049759/environments/devstral-small-2507-v1")
 SERVER_PYTHON = ENVIRONMENT_PATH / "bin/python"
 CONTROLLER_PYTHON = Path("/home/s224049759/environments/cmpilot-conda/bin/python")
 AGENT_PYTHON = Path(
-    "/home/s224049759/environments/mini-swe-agent-smoke/bin/python"
+    "/home/s224049759/environments/devstral-small-2507-agent-v1/bin/python"
 )
+AGENT_ENVIRONMENT_ID = "devstral-small-2507-agent-v1"
+AGENT_ENVIRONMENT_PATH = AGENT_PYTHON.parent.parent
 
 CANDIDATE_PYTHON_VERSION = "3.11.11"
 CANDIDATE_CUDA_WHEEL_RUNTIME = "12.8"
 CANDIDATE_LOCK = Path("configs/environments/devstral-small-2507-lock.txt")
 CANDIDATE_LOCK_SHA256 = (
-    "db18d140646e1c65e1b68b96db8dcebfab6b2cb34856a073485e5de33f2ffd9a"
+    "f176ebeab5260601c4eef407019fa6afa9039c9be9b337f1f0ededc83a6c1c1e"
+)
+CANDIDATE_FREEZE = Path("configs/environments/devstral-small-2507-freeze.txt")
+CANDIDATE_FREEZE_SHA256 = (
+    "a5f4bd7d040151e77b213bac45fa21ef56a0762d655ccec02617ef10b931d184"
+)
+CANDIDATE_AGENT_LOCK = Path(
+    "configs/environments/devstral-small-2507-agent-lock.txt"
+)
+CANDIDATE_AGENT_LOCK_SHA256 = (
+    "c147cc1b8e11706fb657f87d7e3e61b4d5fb90230a2285dfafeb78a8786df755"
+)
+CANDIDATE_AGENT_FREEZE = Path(
+    "configs/environments/devstral-small-2507-agent-freeze.txt"
+)
+CANDIDATE_AGENT_FREEZE_SHA256 = (
+    "fbd5c69216799eb291a2d5864f293c2378722173b8816b56b3468b2d341a5141"
 )
 CANDIDATE_PACKAGE_VERSIONS = (
     ("huggingface-hub", "0.33.4"),
@@ -56,12 +74,37 @@ CANDIDATE_PACKAGE_VERSIONS = (
     ("packaging", "25.0"),
     ("pip", "25.1.1"),
     ("tokenizers", "0.21.2"),
-    ("torch", "2.7.1"),
-    ("torchaudio", "2.7.1"),
-    ("torchvision", "0.22.1"),
+    ("torch", "2.7.1+cu128"),
+    ("torchaudio", "2.7.1+cu128"),
+    ("torchvision", "0.22.1+cu128"),
     ("transformers", "4.53.2"),
     ("vllm", "0.10.0"),
     ("xgrammar", "0.1.21"),
+)
+CANDIDATE_AGENT_PACKAGE_VERSIONS = (
+    ("litellm", "1.98.0"),
+    ("mini-swe-agent", "2.4.6"),
+    ("mistral-common", "1.8.4"),
+    ("openai", "2.54.0"),
+    ("packaging", "25.0"),
+    ("pip", "25.1.1"),
+    ("tokenizers", "0.23.1"),
+)
+ENVIRONMENT_FINGERPRINT_SHA256 = (
+    "a46d2f6e7c1f40f3429e4729afbc43e1357f82810e9c86f4464b6be7ab7b893d"
+)
+ENVIRONMENT_CONTENT_DIGEST_SHA256 = (
+    "85cd239b14eb746ad2f13e483a61b40434b398ef77eddbbb65a460dd9efb55d8"
+)
+ENVIRONMENT_CONTENT_DISTRIBUTIONS = (
+    "mistral-common",
+    "outlines-core",
+    "safetensors",
+    "tokenizers",
+    "torch",
+    "transformers",
+    "vllm",
+    "xgrammar",
 )
 
 TOKENIZER_MODE = "mistral"
@@ -70,13 +113,44 @@ LOAD_FORMAT = "mistral"
 CHAT_TEMPLATE_SOURCE = "mistral-common/tekken.json"
 MODEL_SYSTEM_PROMPT = None
 NATIVE_TOOL_CALL_PARSER = None
+STAGED_SNAPSHOT_FILE_SHA256 = (
+    (
+        "config.json",
+        "868bdb4e07afca5d86dc0a874f11ede7ff586b1aaa6e3edfc2e82ec3ad771a1b",
+    ),
+    (
+        "generation_config.json",
+        "86acf1e8f5d32e7c25ce501b6d9b6152f4eaf8659e5cea9907ad58d50ba4cc47",
+    ),
+    (
+        "model.safetensors.index.json",
+        "2d570fc53098c04ddc802460b783fbecf0a5b0cf4c4d36e0491a870ad81779fd",
+    ),
+    (
+        "params.json",
+        "52abcf3369f5acc22cdd1ab8a6fcb696122e9e906d9a701fd45296a9fd28e8e8",
+    ),
+    (
+        "tekken.json",
+        "839c48629ff570bd664586800aa3ee17ee628f56efc7fd8e145cc01467a1c188",
+    ),
+)
+ALTERNATIVE_WEIGHT_SHARD_FILES = tuple(
+    f"model-{index:05d}-of-00010.safetensors" for index in range(1, 11)
+)
 REQUIRED_SNAPSHOT_FILES = (
     "config.json",
     "consolidated.safetensors",
     "generation_config.json",
+    "model.safetensors.index.json",
     "params.json",
     "tekken.json",
 )
+EXPECTED_CONSOLIDATED_SIZE = 47_144_846_024
+EXPECTED_CONSOLIDATED_SHA256 = (
+    "ed57cdadcdfe28e026bafa56ee1b5c91866e1d85cd33b772c8216415926d5727"
+)
+ALTERNATIVE_SHARDS_TOTAL_SIZE = 47_144_806_400
 
 SERVER_SETTINGS = ServerSettings(
     dtype="bfloat16",
@@ -151,6 +225,28 @@ def validate_candidate_environment(
     return tuple(errors)
 
 
+def validate_candidate_agent_environment(
+    *, python_version: str, package_versions: Mapping[str, str]
+) -> tuple[str, ...]:
+    """Return deterministic reasons the isolated agent prefix misses pins."""
+    errors: list[str] = []
+    if python_version != CANDIDATE_PYTHON_VERSION:
+        errors.append(
+            f"python: expected {CANDIDATE_PYTHON_VERSION}, found {python_version}"
+        )
+    installed = {
+        normalize_package_name(name): version
+        for name, version in package_versions.items()
+    }
+    for name, expected in CANDIDATE_AGENT_PACKAGE_VERSIONS:
+        actual = installed.get(name)
+        if actual is None:
+            errors.append(f"{name}: not installed")
+        elif actual != expected:
+            errors.append(f"{name}: expected {expected}, found {actual}")
+    return tuple(errors)
+
+
 @dataclass(frozen=True)
 class VerifiedDevstralIdentity:
     """Hashes that may only be populated from staged, captured artifacts."""
@@ -203,7 +299,7 @@ class DevstralCandidateProfile:
     native_tool_call_parser: None = NATIVE_TOOL_CALL_PARSER
     server: ServerSettings = SERVER_SETTINGS
     generation: GenerationSettings = GENERATION_SETTINGS
-    verification_state: str = "CANDIDATE_UNSTAGED_UNVERIFIED"
+    verification_state: str = "PARTIAL_METADATA_TOKENIZER_STAGED_WEIGHTS_ABSENT"
 
     @property
     def agent_config(self):
@@ -329,8 +425,21 @@ def verify_devstral_readiness(
         raise DevstralProfileError("the checked-in Devstral candidate lock changed")
     if verified_identity.environment_lock_sha256 != actual_lock_sha256:
         raise DevstralProfileError("the staged Devstral environment used another lock")
+    freeze = (root / CANDIDATE_FREEZE).resolve(strict=True)
+    if _sha256_file(freeze) != CANDIDATE_FREEZE_SHA256:
+        raise DevstralProfileError("the checked-in Devstral exact freeze changed")
+    if (
+        verified_identity.environment_fingerprint_sha256
+        != ENVIRONMENT_FINGERPRINT_SHA256
+    ):
+        raise DevstralProfileError("the staged Devstral environment fingerprint changed")
+    if (
+        verified_identity.environment_content_digest_sha256
+        != ENVIRONMENT_CONTENT_DIGEST_SHA256
+    ):
+        raise DevstralProfileError("the staged Devstral environment content changed")
 
-    verified_paths: list[Path] = [interpreter, lock]
+    verified_paths: list[Path] = [interpreter, lock, freeze]
     for name, expected_sha256 in verified_identity.snapshot_file_sha256:
         path = snapshot / name
         if not path.is_file():
@@ -346,10 +455,21 @@ def verify_devstral_readiness(
 
 
 __all__ = [
+    "ALTERNATIVE_SHARDS_TOTAL_SIZE",
+    "ALTERNATIVE_WEIGHT_SHARD_FILES",
+    "AGENT_ENVIRONMENT_ID",
+    "AGENT_ENVIRONMENT_PATH",
     "AGENT_PYTHON",
+    "CANDIDATE_AGENT_LOCK",
+    "CANDIDATE_AGENT_LOCK_SHA256",
+    "CANDIDATE_AGENT_FREEZE",
+    "CANDIDATE_AGENT_FREEZE_SHA256",
+    "CANDIDATE_AGENT_PACKAGE_VERSIONS",
     "CANDIDATE_CUDA_WHEEL_RUNTIME",
     "CANDIDATE_LOCK",
     "CANDIDATE_LOCK_SHA256",
+    "CANDIDATE_FREEZE",
+    "CANDIDATE_FREEZE_SHA256",
     "CANDIDATE_PACKAGE_VERSIONS",
     "CANDIDATE_PYTHON_VERSION",
     "CONFIG_FORMAT",
@@ -359,6 +479,11 @@ __all__ = [
     "DevstralProfileError",
     "ENVIRONMENT_ID",
     "ENVIRONMENT_PATH",
+    "ENVIRONMENT_CONTENT_DIGEST_SHA256",
+    "ENVIRONMENT_CONTENT_DISTRIBUTIONS",
+    "ENVIRONMENT_FINGERPRINT_SHA256",
+    "EXPECTED_CONSOLIDATED_SHA256",
+    "EXPECTED_CONSOLIDATED_SIZE",
     "LOAD_FORMAT",
     "MODEL_ID",
     "MODEL_REVISION",
@@ -370,9 +495,11 @@ __all__ = [
     "SERVER_PYTHON",
     "SERVED_MODEL_NAME",
     "TOKENIZER_MODE",
+    "STAGED_SNAPSHOT_FILE_SHA256",
     "VerifiedDevstralIdentity",
     "build_devstral_server_argv",
     "normalize_package_name",
+    "validate_candidate_agent_environment",
     "validate_candidate_environment",
     "validate_devstral_server_argv",
     "verify_devstral_readiness",
