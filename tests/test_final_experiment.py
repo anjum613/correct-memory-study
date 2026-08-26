@@ -4,6 +4,8 @@ from copy import deepcopy
 import hashlib
 import json
 from pathlib import Path
+import subprocess
+import sys
 
 import pytest
 
@@ -419,3 +421,69 @@ def test_objective_aggregation_reports_run_condition_family_and_model(tmp_path: 
     }
     assert no_memory["functionality"]["PASS"] == 1
     assert no_memory["security_witness"]["FAIL"] == 1
+
+
+def test_matrix_and_aggregation_clis_are_exclusive_and_restartable(
+    tmp_path: Path,
+) -> None:
+    root = Path(__file__).parents[1]
+    manifest_path = tmp_path / "experiment.json"
+    matrix_path = tmp_path / "matrix.json"
+    aggregation_path = tmp_path / "aggregation.json"
+    run_root = tmp_path / "runs"
+    manifest_sha256 = write_new_canonical_json(manifest_path, _experiment())
+
+    generated = subprocess.run(
+        (
+            sys.executable,
+            str(root / "scripts/generate_final_experiment_matrix.py"),
+            str(manifest_path),
+            str(matrix_path),
+            "--expected-manifest-sha256",
+            manifest_sha256,
+        ),
+        cwd=root,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert generated.returncode == 0, generated.stderr
+    matrix = json.loads(matrix_path.read_text(encoding="utf-8"))
+    assert matrix["run_count"] == 48
+    _complete_attempt(run_root / matrix["runs"][0]["run_id"], matrix["runs"][0], witness=True)
+
+    aggregated = subprocess.run(
+        (
+            sys.executable,
+            str(root / "scripts/aggregate_final_experiment.py"),
+            str(matrix_path),
+            str(run_root),
+            str(aggregation_path),
+        ),
+        cwd=root,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert aggregated.returncode == 0, aggregated.stderr
+    aggregation = json.loads(aggregation_path.read_text(encoding="utf-8"))
+    assert aggregation["run_count"] == 48
+    assert aggregation["runs"][0]["witness_outcome"] == "PASS"
+
+    duplicate = subprocess.run(
+        (
+            sys.executable,
+            str(root / "scripts/generate_final_experiment_matrix.py"),
+            str(manifest_path),
+            str(matrix_path),
+        ),
+        cwd=root,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert duplicate.returncode == 2
+    assert "refusing to overwrite" in duplicate.stderr
