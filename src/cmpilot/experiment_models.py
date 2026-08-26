@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import hashlib
+import json
+import math
 from pathlib import Path
 import re
 from types import MappingProxyType
@@ -214,7 +216,15 @@ class GenerationSettings:
     stop_tokens: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        if self.temperature < 0 or self.max_tokens < 1:
+        if (
+            isinstance(self.temperature, bool)
+            or not isinstance(self.temperature, (int, float))
+            or not math.isfinite(self.temperature)
+            or self.temperature < 0
+            or isinstance(self.max_tokens, bool)
+            or not isinstance(self.max_tokens, int)
+            or self.max_tokens < 1
+        ):
             raise ModelProfileError("generation temperature/tokens are invalid")
         if self.samples_per_call not in (None, 1):
             raise ModelProfileError("the production adapter permits at most one sample")
@@ -237,6 +247,21 @@ class GenerationSettings:
             if value is not None:
                 parameters.append((key, value))
         return tuple(parameters)
+
+    def as_record(self) -> dict[str, object]:
+        """Return every frozen sampling field, including explicit nulls."""
+        return {
+            "max_tokens": self.max_tokens,
+            "min_p": self.min_p,
+            "presence_penalty": self.presence_penalty,
+            "repetition_penalty": self.repetition_penalty,
+            "request_seed": self.request_seed,
+            "samples_per_call": self.samples_per_call,
+            "stop_tokens": list(self.stop_tokens),
+            "temperature": self.temperature,
+            "top_k": self.top_k,
+            "top_p": self.top_p,
+        }
 
 
 @dataclass(frozen=True)
@@ -379,6 +404,129 @@ class ModelProfile:
         tokenizer_files = self.serialization.verify()
         boundary_files = self.scientific_boundary.verify(project_root)
         return (agent_config, *tokenizer_files, *boundary_files)
+
+    def identity_record(self) -> dict[str, object]:
+        """Serialize the complete model-specific identity without callables."""
+        return {
+            "agent_config": {
+                "path": self.agent_config.relative_path.as_posix(),
+                "sha256": self.agent_config.sha256,
+            },
+            "environment": {
+                "agent_python": str(self.environment.agent_python),
+                "content_digest_sha256": (
+                    self.environment.environment_content_digest
+                ),
+                "controller_python": str(self.environment.controller_python),
+                "environment_id": self.environment.environment_id,
+                "fingerprint_sha256": self.environment.environment_fingerprint,
+                "offline_environment": dict(self.environment.offline_environment),
+                "package_versions": dict(self.environment.package_versions),
+                "server_python": str(self.environment.server_python),
+            },
+            "generation_parameters": self.generation.as_record(),
+            "model_id": self.model_id,
+            "model_revision": self.model_revision,
+            "model_snapshot": str(self.model_snapshot),
+            "profile_id": self.profile_id,
+            "schema": "cmpilot-model-profile-v1",
+            "scientific_boundary": {
+                "action_regex": self.scientific_boundary.action_regex,
+                "command_policy_version": (
+                    self.scientific_boundary.command_policy_version
+                ),
+                "completion_sentinel": self.scientific_boundary.completion_sentinel,
+                "finalizer_control_flow_version": (
+                    self.scientific_boundary.finalizer_control_flow_version
+                ),
+                "finalizer_state_schema": (
+                    self.scientific_boundary.finalizer_state_schema
+                ),
+                "hardened_agent_class": (
+                    self.scientific_boundary.hardened_agent_class
+                ),
+                "maximum_consecutive_protocol_errors": (
+                    self.scientific_boundary.maximum_consecutive_protocol_errors
+                ),
+                "mini_swe_agent_version": (
+                    self.scientific_boundary.mini_swe_agent_version
+                ),
+                "source_files": [
+                    {
+                        "path": item.relative_path.as_posix(),
+                        "sha256": item.sha256,
+                    }
+                    for item in self.scientific_boundary.source_files
+                ],
+                "task_policy_schema": self.scientific_boundary.task_policy_schema,
+            },
+            "serialization": {
+                "add_generation_prompt": self.serialization.add_generation_prompt,
+                "assets": [
+                    {"path": name, "sha256": digest}
+                    for name, digest in self.serialization.assets
+                ],
+                "chat_template_source": self.serialization.chat_template_source,
+                "mode": self.serialization.serialization_mode,
+                "tokenizer_path": str(self.serialization.tokenizer_path),
+            },
+            "served_model_name": self.served_model_name,
+            "server": {
+                "dtype": self.server.dtype,
+                "gpu_memory_utilization": self.server.gpu_memory_utilization,
+                "max_model_length": self.server.max_model_length,
+                "max_num_sequences": self.server.max_num_sequences,
+                "quantization": self.server.quantization,
+                "server_seed": self.server.server_seed,
+                "tensor_parallel_size": self.server.tensor_parallel_size,
+            },
+        }
+
+    def identity_sha256(self) -> str:
+        payload = (
+            json.dumps(
+                self.identity_record(),
+                ensure_ascii=False,
+                indent=2,
+                sort_keys=True,
+                allow_nan=False,
+            )
+            + "\n"
+        ).encode("utf-8")
+        return hashlib.sha256(payload).hexdigest()
+
+    def final_experiment_record(self, *, step_limit: int) -> dict[str, object]:
+        """Return the model portion consumed by the frozen matrix manifest."""
+        if (
+            isinstance(step_limit, bool)
+            or not isinstance(step_limit, int)
+            or step_limit < 1
+        ):
+            raise ModelProfileError("step_limit must be a positive integer")
+        generation = self.generation.as_record()
+        generation_payload = (
+            json.dumps(
+                generation,
+                ensure_ascii=False,
+                indent=2,
+                sort_keys=True,
+                allow_nan=False,
+            )
+            + "\n"
+        ).encode("utf-8")
+        return {
+            "context_limit": self.server.max_model_length,
+            "environment_id": self.environment.environment_id,
+            "environment_sha256": self.environment.environment_content_digest,
+            "generation_parameters": generation,
+            "generation_parameters_sha256": hashlib.sha256(
+                generation_payload
+            ).hexdigest(),
+            "model_id": self.model_id,
+            "profile_sha256": self.identity_sha256(),
+            "revision": self.model_revision,
+            "step_limit": step_limit,
+        }
 
 
 def _build_qwen32b_server_argv(port: int) -> tuple[str, ...]:

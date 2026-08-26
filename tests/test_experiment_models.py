@@ -123,6 +123,30 @@ def test_qwen_profile_binds_frozen_agent_and_serialization_inputs() -> None:
     assert MODEL_SNAPSHOT / "tokenizer_config.json" in verified
 
 
+def test_qwen_profile_has_a_frozen_final_experiment_identity() -> None:
+    assert QWEN32B_PROFILE.identity_sha256() == (
+        "2c1bfe6fe074e34b0c130e70e766f34ad7cc6b59633c63d71d131bb0eb379993"
+    )
+    record = QWEN32B_PROFILE.final_experiment_record(step_limit=100)
+    assert record == {
+        "context_limit": 4096,
+        "environment_id": "qwen32b-vllm-smoke-v1",
+        "environment_sha256": (
+            "5e640248ebe171e106707ad4aaca0eebf98673f5c4b10b87458364c6f300e9ee"
+        ),
+        "generation_parameters": QWEN32B_PROFILE.generation.as_record(),
+        "generation_parameters_sha256": (
+            "b8485f5f8fc2572154e1284e0ef05df23b17b4f8d293bad8d4078b0d08b5e705"
+        ),
+        "model_id": MODEL_ID,
+        "profile_sha256": QWEN32B_PROFILE.identity_sha256(),
+        "revision": MODEL_REVISION,
+        "step_limit": 100,
+    }
+    with pytest.raises(ModelProfileError, match="step_limit"):
+        QWEN32B_PROFILE.final_experiment_record(step_limit=0)
+
+
 def test_every_profile_uses_the_unoverrideable_production_boundary() -> None:
     boundary = PRODUCTION_SCIENTIFIC_BOUNDARY
 
