@@ -19,6 +19,8 @@ from cmpilot.devstral_profile import (
     build_devstral_server_argv,
     validate_devstral_server_argv,
 )
+from cmpilot.devstral_serialization import PINNED_TEKKEN_SHA256
+from cmpilot.devstral_mini_swe_adapter import write_devstral_adapter
 
 
 ROOT = Path(__file__).parents[1]
@@ -114,7 +116,7 @@ print(json.dumps({{'count': encoding.token_count, 'rendered': encoding.rendered,
         env={"PYTHONDONTWRITEBYTECODE": "1", "PYTHONNOUSERSITE": "1"},
         timeout=60,
     )
-    result = json.loads(completed.stdout)
+    result = json.loads(completed.stdout.splitlines()[-1])
     assert result["count"] == 14
     assert result["rendered"] == (
         "<s>[SYSTEM_PROMPT]You are exact.[/SYSTEM_PROMPT]"
@@ -123,3 +125,48 @@ print(json.dumps({{'count': encoding.token_count, 'rendered': encoding.rendered,
     assert result["identity"]["response_conversion"] is None
     assert result["identity"]["tools"] is None
     assert result["rejected"] is True
+
+
+def test_frozen_agent_adapter_selects_mistral_counting_explicitly(
+    tmp_path: Path,
+) -> None:
+    adapter = tmp_path / "adapter.py"
+    write_devstral_adapter(adapter)
+    program = f"""
+import json
+from adapter import ExactDevstralChatTokenCounter
+from cmpilot_context_budget import (
+    PINNED_TOKENIZER_CONFIG_SHA256,
+    PINNED_TOKENIZER_JSON_SHA256,
+)
+counter = ExactDevstralChatTokenCounter(
+    {str(MODEL_SNAPSHOT)!r},
+    expected_tokenizer_json_sha256=PINNED_TOKENIZER_JSON_SHA256,
+    expected_tokenizer_config_sha256=PINNED_TOKENIZER_CONFIG_SHA256,
+)
+messages = [
+    {{'role': 'system', 'content': 'You are exact.'}},
+    {{'role': 'user', 'content': 'Reply with one word.'}},
+]
+print(json.dumps({{
+    'count': counter.count(messages),
+    'identity': counter.identity,
+}}))
+"""
+    completed = subprocess.run(
+        (str(AGENT_PYTHON), "-c", program),
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+        env={"PYTHONDONTWRITEBYTECODE": "1", "PYTHONNOUSERSITE": "1"},
+        timeout=60,
+    )
+
+    result = json.loads(completed.stdout.splitlines()[-1])
+    assert result["count"] == 14
+    assert result["identity"]["tekken_sha256"] == PINNED_TEKKEN_SHA256
+    assert result["identity"]["response_conversion"] is None
+    assert result["identity"]["adapter_schema"] == (
+        "devstral-frozen-text-runtime-serialization-v1"
+    )
