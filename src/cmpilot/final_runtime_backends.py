@@ -1,10 +1,4 @@
-"""Checked-in runtime bindings for frozen final-family packages.
-
-No real family has been selected yet, so the scientific registry remains
-intentionally empty.  The qualified Qwen and Devstral executors are safe to
-register independently: neither can start until a future scientific backend
-has written a hash-bound attempt-local task-policy handoff.
-"""
+"""Checked-in runtime bindings for frozen final-family packages."""
 
 from __future__ import annotations
 
@@ -19,13 +13,16 @@ from .final_model_runtime import (
     build_qwen32b_model_executor,
 )
 from .final_runner import ModelExecutor, ScientificOperations
+from .mcp_pinot_backend import MCP_PINOT_BACKEND_ID, build_mcp_pinot_backend
 
 
 ScientificBackendBuilder = Callable[[Mapping[str, Any]], ScientificOperations]
 ModelExecutorBuilder = Callable[[Mapping[str, Any]], ModelExecutor]
 
 
-SCIENTIFIC_BACKENDS: Mapping[str, ScientificBackendBuilder] = MappingProxyType({})
+SCIENTIFIC_BACKENDS: Mapping[str, ScientificBackendBuilder] = MappingProxyType(
+    {MCP_PINOT_BACKEND_ID: build_mcp_pinot_backend}
+)
 MODEL_EXECUTORS: Mapping[str, ModelExecutorBuilder] = MappingProxyType(
     {
         QWEN32B_PROFILE.profile_id: build_qwen32b_model_executor,
