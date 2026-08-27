@@ -327,6 +327,11 @@ def build_analysis_report(
         "experiment_manifest_sha256": matrix["experiment_manifest_sha256"],
         "run_ids_sha256": matrix["run_ids_sha256"],
         "memory_mode": matrix["memory_mode"],
+        "family_count_policy": matrix["family_count_policy"],
+        "achieved_family_count": matrix["achieved_family_count"],
+        "achieved_trust_category_coverage": matrix[
+            "achieved_trust_category_coverage"
+        ],
         "dimensions": matrix["dimensions"],
         "run_count": len(rows),
         "completed_run_count": len(rows) - len(incomplete),

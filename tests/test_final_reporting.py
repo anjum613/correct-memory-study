@@ -59,6 +59,9 @@ def test_analysis_report_keeps_incomplete_inventory_visible(tmp_path: Path) -> N
     assert report["run_count"] == 48
     assert report["completed_run_count"] == 0
     assert report["incomplete_run_count"] == 48
+    assert report["achieved_family_count"] == 6
+    assert report["family_count_policy"] == {"mode": "EXACT_SIX"}
+    assert report["achieved_trust_category_coverage"] == ["G6"]
     assert {row["state"] for row in report["incomplete_runs"]} == {"ABSENT"}
     assert len(report["runs"]) == 48
     assert all(row["attempt_state"] == "ABSENT" for row in report["runs"])

@@ -18,6 +18,8 @@ from cmpilot.devstral_profile import DEVSTRAL_PRODUCTION_PROFILE
 from cmpilot.experiment_models import QWEN32B_PROFILE
 from cmpilot.final_experiment import (
     ATTEMPT_PROVENANCE_SCHEMA,
+    DEADLINE_BOUNDED_PARTIAL,
+    EXACT_SIX,
     EXPERIMENT_SCHEMA,
     FROZEN,
     PRODUCTION,
@@ -177,6 +179,42 @@ def _experiment(*, per_model: bool = False) -> dict[str, object]:
         },
         "families": [_family(index, per_model=per_model) for index in range(6)],
     }
+
+
+def _partial_experiment(
+    family_count: int,
+    *,
+    amendment_sha256: str = (
+        "43f362095b60462731fce7519640a9a96ef14d6011062343f26b5d4d9cd6765c"
+    ),
+) -> dict[str, object]:
+    experiment = _experiment()
+    experiment["purpose"] = PRODUCTION
+    experiment["freeze_status"] = FROZEN
+    experiment["families"] = [
+        {
+            **_family(index),
+            "production_admission": {
+                "family_kind": "REAL_HISTORICAL",
+                "path": f"families/family-{index + 1}/validation/freeze-manifest.json",
+                "sha256": _hash(f"family-{index + 1}-validation"),
+                "validation_status": "CPU_VALIDATION_PASS",
+            },
+        }
+        for index in range(family_count)
+    ]
+    experiment["family_count_policy"] = {
+        "mode": DEADLINE_BOUNDED_PARTIAL,
+        "minimum": 1,
+        "maximum": 3,
+        "original_target": 6,
+        "amendment": {
+            "amendment_id": "deadline-bounded-family-count-v1",
+            "path": "docs/methodology/deadline-bounded-family-count-amendment-v1.json",
+            "sha256": amendment_sha256,
+        },
+    }
+    return experiment
 
 
 def _build(
@@ -521,6 +559,90 @@ def test_manifest_purpose_and_freeze_are_fail_closed() -> None:
         validate_experiment_manifest(
             wrong_synthetic_status, allow_synthetic=True
         )
+
+
+def test_existing_manifest_retains_exact_six_default() -> None:
+    experiment = _experiment()
+    validated = validate_experiment_manifest(experiment, allow_synthetic=True)
+    assert "family_count_policy" not in validated
+
+    matrix = _build(experiment)
+    assert matrix["family_count_policy"] == {"mode": EXACT_SIX}
+    assert matrix["achieved_family_count"] == 6
+    assert matrix["achieved_trust_category_coverage"] == ["G6"]
+
+    explicit = deepcopy(experiment)
+    explicit["family_count_policy"] = {"mode": EXACT_SIX}
+    validate_experiment_manifest(explicit, allow_synthetic=True)
+
+
+@pytest.mark.parametrize("family_count", [1, 2, 3])
+def test_deadline_bounded_partial_accepts_one_to_three_real_families(
+    family_count: int,
+) -> None:
+    experiment = _partial_experiment(family_count)
+    validated = validate_experiment_manifest(experiment)
+    assert len(validated["families"]) == family_count
+    assert validated["family_count_policy"]["original_target"] == 6
+
+
+@pytest.mark.parametrize("family_count", [0, 4])
+def test_deadline_bounded_partial_rejects_counts_outside_one_to_three(
+    family_count: int,
+) -> None:
+    with pytest.raises(FinalExperimentError, match="requires 1 to 3"):
+        validate_experiment_manifest(_partial_experiment(family_count))
+
+
+def test_partial_production_without_explicit_amendment_is_rejected() -> None:
+    experiment = _partial_experiment(1)
+    experiment.pop("family_count_policy")
+    with pytest.raises(FinalExperimentError, match="exactly six"):
+        validate_experiment_manifest(experiment)
+
+
+def test_synthetic_family_cannot_satisfy_partial_production_count() -> None:
+    experiment = _partial_experiment(1)
+    experiment["families"][0].pop("production_admission")
+    with pytest.raises(FinalExperimentError, match="production_admission"):
+        validate_experiment_manifest(experiment)
+
+    synthetic = _partial_experiment(1)
+    synthetic["purpose"] = SYNTHETIC_UNIT_TEST
+    synthetic["freeze_status"] = SYNTHETIC_ONLY
+    with pytest.raises(FinalExperimentError, match="only for a PRODUCTION"):
+        validate_experiment_manifest(synthetic, allow_synthetic=True)
+
+
+def test_partial_matrix_cardinality_remains_the_cartesian_product() -> None:
+    matrix = build_run_matrix(_partial_experiment(1))
+    assert matrix["run_count"] == 1 * 2 * 2 * 2
+    assert matrix["achieved_family_count"] == 1
+    assert matrix["family_count_policy"]["mode"] == DEADLINE_BOUNDED_PARTIAL
+    assert matrix["achieved_trust_category_coverage"] == ["G6"]
+
+
+def test_amendment_hash_changes_manifest_and_atomic_run_identity() -> None:
+    first = build_run_matrix(_partial_experiment(1, amendment_sha256="1" * 64))
+    second = build_run_matrix(_partial_experiment(1, amendment_sha256="2" * 64))
+    assert first["experiment_manifest_sha256"] != second[
+        "experiment_manifest_sha256"
+    ]
+    assert [run["run_id"] for run in first["runs"]] != [
+        run["run_id"] for run in second["runs"]
+    ]
+
+
+def test_amendment_methodology_record_is_canonical_and_hash_frozen() -> None:
+    path = (
+        Path(__file__).parents[1]
+        / "docs/methodology/deadline-bounded-family-count-amendment-v1.json"
+    )
+    payload = path.read_bytes()
+    assert payload == canonical_json_bytes(json.loads(payload))
+    assert hashlib.sha256(payload).hexdigest() == (
+        "43f362095b60462731fce7519640a9a96ef14d6011062343f26b5d4d9cd6765c"
+    )
 
 
 def test_fixed_external_forbids_model_generation_provenance() -> None:

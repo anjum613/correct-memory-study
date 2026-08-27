@@ -40,6 +40,13 @@ FROZEN = "FROZEN"
 SYNTHETIC_ONLY = "SYNTHETIC_ONLY"
 MANIFEST_PURPOSES = frozenset({PRODUCTION, SYNTHETIC_UNIT_TEST})
 
+EXACT_SIX = "EXACT_SIX"
+DEADLINE_BOUNDED_PARTIAL = "DEADLINE_BOUNDED_PARTIAL"
+FAMILY_COUNT_POLICY_MODES = frozenset({EXACT_SIX, DEADLINE_BOUNDED_PARTIAL})
+ORIGINAL_FAMILY_TARGET = 6
+PARTIAL_FAMILY_MINIMUM = 1
+PARTIAL_FAMILY_MAXIMUM = 3
+
 NO_MEMORY = "NO_MEMORY"
 SOURCE_CORRECT_MEMORY = "SOURCE_CORRECT_MEMORY"
 REQUIRED_CONDITIONS = frozenset({NO_MEMORY, SOURCE_CORRECT_MEMORY})
@@ -160,6 +167,89 @@ def _digest_record(value: Any, name: str) -> Mapping[str, Any]:
     if not evidence or all(item in (None, "", [], {}) for item in evidence):
         raise FinalExperimentError(f"{name} must include provenance beside its hash")
     return record
+
+
+def _validate_production_family_admission(value: Any, *, name: str) -> None:
+    admission = _digest_record(value, name)
+    if admission.get("family_kind") != "REAL_HISTORICAL":
+        raise FinalExperimentError(
+            f"{name}.family_kind must be REAL_HISTORICAL"
+        )
+    if admission.get("validation_status") != "CPU_VALIDATION_PASS":
+        raise FinalExperimentError(
+            f"{name}.validation_status must be CPU_VALIDATION_PASS"
+        )
+
+
+def _validate_family_count_policy(
+    value: Any,
+    *,
+    purpose: str,
+    families: Sequence[Mapping[str, Any]],
+    require_family_admission: bool,
+) -> dict[str, Any]:
+    """Return the explicit effective policy while preserving exact-six defaults."""
+
+    if value is None:
+        policy: Mapping[str, Any] = {"mode": EXACT_SIX}
+    else:
+        policy = _mapping(value, "family_count_policy")
+    mode = policy.get("mode")
+    if mode not in FAMILY_COUNT_POLICY_MODES:
+        raise FinalExperimentError(
+            "family_count_policy.mode must be one of "
+            f"{sorted(FAMILY_COUNT_POLICY_MODES)}"
+        )
+
+    family_count = len(families)
+    if mode == EXACT_SIX:
+        if set(policy) != {"mode"}:
+            raise FinalExperimentError(
+                "EXACT_SIX family_count_policy may contain only mode"
+            )
+        if family_count != ORIGINAL_FAMILY_TARGET:
+            raise FinalExperimentError("families must contain exactly six records")
+        return {"mode": EXACT_SIX}
+
+    if purpose != PRODUCTION:
+        raise FinalExperimentError(
+            "DEADLINE_BOUNDED_PARTIAL is permitted only for a PRODUCTION manifest"
+        )
+    expected_fields = {
+        "amendment",
+        "maximum",
+        "minimum",
+        "mode",
+        "original_target",
+    }
+    if set(policy) != expected_fields:
+        raise FinalExperimentError(
+            "DEADLINE_BOUNDED_PARTIAL family_count_policy must contain exactly "
+            f"{sorted(expected_fields)}"
+        )
+    if policy.get("minimum") != PARTIAL_FAMILY_MINIMUM:
+        raise FinalExperimentError("partial family minimum must be exactly 1")
+    if policy.get("maximum") != PARTIAL_FAMILY_MAXIMUM:
+        raise FinalExperimentError("partial family maximum must be exactly 3")
+    if policy.get("original_target") != ORIGINAL_FAMILY_TARGET:
+        raise FinalExperimentError("partial family original_target must be exactly 6")
+    amendment = _digest_record(policy.get("amendment"), "family_count_policy.amendment")
+    _identifier(
+        amendment.get("amendment_id"),
+        "family_count_policy.amendment.amendment_id",
+    )
+    if not PARTIAL_FAMILY_MINIMUM <= family_count <= PARTIAL_FAMILY_MAXIMUM:
+        raise FinalExperimentError(
+            "DEADLINE_BOUNDED_PARTIAL requires 1 to 3 families"
+        )
+    if require_family_admission:
+        for index, family in enumerate(families):
+            family = _mapping(family, f"families[{index}]")
+            _validate_production_family_admission(
+                family.get("production_admission"),
+                name=f"families[{index}].production_admission",
+            )
+    return json.loads(canonical_json_bytes(policy))
 
 
 def _manifest_purpose(
@@ -402,7 +492,7 @@ def validate_experiment_manifest(
     record = _mapping(value, "experiment manifest")
     if record.get("schema") != EXPERIMENT_SCHEMA:
         raise FinalExperimentError(f"unsupported experiment schema: {record.get('schema')}")
-    _manifest_purpose(record, allow_synthetic=allow_synthetic)
+    purpose, _ = _manifest_purpose(record, allow_synthetic=allow_synthetic)
     _nonempty_string(record.get("protocol_version"), "protocol_version")
     evaluator = _digest_record(record.get("evaluator"), "evaluator")
     _nonempty_string(evaluator.get("version"), "evaluator.version")
@@ -441,8 +531,14 @@ def validate_experiment_manifest(
 
     models = _validate_models(record.get("models"))
     families = record.get("families")
-    if not isinstance(families, list) or len(families) != 6:
-        raise FinalExperimentError("families must contain exactly six records")
+    if not isinstance(families, list):
+        raise FinalExperimentError("families must be an exact JSON list")
+    family_count_policy = _validate_family_count_policy(
+        record.get("family_count_policy"),
+        purpose=purpose,
+        families=families,
+        require_family_admission=True,
+    )
     memory_conditions = {
         condition
         for condition, definition in condition_definitions.items()
@@ -459,14 +555,16 @@ def validate_experiment_manifest(
         for index, family in enumerate(families)
     ]
     family_ids = [str(family["family_id"]) for family in validated_families]
-    if len(set(family_ids)) != 6:
-        raise FinalExperimentError("the six family IDs must be unique")
+    if len(set(family_ids)) != len(family_ids):
+        raise FinalExperimentError("family IDs must be unique")
 
     # JSON round-tripping both detaches the result and rejects non-JSON Python values.
     try:
         detached = json.loads(canonical_json_bytes(record))
     except (TypeError, ValueError) as error:
         raise FinalExperimentError(f"manifest is not pure JSON: {error}") from error
+    if "family_count_policy" in detached:
+        detached["family_count_policy"] = family_count_policy
     return detached
 
 
@@ -700,6 +798,16 @@ def build_run_matrix(
         "protocol_version": experiment["protocol_version"],
         "experiment_manifest_sha256": manifest_sha256,
         "memory_mode": experiment["memory_mode"],
+        "family_count_policy": _validate_family_count_policy(
+            experiment.get("family_count_policy"),
+            purpose=experiment["purpose"],
+            families=families,
+            require_family_admission=True,
+        ),
+        "achieved_family_count": len(families),
+        "achieved_trust_category_coverage": sorted(
+            {str(family["transition_type"]) for family in families}
+        ),
         "dimensions": {
             "families": [family["family_id"] for family in families],
             "conditions": conditions,
@@ -782,6 +890,20 @@ def _sorted_identifier_list(value: Any, name: str) -> list[str]:
     items = [_identifier(item, f"{name}[{index}]") for index, item in enumerate(value)]
     if len(set(items)) != len(items):
         raise FinalExperimentError(f"{name} must contain unique identifiers")
+    if items != sorted(items):
+        raise FinalExperimentError(f"{name} must use canonical sorted order")
+    return items
+
+
+def _sorted_nonempty_string_list(value: Any, name: str) -> list[str]:
+    if not isinstance(value, list) or not value:
+        raise FinalExperimentError(f"{name} must be a non-empty list")
+    items = [
+        _nonempty_string(item, f"{name}[{index}]")
+        for index, item in enumerate(value)
+    ]
+    if len(set(items)) != len(items):
+        raise FinalExperimentError(f"{name} must contain unique values")
     if items != sorted(items):
         raise FinalExperimentError(f"{name} must use canonical sorted order")
     return items
@@ -979,8 +1101,21 @@ def validate_run_matrix(value: Any) -> dict[str, Any]:
         )
     dimensions = _mapping(record.get("dimensions"), "dimensions")
     families = _sorted_identifier_list(dimensions.get("families"), "dimensions.families")
-    if len(families) != 6:
-        raise FinalExperimentError("matrix dimensions must contain exactly six families")
+    _validate_family_count_policy(
+        record.get("family_count_policy"),
+        purpose=purpose,
+        families=[{"family_id": family} for family in families],
+        require_family_admission=False,
+    )
+    achieved_family_count = record.get("achieved_family_count")
+    if achieved_family_count != len(families):
+        raise FinalExperimentError(
+            "achieved_family_count must match the matrix family dimension"
+        )
+    achieved_trust_category_coverage = _sorted_nonempty_string_list(
+        record.get("achieved_trust_category_coverage"),
+        "achieved_trust_category_coverage",
+    )
     conditions = _sorted_identifier_list(
         dimensions.get("conditions"), "dimensions.conditions"
     )
@@ -1097,6 +1232,13 @@ def validate_run_matrix(value: Any) -> dict[str, Any]:
         run_ids.append(expected_id)
     if len(set(run_ids)) != len(run_ids):
         raise FinalExperimentError("run matrix contains duplicate atomic run IDs")
+    observed_trust_categories = sorted(
+        {str(run["transition_type"]) for run in runs}
+    )
+    if achieved_trust_category_coverage != observed_trust_categories:
+        raise FinalExperimentError(
+            "achieved_trust_category_coverage differs from the run inventory"
+        )
     expected_inventory_hash = sha256_bytes(canonical_json_bytes(run_ids))
     if record.get("run_ids_sha256") != expected_inventory_hash:
         raise FinalExperimentError("run ID inventory hash changed")
