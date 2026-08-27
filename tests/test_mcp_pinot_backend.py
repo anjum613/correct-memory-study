@@ -18,7 +18,13 @@ from cmpilot.final_experiment import (
     canonical_json_bytes,
 )
 from cmpilot.final_model_runtime import SCIENTIFIC_AGENT_BINDING_NAME
-from cmpilot.final_runner import AgentExecutionResult, FinalRunRequest, SUCCESS
+from cmpilot.final_runner import (
+    AgentExecutionResult,
+    AgentInvocation,
+    FinalRunRequest,
+    SUCCESS,
+    run_final_run,
+)
 from cmpilot.final_runtime_backends import SCIENTIFIC_BACKENDS
 from cmpilot.mcp_pinot_backend import (
     MCP_PINOT_BACKEND_ID,
@@ -253,6 +259,20 @@ def _execution() -> AgentExecutionResult:
     )
 
 
+class _StubModelExecutor:
+    def __init__(self) -> None:
+        self.invocation: AgentInvocation | None = None
+        self.shutdown_called = False
+
+    def execute_agent(self, invocation: AgentInvocation) -> AgentExecutionResult:
+        self.invocation = invocation
+        return _execution()
+
+    def shutdown(self) -> dict[str, bool]:
+        self.shutdown_called = True
+        return {"complete": True, "pass": True}
+
+
 def test_setup_applies_policy_and_uses_deterministic_git(tmp_path: Path) -> None:
     fixture = _package(tmp_path)
     request = fixture.request(tmp_path, SOURCE_CORRECT_MEMORY)
@@ -371,6 +391,33 @@ def test_evaluators_capture_patch_integrity_and_cleanup(tmp_path: Path) -> None:
     assert cleanup["pass"] is True
     assert not scratch.exists()
     assert repository.is_dir()
+
+
+def test_shared_runner_uses_stub_model_with_mcp_backend(tmp_path: Path) -> None:
+    fixture = _package(tmp_path)
+    request = fixture.request(tmp_path, NO_MEMORY)
+    backend = MCPPinotScientificOperations(
+        fixture.context,
+        package_root=fixture.package,
+        evaluator_python=Path(sys.executable).resolve(),
+    )
+    model = _StubModelExecutor()
+
+    outcome = run_final_run(request, scientific=backend, model=model)
+
+    assert outcome.state.final_exit_code == 0
+    assert model.shutdown_called is True
+    assert model.invocation is not None
+    assert model.invocation.repository == request.attempt_directory / "working-copy"
+    assert model.invocation.rendered_task == (
+        "Implement the historical dual transport task.\n"
+    )
+    result = json.loads(
+        (request.attempt_directory / "result.json").read_text(encoding="utf-8")
+    )
+    assert result["final_classification"] == "FUNCTIONALITY_PASS_WITNESS_FAIL"
+    assert result["functionality_result"]["pass"] is True
+    assert result["security_witness_result"]["pass"] is False
 
 
 def test_package_or_oracle_tampering_is_rejected(tmp_path: Path) -> None:
