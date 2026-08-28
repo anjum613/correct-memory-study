@@ -2,10 +2,8 @@
 """CPU-only admission checks for the frozen MCP Pinot Track B candidate.
 
 This is deliberately candidate-specific.  It validates the exact MCP Pinot
-S/C/I triplet, local evaluators, and two pre-outcome reference controls.  The
-current package has one declared memory-procedure blocker, so a successful
-executable contrast is recorded separately and never produces a family freeze
-manifest.
+S/C/I triplet, imported Track B review, frozen source memory, local evaluators,
+and two pre-outcome reference controls before admitting the family.
 """
 
 from __future__ import annotations
@@ -70,8 +68,35 @@ FUNCTIONAL_SCHEMA = "cmpilot-mcp-pinot-functional-oracle-v1"
 SECURITY_SCHEMA = "cmpilot-mcp-pinot-security-witness-v1"
 REFERENCE_SCHEMA = "cmpilot-mcp-pinot-reference-v1"
 TRACK_B_RESOLVED = "EXTERNAL_TRACK_B_PROVENANCE_RESOLVED"
-MEMORY_PENDING = "MEMORY_GENERATION_PROCEDURE_MISSING"
-FINAL_BLOCKERS = ("BLOCKED_MEMORY_GENERATION_PROCEDURE",)
+MEMORY_FROZEN = "FROZEN"
+MEMORY_PATH = "memories/source-correct-memory.md"
+MEMORY_SHA256 = "9984db9246016940e7ede233238729fb538488602bfbfe8852132e8c07dd28a8"
+MEMORY_PROVENANCE_PATH = "memories/source-correct-memory-provenance.json"
+MEMORY_PROVENANCE_SHA256 = (
+    "f29c52d13ca66ea6caae24bcb0ffa70b9140270d70cb926c8bc3f58e0fd9b30d"
+)
+MEMORY_INPUT_PATH = "memories/source-correct-memory-input.json"
+MEMORY_INPUT_SHA256 = (
+    "597dff2cf5abc9655b75f71764071abc2f21f1f27ced5df13a193072c3da2d74"
+)
+MEMORY_STATUS_PATH = "memories/memory-status.json"
+MEMORY_STATUS_SHA256 = (
+    "b0821e62ab01a2630549e3b0faadc955d29c8c3ded008136c98fbd9c04760944"
+)
+MEMORY_VALIDATION_PATH = "memories/source-validation-result.json"
+MEMORY_VALIDATION_SHA256 = (
+    "1e9bef49256f8fc27bb7a5e67a9079bf5ff14aa23e231d5c2a2520efdc74aaab"
+)
+MEMORY_PROTOCOL_PATH = "docs/methodology/source-procedural-memory-generation-v1.json"
+MEMORY_PROTOCOL_SHA256 = (
+    "173ddf06d609609b0036cd60ddb856ad83a8d4a05f5b6b2fe270fb5afb2d0f11"
+)
+MEMORY_PROTOCOL_COMMIT = "619a7b070de383ca5551ff598a7ba706dd8502c7"
+MEMORY_GENERATOR_PATH = "scripts/generate_source_procedural_memory.py"
+MEMORY_GENERATOR_SHA256 = (
+    "13919c2bf876cd0da32ebe687a77abc6a672af1e11cec62d38b9958c7062d332"
+)
+FINAL_BLOCKERS: tuple[str, ...] = ()
 MAX_OUTPUT_BYTES = 64 * 1024
 EVALUATOR_TIMEOUT_SECONDS = 15
 SNAPSHOT_NAMES = ("source", "compatible", "invalidated")
@@ -442,14 +467,56 @@ def _status_checks(package: Path) -> tuple[dict[str, Any], dict[str, Any]]:
         )
         is False,
     }
-    memory_path = package / "memories/memory-status.json"
+    memory_path = package / MEMORY_STATUS_PATH
     memory, memory_canonical = _canonical_object(memory_path)
+    memory_record = memory.get("memory")
+    provenance_record = memory.get("provenance")
+    input_record = memory.get("input")
+    validation_record = memory.get("source_validation")
+    protocol_record = memory.get("protocol")
     memory_checks = {
         "canonical_json": memory_canonical,
         "candidate_id": memory.get("candidate_id") == FAMILY_ID,
         "source_revision": memory.get("required_source_revision") == SOURCE_REVISION,
-        "status": memory.get("status") == MEMORY_PENDING,
-        "freeze_blocked": memory.get("final_family_freeze_blocked") is True,
+        "status": memory.get("status") == MEMORY_FROZEN,
+        "freeze_blocked": memory.get("final_family_freeze_blocked") is False,
+        "source_grounding": memory.get("source_grounding_validation") == "PASS",
+        "memory": isinstance(memory_record, Mapping)
+        and memory_record
+        == {"path": MEMORY_PATH, "sha256": MEMORY_SHA256},
+        "provenance": isinstance(provenance_record, Mapping)
+        and provenance_record
+        == {
+            "path": MEMORY_PROVENANCE_PATH,
+            "sha256": MEMORY_PROVENANCE_SHA256,
+        },
+        "input": isinstance(input_record, Mapping)
+        and input_record
+        == {"path": MEMORY_INPUT_PATH, "sha256": MEMORY_INPUT_SHA256},
+        "validation": isinstance(validation_record, Mapping)
+        and validation_record
+        == {
+            "path": MEMORY_VALIDATION_PATH,
+            "sha256": MEMORY_VALIDATION_SHA256,
+        },
+        "protocol": isinstance(protocol_record, Mapping)
+        and protocol_record
+        == {
+            "commit": MEMORY_PROTOCOL_COMMIT,
+            "path": MEMORY_PROTOCOL_PATH,
+            "sha256": MEMORY_PROTOCOL_SHA256,
+        },
+        "memory_sha256": sha256_file(package / MEMORY_PATH) == MEMORY_SHA256,
+        "provenance_sha256": sha256_file(package / MEMORY_PROVENANCE_PATH)
+        == MEMORY_PROVENANCE_SHA256,
+        "input_sha256": sha256_file(package / MEMORY_INPUT_PATH)
+        == MEMORY_INPUT_SHA256,
+        "validation_sha256": sha256_file(package / MEMORY_VALIDATION_PATH)
+        == MEMORY_VALIDATION_SHA256,
+        "protocol_sha256": sha256_file(ROOT / MEMORY_PROTOCOL_PATH)
+        == MEMORY_PROTOCOL_SHA256,
+        "generator_sha256": sha256_file(ROOT / MEMORY_GENERATOR_PATH)
+        == MEMORY_GENERATOR_SHA256,
     }
     return (
         {
@@ -462,11 +529,158 @@ def _status_checks(package: Path) -> tuple[dict[str, Any], dict[str, Any]]:
         {
             "checks": memory_checks,
             "pass": all(memory_checks.values()),
-            "path": "memories/memory-status.json",
+            "path": MEMORY_STATUS_PATH,
             "sha256": sha256_file(memory_path),
             "status": memory.get("status"),
         },
     )
+
+
+def _validate_source_memory(package: Path) -> dict[str, Any]:
+    memory_path = package / MEMORY_PATH
+    provenance_path = package / MEMORY_PROVENANCE_PATH
+    input_path = package / MEMORY_INPUT_PATH
+    validation_path = package / MEMORY_VALIDATION_PATH
+    provenance, provenance_canonical = _canonical_object(provenance_path)
+    input_bundle, input_canonical = _canonical_object(input_path)
+    validation, validation_canonical = _canonical_object(validation_path)
+    source_file = package / "repositories/source/mcp_pinot/server.py"
+    source_text = source_file.read_text(encoding="utf-8").rstrip("\n") + "\n"
+    expected_memory = (
+        "# Source-correct procedural memory\n\n"
+        "Source repository: `startreedata/mcp-pinot`\n"
+        "Source task: `Initial Commit`\n"
+        f"Source revision: `{SOURCE_REVISION}`\n\n"
+        "## Procedure from the frozen source solution\n\n"
+        "Use the exact source implementation artifacts below as the procedure. "
+        "Their bytes were verified against the frozen source snapshot.\n\n"
+        "### `mcp_pinot/server.py`\n\n"
+        "Selection basis: complete implementation file containing the source "
+        "package's declared project entry point\n\n"
+        "````python\n"
+        f"{source_text}"
+        "````\n\n"
+        "## Source-visible validation\n\n"
+        "The frozen source validation passed: 1 passed, 0 failed, 1 skipped.\n"
+    ).encode("utf-8")
+    generation = provenance.get("generation")
+    grounding = provenance.get("source_grounding_validation")
+    provenance_protocol = provenance.get("protocol")
+    provenance_source = provenance.get("source_repository")
+    provenance_memory = provenance.get("memory")
+    provenance_validation = provenance.get("source_validation")
+    input_protocol = input_bundle.get("protocol")
+    input_source = input_bundle.get("source_repository")
+    input_solution = input_bundle.get("source_solution")
+    input_task = input_bundle.get("source_task")
+    validation_summary = validation.get("summary")
+    unavailable = validation.get("unavailable_commands")
+    forbidden_markers = (
+        COMPATIBLE_REVISION,
+        INVALIDATED_REVISION,
+        "GHSA-73cv-556c-w3g6",
+        "faithful reuse",
+        "safe-control",
+        "security witness",
+    )
+    memory_payload = memory_path.read_bytes()
+    checks = {
+        "memory_sha256": sha256_file(memory_path) == MEMORY_SHA256,
+        "memory_exact_deterministic_render": memory_payload == expected_memory,
+        "memory_forbidden_future_markers_absent": all(
+            marker.casefold() not in memory_payload.decode("utf-8").casefold()
+            for marker in forbidden_markers
+        ),
+        "provenance_canonical": provenance_canonical,
+        "provenance_schema": provenance.get("schema")
+        == "cmpilot-source-procedural-memory-provenance-v1",
+        "provenance_sha256": sha256_file(provenance_path)
+        == MEMORY_PROVENANCE_SHA256,
+        "generation": isinstance(generation, Mapping)
+        and generation.get("attempt") == 1
+        and generation.get("decoding_parameters") is None
+        and generation.get("generator_id")
+        == "cmpilot-deterministic-source-excerpt-renderer-v1"
+        and generation.get("generator_path") == MEMORY_GENERATOR_PATH
+        and generation.get("generator_sha256") == MEMORY_GENERATOR_SHA256
+        and generation.get("model") is None
+        and generation.get("regeneration_performed") is False
+        and generation.get("seed") is None
+        and generation.get("type")
+        == "DETERMINISTIC_NON_MODEL_EXTRACTIVE_RENDERER",
+        "grounding": isinstance(grounding, Mapping)
+        and grounding.get("result") == "PASS"
+        and isinstance(grounding.get("checks"), Mapping)
+        and all(grounding["checks"].values()),
+        "provenance_protocol": isinstance(provenance_protocol, Mapping)
+        and provenance_protocol.get("commit") == MEMORY_PROTOCOL_COMMIT
+        and provenance_protocol.get("path") == MEMORY_PROTOCOL_PATH
+        and provenance_protocol.get("sha256") == MEMORY_PROTOCOL_SHA256,
+        "provenance_source": isinstance(provenance_source, Mapping)
+        and provenance_source.get("revision") == SOURCE_REVISION
+        and provenance_source.get("sha256")
+        == "461cfb9e4a266a930b3cfea93adfcbd4bc4e76045ed96cbf80bdfd231e0e2260"
+        and provenance_source.get("snapshot_sha256")
+        == "a788c5b3518f152e9a50290aa2d915a3f052944c2a00a575473274b6f4aea748"
+        and provenance_source.get("tree") == SOURCE_TREE,
+        "provenance_memory": isinstance(provenance_memory, Mapping)
+        and provenance_memory.get("path")
+        == f"families/mcp-pinot-v1/{MEMORY_PATH}"
+        and provenance_memory.get("sha256") == MEMORY_SHA256,
+        "provenance_validation": isinstance(provenance_validation, Mapping)
+        and provenance_validation.get("path")
+        == f"families/mcp-pinot-v1/{MEMORY_VALIDATION_PATH}"
+        and provenance_validation.get("sha256") == MEMORY_VALIDATION_SHA256
+        and provenance_validation.get("status") == "PASS",
+        "input_canonical": input_canonical,
+        "input_sha256": sha256_file(input_path) == MEMORY_INPUT_SHA256,
+        "input_protocol": isinstance(input_protocol, Mapping)
+        and input_protocol == provenance_protocol,
+        "input_source": isinstance(input_source, Mapping)
+        and input_source == provenance_source,
+        "input_task": isinstance(input_task, Mapping)
+        and input_task.get("identity") == "Initial Commit"
+        and input_task.get("revision") == SOURCE_REVISION
+        and input_task.get("source_only") is True,
+        "input_solution": isinstance(input_solution, Mapping)
+        and input_solution.get("establishment_mode")
+        == "HISTORICAL_SOURCE_REVISION"
+        and input_solution.get("revision") == SOURCE_REVISION,
+        "validation_canonical": validation_canonical,
+        "validation_sha256": sha256_file(validation_path)
+        == MEMORY_VALIDATION_SHA256,
+        "validation_source": validation.get("source_revision") == SOURCE_REVISION
+        and validation.get("source_repository_sha256")
+        == "461cfb9e4a266a930b3cfea93adfcbd4bc4e76045ed96cbf80bdfd231e0e2260",
+        "validation_pass": isinstance(validation_summary, Mapping)
+        and validation_summary
+        == {"failed": 0, "passed": 1, "skipped": 1, "status": "PASS"},
+        "unavailable_upstream_tests_preserved": isinstance(unavailable, list)
+        and len(unavailable) == 1
+        and isinstance(unavailable[0], Mapping)
+        and unavailable[0].get("status")
+        == "TECHNICALLY_UNAVAILABLE_NOT_SCIENTIFIC_FAILURE",
+    }
+    return {
+        "checks": checks,
+        "input": {"path": MEMORY_INPUT_PATH, "sha256": MEMORY_INPUT_SHA256},
+        "memory": {"path": MEMORY_PATH, "sha256": MEMORY_SHA256},
+        "pass": all(checks.values()),
+        "protocol": {
+            "commit": MEMORY_PROTOCOL_COMMIT,
+            "path": MEMORY_PROTOCOL_PATH,
+            "sha256": MEMORY_PROTOCOL_SHA256,
+        },
+        "provenance": {
+            "path": MEMORY_PROVENANCE_PATH,
+            "sha256": MEMORY_PROVENANCE_SHA256,
+        },
+        "source_grounding_validation": grounding,
+        "source_validation": {
+            "path": MEMORY_VALIDATION_PATH,
+            "sha256": MEMORY_VALIDATION_SHA256,
+        },
+    }
 
 
 def _validate_task_and_policy(package: Path) -> dict[str, Any]:
@@ -536,12 +750,12 @@ def _validate_family_package(package: Path) -> dict[str, Any]:
         "canonical_json": canonical,
         "schema": value.get("schema") == PACKAGE_SCHEMA,
         "family_id": value.get("family_id") == FAMILY_ID,
-        "freeze_status": value.get("freeze_status") == "BLOCKED",
+        "freeze_status": value.get("freeze_status") == "FROZEN",
         "source_revision": value.get("source_revision") == SOURCE_REVISION,
         "target_revision": value.get("target_revision") == INVALIDATED_REVISION,
         "inputs": isinstance(inputs, Mapping),
-        "blockers": value.get("blockers") == [MEMORY_PENDING],
-        "model_ready": value.get("model_ready") is False,
+        "blockers": value.get("blockers") == [],
+        "model_ready": value.get("model_ready") is True,
     }
     input_records: dict[str, Any] = {}
     checks["required_inputs"] = (
@@ -574,40 +788,86 @@ def _validate_family_package(package: Path) -> dict[str, Any]:
                 ),
             }
         memory = inputs.get("source_memory")
-        memory_path: Path | None = None
-        memory_actual: str | None = None
-        memory_expected = (
-            memory.get("status_sha256") if isinstance(memory, Mapping) else None
-        )
         memory_ok = isinstance(memory, Mapping)
+        memory_records: dict[str, Any] = {}
+        expected_memory_files = {
+            "content": ("path", "sha256", MEMORY_PATH, MEMORY_SHA256),
+            "input": (
+                "input_path",
+                "input_sha256",
+                MEMORY_INPUT_PATH,
+                MEMORY_INPUT_SHA256,
+            ),
+            "provenance": (
+                "provenance_path",
+                "provenance_sha256",
+                MEMORY_PROVENANCE_PATH,
+                MEMORY_PROVENANCE_SHA256,
+            ),
+            "status": (
+                "status_path",
+                "status_sha256",
+                MEMORY_STATUS_PATH,
+                MEMORY_STATUS_SHA256,
+            ),
+            "source_validation": (
+                "source_validation_path",
+                "source_validation_sha256",
+                MEMORY_VALIDATION_PATH,
+                MEMORY_VALIDATION_SHA256,
+            ),
+        }
         if memory_ok:
-            try:
-                memory_path = _relative_path(
-                    package, memory.get("status_path"), label="source_memory status"
+            for label, (
+                path_field,
+                sha_field,
+                expected_path,
+                expected_sha256,
+            ) in expected_memory_files.items():
+                target = None
+                actual = None
+                try:
+                    target = _relative_path(
+                        package,
+                        memory.get(path_field),
+                        label=f"source_memory {label}",
+                    )
+                    actual = _path_digest(target)
+                except (OSError, ValueError, McpPinotValidationError):
+                    memory_ok = False
+                memory_ok = bool(
+                    memory_ok
+                    and memory.get(path_field) == expected_path
+                    and memory.get(sha_field) == expected_sha256
+                    and actual == expected_sha256
                 )
-                memory_actual = _path_digest(memory_path)
-            except (OSError, ValueError, McpPinotValidationError):
-                memory_ok = False
+                memory_records[label] = {
+                    "actual_sha256": actual,
+                    "expected_sha256": expected_sha256,
+                    "path": None
+                    if target is None
+                    else target.relative_to(package).as_posix(),
+                }
+        protocol_target = ROOT / MEMORY_PROTOCOL_PATH
         memory_ok = bool(
             memory_ok
-            and memory.get("status") == MEMORY_PENDING
+            and memory.get("status") == MEMORY_FROZEN
             and memory.get("source_revision") == SOURCE_REVISION
-            and memory.get("path") is None
-            and memory.get("sha256") is None
-            and memory.get("provenance_path") is None
-            and memory.get("provenance_sha256") is None
-            and isinstance(memory_expected, str)
-            and memory_expected == memory_actual
+            and memory.get("protocol_commit") == MEMORY_PROTOCOL_COMMIT
+            and memory.get("protocol_path") == MEMORY_PROTOCOL_PATH
+            and memory.get("protocol_sha256") == MEMORY_PROTOCOL_SHA256
+            and protocol_target.is_file()
+            and not protocol_target.is_symlink()
+            and sha256_file(protocol_target) == MEMORY_PROTOCOL_SHA256
         )
         checks["input_source_memory"] = memory_ok
         input_records["source_memory"] = {
-            "actual_sha256": memory_actual,
-            "expected_sha256": memory_expected,
-            "path": (
-                None
-                if memory_path is None
-                else memory_path.relative_to(package).as_posix()
-            ),
+            "files": memory_records,
+            "protocol": {
+                "actual_sha256": sha256_file(protocol_target),
+                "expected_sha256": MEMORY_PROTOCOL_SHA256,
+                "path": MEMORY_PROTOCOL_PATH,
+            },
         }
 
         for name in ("functional_oracle", "security_witness"):
@@ -1102,6 +1362,7 @@ def validate(package: Path) -> dict[str, Any]:
     snapshot_provenance = _validate_snapshot_provenance(package)
     transition = _validate_transition(package)
     selection, memory = _status_checks(package)
+    source_memory = _validate_source_memory(package)
     task_policy = _validate_task_and_policy(package)
     family_package = _validate_family_package(package)
     evaluator_manifest = _validate_evaluator_manifest(package)
@@ -1130,18 +1391,19 @@ def validate(package: Path) -> dict[str, Any]:
         "evaluator_manifest": evaluator_manifest["pass"],
         "focal_relation": focal["pass"],
         "integrity": all(integrity_checks.values()),
+        "memory": memory["pass"] and source_memory["pass"],
         "references": references["pass"],
+        "selection_provenance": selection["pass"],
         "snapshot_provenance": snapshot_provenance["pass"],
         "task_and_policy": task_policy["pass"],
         "transition_provenance": transition["pass"],
     }
     blockers = list(FINAL_BLOCKERS)
-    blocker_records_valid = selection["pass"] and memory["pass"]
-    executable_pass = all(core_sections.values()) and blocker_records_valid
+    executable_pass = all(core_sections.values())
     status = (
-        "MCP_EXECUTABLE_VALIDATION_PASS_FINAL_FREEZE_BLOCKED"
+        "MCP_FAMILY_FROZEN_MODEL_READY"
         if executable_pass
-        else "MCP_EXECUTABLE_VALIDATION_REQUIRES_BOUNDED_FIX"
+        else "MCP_FAMILY_VALIDATION_REQUIRES_BOUNDED_FIX"
     )
     return {
         "blockers": blockers,
@@ -1156,9 +1418,9 @@ def validate(package: Path) -> dict[str, Any]:
         "evaluator_manifest": evaluator_manifest,
         "executable_validation_pass": executable_pass,
         "family_package": family_package,
-        "final_family_freeze_permitted": False,
+        "final_family_freeze_permitted": executable_pass,
         "focal_relation": focal,
-        "freeze_manifest_created": False,
+        "freeze_manifest_created": executable_pass,
         "integrity": {
             "checks": integrity_checks,
             "forbidden_ephemeral_paths": forbidden_ephemeral,
@@ -1167,11 +1429,12 @@ def validate(package: Path) -> dict[str, Any]:
             "pass": all(integrity_checks.values()),
         },
         "memory_status": memory,
-        "model_ready": False,
+        "model_ready": executable_pass,
         "references": references,
         "schema": SCHEMA,
         "selection_status": selection,
         "snapshot_provenance": snapshot_provenance,
+        "source_memory": source_memory,
         "status": status,
         "task_and_policy": task_policy,
         "transition_provenance": transition,
@@ -1179,18 +1442,18 @@ def validate(package: Path) -> dict[str, Any]:
 
 
 def write_validation_result(path: Path, result: Mapping[str, Any]) -> str:
-    """Atomically write the canonical CPU result; never create a freeze file."""
+    """Atomically write the admitted CPU result and family freeze manifest."""
 
-    if result.get("final_family_freeze_permitted") is not False:
-        raise McpPinotValidationError(
-            "current external blockers forbid a family freeze manifest"
-        )
+    if (
+        result.get("final_family_freeze_permitted") is not True
+        or result.get("model_ready") is not True
+        or result.get("blockers") != []
+    ):
+        raise McpPinotValidationError("family freeze requires complete CPU admission")
     path.parent.mkdir(parents=True, exist_ok=True)
     freeze = path.parent / "freeze-manifest.json"
-    if freeze.exists() or freeze.is_symlink():
-        raise McpPinotValidationError(
-            "freeze-manifest.json exists despite unresolved external blockers"
-        )
+    if freeze.is_symlink():
+        raise McpPinotValidationError("freeze-manifest.json must not be a symlink")
     payload = canonical_json_bytes(dict(result))
     descriptor, temporary_name = tempfile.mkstemp(
         prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
@@ -1204,7 +1467,69 @@ def write_validation_result(path: Path, result: Mapping[str, Any]) -> str:
         os.replace(temporary, path)
     finally:
         temporary.unlink(missing_ok=True)
-    return hashlib.sha256(payload).hexdigest()
+    validation_sha256 = hashlib.sha256(payload).hexdigest()
+    family_package = result.get("family_package")
+    selection = result.get("selection_status")
+    memory = result.get("source_memory")
+    references = result.get("references")
+    if not all(
+        isinstance(item, Mapping)
+        for item in (family_package, selection, memory, references)
+    ):
+        raise McpPinotValidationError("freeze inputs are incomplete")
+    freeze_value = {
+        "admission": {
+            "path": "validation/cpu-validation-result.json",
+            "sha256": validation_sha256,
+            "status": result.get("status"),
+        },
+        "candidate_id": FAMILY_ID,
+        "classification": "MCP_FAMILY_FROZEN_MODEL_READY",
+        "family_package": {
+            "path": "family-package.json",
+            "sha256": family_package.get("sha256"),
+        },
+        "frozen_inputs": {
+            "memory": memory.get("memory"),
+            "memory_provenance": memory.get("provenance"),
+            "memory_protocol": memory.get("protocol"),
+            "selection_provenance": {
+                "path": selection.get("path"),
+                "sha256": selection.get("sha256"),
+                "status": selection.get("status"),
+            },
+        },
+        "model_ready": True,
+        "reference_contrast": {
+            "faithful_reuse_functional": references["faithful_reuse"][
+                "functional"
+            ]["passed"],
+            "faithful_reuse_security": references["faithful_reuse"]["security"][
+                "passed"
+            ],
+            "safe_control_functional": references["safe_control"]["functional"][
+                "passed"
+            ],
+            "safe_control_security": references["safe_control"]["security"][
+                "passed"
+            ],
+        },
+        "schema": "cmpilot-mcp-pinot-family-freeze-v1",
+    }
+    freeze_payload = canonical_json_bytes(freeze_value)
+    freeze_descriptor, freeze_temporary_name = tempfile.mkstemp(
+        prefix=f".{freeze.name}.", suffix=".tmp", dir=freeze.parent
+    )
+    freeze_temporary = Path(freeze_temporary_name)
+    try:
+        with os.fdopen(freeze_descriptor, "wb") as stream:
+            stream.write(freeze_payload)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(freeze_temporary, freeze)
+    finally:
+        freeze_temporary.unlink(missing_ok=True)
+    return validation_sha256
 
 
 def _parser() -> argparse.ArgumentParser:

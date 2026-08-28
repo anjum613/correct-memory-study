@@ -15,11 +15,11 @@ through local-process STDIO and cannot be invoked directly by an
 unauthenticated network client. Executable inspection supports the frozen
 conclusions `p*(S)=TRUE`, `p*(C)=TRUE`, and `p*(I)=FALSE`.
 
-This package is not yet a frozen production family. The exact external Track B
+This production family is frozen and model-ready. The exact external Track B
 semantic review is imported byte-for-byte from its authoritative retrieval run.
-No authoritative generic procedure for generating the source-correct
-procedural memory was reachable in the prior HPC repository state, so that is
-the sole remaining blocker at this checkpoint.
+The source-correct procedural memory was generated after the generic source-only
+protocol was frozen, using its deterministic non-model extractive renderer, and
+passed source-grounding validation before any scientific model launch.
 
 The functional and security evaluators are external to the model-visible
 working copy. They use controlled local dependency stubs and no live Pinot,

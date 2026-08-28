@@ -484,6 +484,10 @@ class MCPPinotScientificOperations:
         observed_revision = provenance.get(
             "source_repository_revision", provenance.get("source_revision")
         )
+        if observed_revision is None:
+            source_repository = provenance.get("source_repository")
+            if isinstance(source_repository, Mapping):
+                observed_revision = source_repository.get("revision")
         if observed_revision != MCP_PINOT_SOURCE_REVISION:
             raise MCPPinotBackendError("source memory provenance revision mismatch")
         try:

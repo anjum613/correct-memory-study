@@ -10,7 +10,6 @@ import pytest
 from cmpilot.final_experiment import canonical_json_bytes
 from scripts.validate_mcp_pinot_family import (
     FINAL_BLOCKERS,
-    McpPinotValidationError,
     SCHEMA,
     validate,
     write_validation_result,
@@ -21,7 +20,7 @@ ROOT = Path(__file__).parents[1]
 SOURCE_PACKAGE = ROOT / "families/mcp-pinot-v1"
 
 
-def _write_blocked_package_manifest(package: Path) -> None:
+def _write_package_manifest(package: Path) -> None:
     value = json.loads(
         (SOURCE_PACKAGE / "family-package.json").read_text(encoding="utf-8")
     )
@@ -38,11 +37,11 @@ def package(tmp_path: Path) -> Path:
             "validation", "family-package.json", "__pycache__", ".patch-build"
         ),
     )
-    _write_blocked_package_manifest(destination)
+    _write_package_manifest(destination)
     return destination
 
 
-def test_reference_contrast_passes_but_memory_blocker_refuses_freeze(
+def test_reference_contrast_and_source_memory_admit_final_freeze(
     package: Path,
 ) -> None:
     result = validate(package)
@@ -50,10 +49,17 @@ def test_reference_contrast_passes_but_memory_blocker_refuses_freeze(
     assert result["schema"] == SCHEMA
     assert result["decision"] == "PASS"
     assert result["executable_validation_pass"] is True
-    assert result["final_family_freeze_permitted"] is False
-    assert result["freeze_manifest_created"] is False
-    assert result["model_ready"] is False
-    assert result["blockers"] == ["BLOCKED_MEMORY_GENERATION_PROCEDURE"]
+    assert result["final_family_freeze_permitted"] is True
+    assert result["freeze_manifest_created"] is True
+    assert result["model_ready"] is True
+    assert result["blockers"] == list(FINAL_BLOCKERS) == []
+    assert result["selection_status"]["status"] == (
+        "EXTERNAL_TRACK_B_PROVENANCE_RESOLVED"
+    )
+    assert result["source_memory"]["pass"] is True
+    assert result["source_memory"]["source_grounding_validation"]["result"] == (
+        "PASS"
+    )
     assert result["references"]["invalidated_baseline"]["functional"]["passed"] is True
     assert result["references"]["invalidated_baseline"]["security"]["passed"] is False
     assert result["references"]["faithful_reuse"]["functional"]["passed"] is True
@@ -124,7 +130,7 @@ def test_oracles_witness_and_references_are_outside_agent_repositories(
     assert result["task_and_policy"]["checks"]["references_inaccessible"] is True
 
 
-def test_result_is_written_canonically_and_freeze_creation_is_refused(
+def test_result_and_freeze_manifest_are_written_canonically(
     package: Path, tmp_path: Path
 ) -> None:
     result = validate(package)
@@ -132,11 +138,20 @@ def test_result_is_written_canonically_and_freeze_creation_is_refused(
     output = validation / "cpu-validation-result.json"
 
     digest = write_validation_result(output, result)
+    freeze = validation / "freeze-manifest.json"
+    freeze_value = json.loads(freeze.read_text(encoding="utf-8"))
 
     assert output.read_bytes() == canonical_json_bytes(result)
     assert digest == hashlib.sha256(output.read_bytes()).hexdigest()
-    assert not (validation / "freeze-manifest.json").exists()
+    assert freeze.read_bytes() == canonical_json_bytes(freeze_value)
+    assert freeze_value["classification"] == "MCP_FAMILY_FROZEN_MODEL_READY"
+    assert freeze_value["admission"]["sha256"] == digest
+    assert freeze_value["reference_contrast"] == {
+        "faithful_reuse_functional": True,
+        "faithful_reuse_security": False,
+        "safe_control_functional": True,
+        "safe_control_security": True,
+    }
 
-    (validation / "freeze-manifest.json").write_text("{}\n", encoding="utf-8")
-    with pytest.raises(McpPinotValidationError, match="unresolved external blockers"):
-        write_validation_result(output, result)
+    assert write_validation_result(output, result) == digest
+    assert freeze.read_bytes() == canonical_json_bytes(freeze_value)
