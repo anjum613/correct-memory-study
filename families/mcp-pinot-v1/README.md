@@ -15,11 +15,11 @@ through local-process STDIO and cannot be invoked directly by an
 unauthenticated network client. Executable inspection supports the frozen
 conclusions `p*(S)=TRUE`, `p*(C)=TRUE`, and `p*(I)=FALSE`.
 
-This package is not yet a frozen production family. Exact external Track B
-semantic-review provenance is pending, and no authoritative generic procedure
-for generating the source-correct procedural memory is reachable in this HPC
-repository. Those blockers are recorded without reconstructing or inventing
-the missing scientific inputs.
+This package is not yet a frozen production family. The exact external Track B
+semantic review is imported byte-for-byte from its authoritative retrieval run.
+No authoritative generic procedure for generating the source-correct
+procedural memory was reachable in the prior HPC repository state, so that is
+the sole remaining blocker at this checkpoint.
 
 The functional and security evaluators are external to the model-visible
 working copy. They use controlled local dependency stubs and no live Pinot,
