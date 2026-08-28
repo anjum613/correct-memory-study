@@ -42,7 +42,7 @@ def package(tmp_path: Path) -> Path:
     return destination
 
 
-def test_reference_contrast_passes_but_external_blockers_refuse_freeze(
+def test_reference_contrast_passes_but_memory_blocker_refuses_freeze(
     package: Path,
 ) -> None:
     result = validate(package)
@@ -53,7 +53,7 @@ def test_reference_contrast_passes_but_external_blockers_refuse_freeze(
     assert result["final_family_freeze_permitted"] is False
     assert result["freeze_manifest_created"] is False
     assert result["model_ready"] is False
-    assert result["blockers"] == list(FINAL_BLOCKERS)
+    assert result["blockers"] == ["BLOCKED_MEMORY_GENERATION_PROCEDURE"]
     assert result["references"]["invalidated_baseline"]["functional"]["passed"] is True
     assert result["references"]["invalidated_baseline"]["security"]["passed"] is False
     assert result["references"]["faithful_reuse"]["functional"]["passed"] is True

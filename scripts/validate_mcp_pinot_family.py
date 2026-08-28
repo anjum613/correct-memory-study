@@ -3,8 +3,9 @@
 
 This is deliberately candidate-specific.  It validates the exact MCP Pinot
 S/C/I triplet, local evaluators, and two pre-outcome reference controls.  The
-current package has two declared external blockers, so a successful executable
-contrast is recorded separately and never produces a family freeze manifest.
+current package has one declared memory-procedure blocker, so a successful
+executable contrast is recorded separately and never produces a family freeze
+manifest.
 """
 
 from __future__ import annotations
@@ -51,6 +52,15 @@ COMPATIBLE_TREE = "79b3718c6b1eee0af83e164a3d4c6bd687e71ec1"
 INVALIDATED_TREE = "7b2f34bd1e98509ea6f3cbfe922e451b826ca686"
 TRACK_B_REVIEW_COMMIT = "1f5a3ee910c03ce32da7eab674d5da94aea52752"
 TRACK_B_RETRIEVAL_RUN = "20260827T131053Z"
+TRACK_B_REVIEW_PATH = (
+    "provenance/track-b/20260827T131053Z/GHSA-73cv-556c-w3g6.md"
+)
+TRACK_B_REVIEW_SOURCE_PATH = (
+    "track_b/semantic-reviews/20260827T131053Z/GHSA-73cv-556c-w3g6.md"
+)
+TRACK_B_REVIEW_SHA256 = (
+    "29cb8732032bc75b1c84b86d7c9c334402e5a294455adf658e55f2bbe1b9694e"
+)
 FOCAL_PROPERTY = (
     "Every invocation of the read-query operation can arrive only through the "
     "local process's STDIO transport; it cannot be invoked directly by an "
@@ -59,12 +69,9 @@ FOCAL_PROPERTY = (
 FUNCTIONAL_SCHEMA = "cmpilot-mcp-pinot-functional-oracle-v1"
 SECURITY_SCHEMA = "cmpilot-mcp-pinot-security-witness-v1"
 REFERENCE_SCHEMA = "cmpilot-mcp-pinot-reference-v1"
-TRACK_B_PENDING = "EXTERNAL_TRACK_B_PROVENANCE_PENDING"
+TRACK_B_RESOLVED = "EXTERNAL_TRACK_B_PROVENANCE_RESOLVED"
 MEMORY_PENDING = "MEMORY_GENERATION_PROCEDURE_MISSING"
-FINAL_BLOCKERS = (
-    "BLOCKED_EXTERNAL_TRACK_B_PROVENANCE",
-    "BLOCKED_MEMORY_GENERATION_PROCEDURE",
-)
+FINAL_BLOCKERS = ("BLOCKED_MEMORY_GENERATION_PROCEDURE",)
 MAX_OUTPUT_BYTES = 64 * 1024
 EVALUATOR_TIMEOUT_SECONDS = 15
 SNAPSHOT_NAMES = ("source", "compatible", "invalidated")
@@ -408,6 +415,9 @@ def _validate_transition(package: Path) -> dict[str, Any]:
 def _status_checks(package: Path) -> tuple[dict[str, Any], dict[str, Any]]:
     selection_path = package / "provenance/track-b-provenance-status.json"
     selection, selection_canonical = _canonical_object(selection_path)
+    imported = selection.get("imported_artifact")
+    source = selection.get("source")
+    review_path = package / TRACK_B_REVIEW_PATH
     selection_checks = {
         "canonical_json": selection_canonical,
         "candidate_id": selection.get("candidate_id") == FAMILY_ID,
@@ -415,8 +425,22 @@ def _status_checks(package: Path) -> tuple[dict[str, Any], dict[str, Any]]:
         == TRACK_B_REVIEW_COMMIT,
         "retrieval_run": selection.get("authoritative_retrieval_run")
         == TRACK_B_RETRIEVAL_RUN,
-        "status": selection.get("status") == TRACK_B_PENDING,
-        "freeze_blocked": selection.get("final_family_freeze_blocked") is True,
+        "retrieval_ref": selection.get("retrieval_ref")
+        == "refs/remotes/track-b-provenance/cleanbase",
+        "source": isinstance(source, Mapping)
+        and source.get("git_commit") == TRACK_B_REVIEW_COMMIT
+        and source.get("path") == TRACK_B_REVIEW_SOURCE_PATH,
+        "imported_artifact": isinstance(imported, Mapping)
+        and imported.get("path") == TRACK_B_REVIEW_PATH
+        and imported.get("sha256") == TRACK_B_REVIEW_SHA256,
+        "imported_artifact_sha256": review_path.is_file()
+        and not review_path.is_symlink()
+        and sha256_file(review_path) == TRACK_B_REVIEW_SHA256,
+        "status": selection.get("status") == TRACK_B_RESOLVED,
+        "freeze_blocked": selection.get(
+            "selection_provenance_blocks_final_family_freeze"
+        )
+        is False,
     }
     memory_path = package / "memories/memory-status.json"
     memory, memory_canonical = _canonical_object(memory_path)
@@ -516,8 +540,7 @@ def _validate_family_package(package: Path) -> dict[str, Any]:
         "source_revision": value.get("source_revision") == SOURCE_REVISION,
         "target_revision": value.get("target_revision") == INVALIDATED_REVISION,
         "inputs": isinstance(inputs, Mapping),
-        "blockers": value.get("blockers")
-        == [TRACK_B_PENDING, MEMORY_PENDING],
+        "blockers": value.get("blockers") == [MEMORY_PENDING],
         "model_ready": value.get("model_ready") is False,
     }
     input_records: dict[str, Any] = {}
@@ -660,6 +683,35 @@ def _validate_family_package(package: Path) -> dict[str, Any]:
         input_records.setdefault("reference_validation", {})[
             "supporting_inputs"
         ] = reference_nested
+        selection = inputs.get("selection_provenance")
+        selection_review_ok = isinstance(selection, Mapping)
+        review_target = None
+        if selection_review_ok:
+            try:
+                review_target = _relative_path(
+                    package,
+                    selection.get("review_path"),
+                    label="selection_provenance review",
+                )
+            except (OSError, ValueError, McpPinotValidationError):
+                selection_review_ok = False
+        selection_review_ok = bool(
+            selection_review_ok
+            and selection.get("status") == TRACK_B_RESOLVED
+            and selection.get("review_sha256") == TRACK_B_REVIEW_SHA256
+            and review_target is not None
+            and sha256_file(review_target) == TRACK_B_REVIEW_SHA256
+        )
+        checks["input_selection_review"] = selection_review_ok
+        input_records.setdefault("selection_provenance", {})["review"] = {
+            "actual_sha256": (
+                None if review_target is None else sha256_file(review_target)
+            ),
+            "expected_sha256": TRACK_B_REVIEW_SHA256,
+            "path": None
+            if review_target is None
+            else review_target.relative_to(package).as_posix(),
+        }
     return {
         "checks": checks,
         "inputs": input_records,
