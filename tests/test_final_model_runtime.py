@@ -559,12 +559,12 @@ def test_gpu_gate_uses_two_visible_torch_a100s_not_all_physical_gpus(
     assert observed[0][0] == str(QWEN32B_PROFILE.environment.server_python)
 
 
-def test_model_and_mcp_pinot_scientific_registries_are_ready() -> None:
+def test_model_and_scientific_registries_are_ready() -> None:
     assert tuple(MODEL_EXECUTORS) == (
         QWEN32B_PROFILE.profile_id,
         DEVSTRAL_PRODUCTION_PROFILE.profile_id,
     )
-    assert tuple(SCIENTIFIC_BACKENDS) == ("mcp-pinot-v1",)
+    assert tuple(SCIENTIFIC_BACKENDS) == ("mcp-pinot-v1", "onnx-v1")
     context = {
         "model_profile_key": QWEN32B_PROFILE.profile_id,
         "model_profile": QWEN32B_PROFILE.final_experiment_record(

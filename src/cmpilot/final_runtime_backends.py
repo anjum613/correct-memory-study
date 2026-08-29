@@ -14,6 +14,7 @@ from .final_model_runtime import (
 )
 from .final_runner import ModelExecutor, ScientificOperations
 from .mcp_pinot_backend import MCP_PINOT_BACKEND_ID, build_mcp_pinot_backend
+from .onnx_backend import ONNX_BACKEND_ID, build_onnx_backend
 
 
 ScientificBackendBuilder = Callable[[Mapping[str, Any]], ScientificOperations]
@@ -21,7 +22,10 @@ ModelExecutorBuilder = Callable[[Mapping[str, Any]], ModelExecutor]
 
 
 SCIENTIFIC_BACKENDS: Mapping[str, ScientificBackendBuilder] = MappingProxyType(
-    {MCP_PINOT_BACKEND_ID: build_mcp_pinot_backend}
+    {
+        MCP_PINOT_BACKEND_ID: build_mcp_pinot_backend,
+        ONNX_BACKEND_ID: build_onnx_backend,
+    }
 )
 MODEL_EXECUTORS: Mapping[str, ModelExecutorBuilder] = MappingProxyType(
     {
