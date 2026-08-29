@@ -564,7 +564,7 @@ def test_model_and_mcp_pinot_scientific_registries_are_ready() -> None:
         QWEN32B_PROFILE.profile_id,
         DEVSTRAL_PRODUCTION_PROFILE.profile_id,
     )
-    assert tuple(SCIENTIFIC_BACKENDS) == ("mcp-pinot-v1",)
+    assert tuple(SCIENTIFIC_BACKENDS) == ("axios-v1", "mcp-pinot-v1")
     context = {
         "model_profile_key": QWEN32B_PROFILE.profile_id,
         "model_profile": QWEN32B_PROFILE.final_experiment_record(
