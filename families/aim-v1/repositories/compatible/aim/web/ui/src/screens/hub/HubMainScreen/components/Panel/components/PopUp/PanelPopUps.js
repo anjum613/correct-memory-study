@@ -388,13 +388,9 @@ function PanelPopUps(props) {
               width: pos.width,
               height: pos.height,
             }));
-          } else {
-            hideActionPopUps(false);
           }
         }, 100);
       }
-    } else {
-      hideActionPopUps(false);
     }
   }
 
@@ -504,45 +500,34 @@ function PanelPopUps(props) {
           },
         );
         setTimeout(() => {
-          const focusedCircle = chart.focused.circle;
-          const focusedMetric = chart.focused.metric;
-          const focusedLineAttr = focusedCircle.active
-            ? focusedCircle
-            : focusedMetric;
-          if (focusedLineAttr.runHash !== null) {
-            const activeCircle = document.querySelector(
-              `circle.${focusedLineAttr.active ? 'focus' : 'active'}`,
+          const activeCircle = document.querySelector(
+            `circle.${focusedLineAttr.active ? 'focus' : 'active'}`,
+          );
+          if (activeCircle) {
+            const circleRect = activeCircle.getBoundingClientRect();
+            const topContainer = activeCircle.closest('svg');
+            const clipPathElement = topContainer.querySelector('rect');
+            const clipPathRect = clipPathElement.getBoundingClientRect();
+            const { left, top } = getPositionBasedOnOverflow(
+              circleRect,
+              clipPathRect,
             );
-            if (activeCircle) {
-              const circleRect = activeCircle.getBoundingClientRect();
-              const topContainer = activeCircle.closest('svg');
-              const clipPathElement = topContainer.querySelector('rect');
-              const clipPathRect = clipPathElement.getBoundingClientRect();
-              const { left, top } = getPositionBasedOnOverflow(
-                circleRect,
-                clipPathRect,
-              );
-              const pos = positionPopUp(left, top);
-              setChartPopUp((cp) => ({
-                ...cp,
-                left: pos.left,
-                top: pos.top,
-                bottom: pos.bottom,
-                width: pos.width,
-                height: pos.height,
-                display: !chart.settings.zoomMode,
-                run: line.run,
-                metric: line.metric,
-                trace: line.trace,
-                point: point,
-                groupConfig: groupConfig,
-                focused: focusedLineAttr.active,
-              }));
-            } else {
-              hideActionPopUps(false);
-            }
-          } else {
-            hideActionPopUps(false);
+            const pos = positionPopUp(left, top);
+            setChartPopUp((cp) => ({
+              ...cp,
+              left: pos.left,
+              top: pos.top,
+              bottom: pos.bottom,
+              width: pos.width,
+              height: pos.height,
+              display: !chart.settings.zoomMode,
+              run: line.run,
+              metric: line.metric,
+              trace: line.trace,
+              point: point,
+              groupConfig: groupConfig,
+              focused: focusedLineAttr.active,
+            }));
           }
         }, 100);
         if (focusedLineAttr.active && isAimRun(line.run ?? {})) {

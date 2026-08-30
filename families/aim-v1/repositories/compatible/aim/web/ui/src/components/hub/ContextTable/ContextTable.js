@@ -10,7 +10,6 @@ import BarViewModes from '../BarViewModes/BarViewModes';
 import BarSort from './components/BarSort/BarSort';
 import BarReorder from './components/BarReorder/BarReorder';
 import BarRowVisualization from './components/BarRowVisualization/BarRowVisualization';
-import BarExport from './components/BarExport/BarExport';
 
 function ContextTable(props) {
   let contextTableContainerRef = useRef();
@@ -116,9 +115,7 @@ function ContextTable(props) {
               setRowHeightMode={props.setRowHeightMode}
             />
           </div>
-          <div className='ContextTableBar__items ContextTableBar__items--right'>
-            {props.exportData && <BarExport exportData={props.exportData} />}
-          </div>
+          <div className='ContextTableBar__items ContextTableBar__items--right' />
         </div>
       )}
       <div
@@ -179,7 +176,6 @@ ContextTable.propTypes = {
   setColumnsWidths: PropTypes.func,
   getParamsWithSameValue: PropTypes.func,
   getTableContainerElement: PropTypes.func,
-  exportData: PropTypes.func,
 };
 
 export default ContextTable;

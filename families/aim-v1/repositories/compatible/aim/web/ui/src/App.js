@@ -3,7 +3,6 @@ import './App.less';
 import React, { Suspense, lazy } from 'react';
 import { BrowserRouter, Route, Switch, Redirect } from 'react-router-dom';
 import LoadingBar from 'react-top-loading-bar';
-import { ToastProvider } from 'react-toast-notifications';
 
 import * as screens from './constants/screens';
 import * as classes from './constants/classes';
@@ -113,107 +112,102 @@ class App extends React.Component {
         {/*    </Helmet>*/}
         {/*  </>*/}
         {/*}*/}
-        <ToastProvider portalTargetSelector='#root' autoDismiss>
-          <Suspense fallback={null}>
-            <Switch>
-              <Route
-                exact
-                path={screens.MAIN}
-                component={RedirectFromMainScreen}
-              />
-              <Route
-                key={screens.EXPLORE}
-                exact
-                path={[screens.EXPLORE, screens.EXPLORE_SEARCH]}
-                component={HubMainScreen}
-              />
-              <Route
-                key={screens.EXPLORE_BOOKMARK}
-                exact
-                path={[
-                  screens.EXPLORE_BOOKMARK,
-                  screens.EXPLORE_BOOKMARK_SEARCH,
-                ]}
-                component={HubMainScreen}
-              />
-              {/*<Route exact path={screens.HUB_PROJECT_EXECUTABLES} component={HubExecutablesScreen}/>*/}
-              {/*<Route exact path={screens.HUB_PROJECT_EXECUTABLE_PROCESS_DETAIL} component={HubExecutableProcessDetailScreen}/>*/}
-              {/*<Route exact path={screens.HUB_PROJECT_CREATE_EXECUTABLE} component={HubExecutableCreateScreen}/>*/}
-              {/*<Route exact path={screens.HUB_PROJECT_EXECUTABLE_DETAIL} component={HubExecutableDetailScreen}/>*/}
-              <Route
-                exact
-                path={screens.HUB_PROJECT_TAGS}
-                component={HubTagsScreen}
-              />
-              <Route
-                exact
-                path={screens.HUB_PROJECT_CREATE_TAG}
-                component={HubTagCreateScreen}
-              />
-              <Route
-                exact
-                path={screens.HUB_PROJECT_EDIT_TAG}
-                component={HubTagDetailScreen}
-              />
-              <Route
-                exact
-                path={screens.HUB_TF_SUMMARY_LIST}
-                component={HubTFSummaryListScreen}
-              />
-              <Route
-                exact
-                path={screens.HUB_PROJECT_EXPERIMENT_DASHBOARD}
-                component={HubExperimentsDashboardScreen}
-              />
-              <Route
-                exact
-                path={screens.HUB_PROJECT_EXPERIMENT_DASHBOARD_SEARCH}
-                component={HubExperimentsDashboardScreen}
-              />
-              <Route
-                exact
-                path={screens.HUB_PROJECT_EXPERIMENT_PARAMS_TAB}
-                render={(props) => (
-                  <HubExperimentScreen {...props} tab='parameters' />
-                )}
-              />
-              <Route
-                exact
-                path={screens.HUB_PROJECT_EXPERIMENT_METRICS_TAB}
-                render={(props) => (
-                  <HubExperimentScreen {...props} tab='metrics' />
-                )}
-              />
-              <Route
-                exact
-                path={screens.HUB_PROJECT_EXPERIMENT_SYSTEM_TAB}
-                render={(props) => (
-                  <HubExperimentScreen {...props} tab='system' />
-                )}
-              />
-              <Route
-                exact
-                path={screens.HUB_PROJECT_EXPERIMENT_SETTINGS_TAB}
-                render={(props) => (
-                  <HubExperimentScreen {...props} tab='settings' />
-                )}
-              />
-              <Route
-                exact
-                path={screens.HUB_PROJECT_EXPERIMENT}
-                render={(props) => (
-                  <HubExperimentScreen {...props} tab='parameters' />
-                )}
-              />
-              <Route
-                exact
-                path={screens.HUB_BOOKMARKS}
-                component={HubBookmarksScreen}
-              />
-              <Route component={SiteNotFoundScreen} />
-            </Switch>
-          </Suspense>
-        </ToastProvider>
+        <Suspense fallback={null}>
+          <Switch>
+            <Route
+              exact
+              path={screens.MAIN}
+              component={RedirectFromMainScreen}
+            />
+            <Route
+              key={screens.EXPLORE}
+              exact
+              path={[screens.EXPLORE, screens.EXPLORE_SEARCH]}
+              component={HubMainScreen}
+            />
+            <Route
+              key={screens.EXPLORE_BOOKMARK}
+              exact
+              path={[screens.EXPLORE_BOOKMARK, screens.EXPLORE_BOOKMARK_SEARCH]}
+              component={HubMainScreen}
+            />
+            {/*<Route exact path={screens.HUB_PROJECT_EXECUTABLES} component={HubExecutablesScreen}/>*/}
+            {/*<Route exact path={screens.HUB_PROJECT_EXECUTABLE_PROCESS_DETAIL} component={HubExecutableProcessDetailScreen}/>*/}
+            {/*<Route exact path={screens.HUB_PROJECT_CREATE_EXECUTABLE} component={HubExecutableCreateScreen}/>*/}
+            {/*<Route exact path={screens.HUB_PROJECT_EXECUTABLE_DETAIL} component={HubExecutableDetailScreen}/>*/}
+            <Route
+              exact
+              path={screens.HUB_PROJECT_TAGS}
+              component={HubTagsScreen}
+            />
+            <Route
+              exact
+              path={screens.HUB_PROJECT_CREATE_TAG}
+              component={HubTagCreateScreen}
+            />
+            <Route
+              exact
+              path={screens.HUB_PROJECT_EDIT_TAG}
+              component={HubTagDetailScreen}
+            />
+            <Route
+              exact
+              path={screens.HUB_TF_SUMMARY_LIST}
+              component={HubTFSummaryListScreen}
+            />
+            <Route
+              exact
+              path={screens.HUB_PROJECT_EXPERIMENT_DASHBOARD}
+              component={HubExperimentsDashboardScreen}
+            />
+            <Route
+              exact
+              path={screens.HUB_PROJECT_EXPERIMENT_DASHBOARD_SEARCH}
+              component={HubExperimentsDashboardScreen}
+            />
+            <Route
+              exact
+              path={screens.HUB_PROJECT_EXPERIMENT_PARAMS_TAB}
+              render={(props) => (
+                <HubExperimentScreen {...props} tab='parameters' />
+              )}
+            />
+            <Route
+              exact
+              path={screens.HUB_PROJECT_EXPERIMENT_METRICS_TAB}
+              render={(props) => (
+                <HubExperimentScreen {...props} tab='metrics' />
+              )}
+            />
+            <Route
+              exact
+              path={screens.HUB_PROJECT_EXPERIMENT_SYSTEM_TAB}
+              render={(props) => (
+                <HubExperimentScreen {...props} tab='system' />
+              )}
+            />
+            <Route
+              exact
+              path={screens.HUB_PROJECT_EXPERIMENT_SETTINGS_TAB}
+              render={(props) => (
+                <HubExperimentScreen {...props} tab='settings' />
+              )}
+            />
+            <Route
+              exact
+              path={screens.HUB_PROJECT_EXPERIMENT}
+              render={(props) => (
+                <HubExperimentScreen {...props} tab='parameters' />
+              )}
+            />
+            <Route
+              exact
+              path={screens.HUB_BOOKMARKS}
+              component={HubBookmarksScreen}
+            />
+            <Route component={SiteNotFoundScreen} />
+          </Switch>
+        </Suspense>
       </BrowserRouter>
     );
   }

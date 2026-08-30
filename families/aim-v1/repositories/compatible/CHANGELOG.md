@@ -1,7 +1,6 @@
 # Changelog
 
-## 2.7.0 Jun 23 2021
-- Add ability to export table data as CSV (KaroMourad)
+## Unreleased
 - Add ability to bookmark explore screen state (roubkar)
 - Add dashboards and apps API (mihran113)
 

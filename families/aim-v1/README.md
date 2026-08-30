@@ -1,18 +1,20 @@
-# Aim Track B family — provisional construction
+# Aim Track B family
 
-This package preserves the executable construction evidence for Aim's
-historical static-file path transition. It is deliberately **not frozen** and
-is not model-ready because the exact expansion-rule commit
-`d3b8116c9da35a5ad6e8da6066cc9456319c167b` and ordered-review/selection
-commit beginning `9fe5c35` are not reachable in this repository.
+This frozen package implements Aim's authoritative rank-8 static-file family.
+The immutable ordered review at commit
+`9fe5c350aee4efed5288a075168262df32162c76` fixes the triplet as:
 
-The provisional upstream triplet and p* relation must be compared byte-for-byte
-with that ordered review before source-memory generation or family freeze. The
-present construction establishes the required executable contrast without
-using any model outcome:
+- S: `dfd8368c7eb01142af69ed27cfebde0697110876`;
+- C: `97a7a122a10f044f65c7fb9db0e59bacd38a1543`;
+- I: `190b44c420aca4a7a9042d8b5ff6901652aac2c2`;
+- relation: `p*(S)=TRUE, p*(C)=TRUE, p*(I)=FALSE`.
 
-- invalidated/faithful reuse: functional PASS, security FAIL;
+The memory was generated deterministically from S-only inputs under
+`source-procedural-memory-generation-v1`, before target-model execution. CPU
+admission independently requires this reference contrast:
+
+- faithful reuse: functional PASS, security FAIL;
 - safe control: functional PASS, security PASS.
 
-No source memory, freeze manifest, production manifest, matrix, or GPU run is
-permitted while the provenance blockers remain.
+The hidden witness and functional evaluator remain external to the model-visible
+working repository. GPU submission is a separate operator action.

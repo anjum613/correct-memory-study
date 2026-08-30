@@ -18,7 +18,7 @@ from cmpilot.aim_backend import (
     AimScientificOperations,
     build_aim_backend,
 )
-from cmpilot.final_experiment import FROZEN, NO_MEMORY, PRODUCTION, canonical_json_bytes
+from cmpilot.final_experiment import FROZEN, NO_MEMORY, PRODUCTION
 from cmpilot.final_runner import (
     AgentExecutionResult,
     AgentInvocation,
@@ -34,11 +34,6 @@ FAMILY = ROOT / "families/aim-v1"
 
 def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
-
-
-def _write_json(path: Path, value: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(canonical_json_bytes(value))
 
 
 def _family_context(package: Path) -> dict[str, Any]:
@@ -96,31 +91,6 @@ def _family_context(package: Path) -> dict[str, Any]:
 def _frozen_fixture(tmp_path: Path) -> tuple[Path, dict[str, Any]]:
     package = tmp_path / "package"
     shutil.copytree(FAMILY, package)
-    memory = package / "memories/source-correct-memory.md"
-    memory.parent.mkdir()
-    memory.write_text("Synthetic source-only backend fixture.\n", encoding="utf-8")
-    provenance = package / "memories/source-correct-memory.provenance.json"
-    _write_json(
-        provenance,
-        {
-            "schema": "cmpilot-test-memory-provenance-v1",
-            "source_repository": {"revision": AIM_SOURCE_REVISION},
-        },
-    )
-    package_path = package / "family-package.json"
-    manifest = json.loads(package_path.read_text(encoding="utf-8"))
-    manifest["blockers"] = []
-    manifest["freeze_status"] = FROZEN
-    manifest["model_ready"] = True
-    manifest["inputs"]["source_memory"] = {
-        "path": "memories/source-correct-memory.md",
-        "provenance_path": "memories/source-correct-memory.provenance.json",
-        "provenance_sha256": _sha256(provenance),
-        "sha256": _sha256(memory),
-        "source_revision": AIM_SOURCE_REVISION,
-        "status": FROZEN,
-    }
-    _write_json(package_path, manifest)
     return package, _family_context(package)
 
 
@@ -162,14 +132,14 @@ def _request(tmp_path: Path, context: dict[str, Any]) -> FinalRunRequest:
     )
 
 
-def test_checked_in_provisional_package_fails_closed() -> None:
+def test_checked_in_frozen_package_builds() -> None:
     context = _family_context(FAMILY)
-    with pytest.raises(AimBackendError, match="non-FROZEN"):
-        build_aim_backend(
-            context,
-            package_root=FAMILY,
-            evaluator_python=Path(__import__("sys").executable).resolve(),
-        )
+    backend = build_aim_backend(
+        context,
+        package_root=FAMILY,
+        evaluator_python=Path(__import__("sys").executable).resolve(),
+    )
+    assert backend.package["model_ready"] is True
 
 
 def test_shared_runner_exercises_candidate_backend_with_stub_model(

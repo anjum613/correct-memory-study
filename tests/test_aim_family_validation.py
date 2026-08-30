@@ -8,13 +8,13 @@ from scripts.validate_aim_family import validate
 ROOT = Path(__file__).parents[1]
 
 
-def test_provisional_aim_construction_passes_engineering_and_blocks_freeze() -> None:
+def test_frozen_aim_family_passes_cpu_admission() -> None:
     result = validate(ROOT / "families/aim-v1")
 
-    assert result["engineering_validation_pass"] is True
-    assert result["decision"] == "BLOCKED_PENDING_EXACT_SELECTION_PROVENANCE"
-    assert result["final_family_freeze_permitted"] is False
-    assert result["model_ready"] is False
+    assert result["cpu_admission_pass"] is True
+    assert result["decision"] == "AIM_FAMILY_FROZEN_MODEL_READY"
+    assert result["final_family_freeze_permitted"] is True
+    assert result["model_ready"] is True
     assert all(result["checks"].values())
     assert result["references"]["faithful_reuse"]["functional"]["passed"] is True
     assert result["references"]["faithful_reuse"]["security"]["passed"] is False
