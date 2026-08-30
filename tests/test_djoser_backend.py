@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 from pathlib import Path
 import stat
+import subprocess
 import sys
+import tarfile
 from typing import Any
+
+import pytest
 
 from cmpilot.djoser_backend import (
     DJOSER_BACKEND_ID,
@@ -29,8 +34,10 @@ def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def _context() -> dict[str, Any]:
-    package = json.loads((PACKAGE / "family-package.json").read_text(encoding="utf-8"))
+def _context(package_root: Path = PACKAGE) -> dict[str, Any]:
+    package = json.loads(
+        (package_root / "family-package.json").read_text(encoding="utf-8")
+    )
     inputs = package["inputs"]
     memory = {
         "content_sha256": inputs["source_memory"]["sha256"],
@@ -54,7 +61,7 @@ def _context() -> dict[str, Any]:
         "target_revision": DJOSER_TARGET_REVISION,
         "task_environment": {
             "path": DJOSER_PACKAGE_LOGICAL_PATH,
-            "sha256": _sha256(PACKAGE / "family-package.json"),
+            "sha256": _sha256(package_root / "family-package.json"),
         },
         "task_specification": {
             "path": inputs["task"]["path"],
@@ -78,7 +85,9 @@ def _context() -> dict[str, Any]:
         "run_id": "run-djoser-test",
         "seed": 17,
         "target_revision": DJOSER_TARGET_REVISION,
-        "task_environment_sha256": _sha256(PACKAGE / "family-package.json"),
+        "task_environment_sha256": _sha256(
+            package_root / "family-package.json"
+        ),
     }
     return {
         "condition": SOURCE_CORRECT_MEMORY,
@@ -86,6 +95,20 @@ def _context() -> dict[str, Any]:
         "run": run,
         "treatment": {"condition": SOURCE_CORRECT_MEMORY, "memory": memory},
     }
+
+
+@pytest.fixture
+def package_root(tmp_path: Path) -> Path:
+    completed = subprocess.run(
+        ("git", "archive", "HEAD", "families/djoser-v1"),
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        timeout=30,
+    )
+    with tarfile.open(fileobj=io.BytesIO(completed.stdout), mode="r:") as archive:
+        archive.extractall(tmp_path, filter="data")
+    return tmp_path / "families/djoser-v1"
 
 
 def _request(context: dict[str, Any], attempt: Path) -> FinalRunRequest:
@@ -115,13 +138,15 @@ def _execution() -> AgentExecutionResult:
     )
 
 
-def test_registry_constructs_exact_frozen_djoser_backend() -> None:
-    context = _context()
+def test_registry_constructs_exact_frozen_djoser_backend(
+    package_root: Path,
+) -> None:
+    context = _context(package_root)
 
     assert SCIENTIFIC_BACKENDS[DJOSER_BACKEND_ID] is build_djoser_backend
     backend = build_djoser_backend(
         context,
-        package_root=PACKAGE,
+        package_root=package_root,
         evaluator_python=Path(sys.executable).resolve(),
     )
 
@@ -131,13 +156,13 @@ def test_registry_constructs_exact_frozen_djoser_backend() -> None:
 
 
 def test_runtime_applies_policy_memory_and_frozen_reference_contrast(
-    tmp_path: Path,
+    tmp_path: Path, package_root: Path,
 ) -> None:
-    context = _context()
+    context = _context(package_root)
     request = _request(context, tmp_path / "attempt")
     backend = DjoserScientificOperations(
         context,
-        package_root=PACKAGE,
+        package_root=package_root,
         evaluator_python=Path(sys.executable).resolve(),
     )
 
@@ -160,9 +185,11 @@ def test_runtime_applies_policy_memory_and_frozen_reference_contrast(
     }
 
 
-def test_actual_package_input_hashes_are_bound() -> None:
-    package = json.loads((PACKAGE / "family-package.json").read_text(encoding="utf-8"))
+def test_actual_package_input_hashes_are_bound(package_root: Path) -> None:
+    package = json.loads(
+        (package_root / "family-package.json").read_text(encoding="utf-8")
+    )
 
     for name in ("functional_oracle", "security_witness", "task", "task_policy"):
         record = package["inputs"][name]
-        assert _sha256(PACKAGE / record["path"]) == record["sha256"]
+        assert _sha256(package_root / record["path"]) == record["sha256"]
