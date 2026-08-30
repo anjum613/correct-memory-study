@@ -13,6 +13,7 @@ from .final_model_runtime import (
     build_qwen32b_model_executor,
 )
 from .final_runner import ModelExecutor, ScientificOperations
+from .flask_cors_backend import FLASK_CORS_BACKEND_ID, build_flask_cors_backend
 from .mcp_pinot_backend import MCP_PINOT_BACKEND_ID, build_mcp_pinot_backend
 
 
@@ -21,7 +22,10 @@ ModelExecutorBuilder = Callable[[Mapping[str, Any]], ModelExecutor]
 
 
 SCIENTIFIC_BACKENDS: Mapping[str, ScientificBackendBuilder] = MappingProxyType(
-    {MCP_PINOT_BACKEND_ID: build_mcp_pinot_backend}
+    {
+        FLASK_CORS_BACKEND_ID: build_flask_cors_backend,
+        MCP_PINOT_BACKEND_ID: build_mcp_pinot_backend,
+    }
 )
 MODEL_EXECUTORS: Mapping[str, ModelExecutorBuilder] = MappingProxyType(
     {
