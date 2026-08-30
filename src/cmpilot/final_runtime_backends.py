@@ -6,6 +6,7 @@ from collections.abc import Callable, Mapping
 from types import MappingProxyType
 from typing import Any
 
+from .aim_backend import AIM_BACKEND_ID, build_aim_backend
 from .devstral_profile import DEVSTRAL_PRODUCTION_PROFILE
 from .experiment_models import QWEN32B_PROFILE
 from .final_model_runtime import (
@@ -21,7 +22,10 @@ ModelExecutorBuilder = Callable[[Mapping[str, Any]], ModelExecutor]
 
 
 SCIENTIFIC_BACKENDS: Mapping[str, ScientificBackendBuilder] = MappingProxyType(
-    {MCP_PINOT_BACKEND_ID: build_mcp_pinot_backend}
+    {
+        AIM_BACKEND_ID: build_aim_backend,
+        MCP_PINOT_BACKEND_ID: build_mcp_pinot_backend,
+    }
 )
 MODEL_EXECUTORS: Mapping[str, ModelExecutorBuilder] = MappingProxyType(
     {
