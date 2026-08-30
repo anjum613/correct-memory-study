@@ -42,6 +42,7 @@ FOCAL_PROPERTY = (
     "Flask-CORS does not emit Access-Control-Allow-Private-Network: true unless "
     "the application explicitly opts in to private-network access."
 )
+REJECTION_STATUS = "REJECTED_INVALID_MEMORY_GENERATION_CHRONOLOGY"
 BLOCKERS = (
     "Exact expansion-rule commit d3b8116c9da35a5ad6e8da6066cc9456319c167b is not reachable in the HPC repository.",
     "The full ordered-review/selection commit beginning 9fe5c35 is not reachable and cannot be identified from its prefix alone.",
@@ -297,14 +298,16 @@ def validate(package: Path) -> dict[str, Any]:
         "backend_registered": SCIENTIFIC_BACKENDS.get(FLASK_CORS_BACKEND_ID)
         is build_flask_cors_backend,
         "canonical_json": all(canonical_json.values()),
-        "family_blocked": family.get("blockers") == list(BLOCKERS)
-        and family.get("freeze_status") == "BLOCKED_PROVENANCE_PENDING"
-        and family.get("model_ready") is False,
+        "family_rejected": family.get("blockers") == list(BLOCKERS)
+        and family.get("freeze_status") == REJECTION_STATUS
+        and family.get("model_ready") is False
+        and family.get("regeneration_permitted_within_expansion_attempt") is False,
         "focal_property": transition.get("focal_property") == FOCAL_PROPERTY,
         "invalidated_functional": invalidated_functional["passed"] is True,
         "memory_rejected": memory.get("status")
-        == "REJECTED_INVALID_GENERATION_CHRONOLOGY"
+        == REJECTION_STATUS
         and memory.get("final_treatment_eligible") is False
+        and memory.get("regeneration_permitted_within_expansion_attempt") is False
         and memory.get("replacement_generated") is False,
         "package_inputs": all(package_inputs.values()),
         "policy": policy.writable_paths == ("flask_cors/core.py",)
@@ -324,7 +327,7 @@ def validate(package: Path) -> dict[str, Any]:
     return {
         "blockers": list(BLOCKERS),
         "candidate_id": FAMILY_ID,
-        "decision": "BLOCKED" if scaffolding_pass else "FAIL",
+        "decision": "REJECTED" if scaffolding_pass else "FAIL",
         "executable_scaffolding_pass": scaffolding_pass,
         "family_freeze_permitted": False,
         "freeze_manifest_created": False,
@@ -339,7 +342,7 @@ def validate(package: Path) -> dict[str, Any]:
         "schema": SCHEMA,
         "scaffolding_checks": scaffolding_checks,
         "snapshot_checks": snapshot_checks,
-        "status": "BLOCKED_PROVENANCE_AND_MEMORY_CHRONOLOGY",
+        "status": REJECTION_STATUS,
     }
 
 
@@ -370,7 +373,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     result = validate(arguments.package)
     digest = write_result(arguments.output, result)
     print(json.dumps({"decision": result["decision"], "sha256": digest}, sort_keys=True))
-    return 0 if result["decision"] == "BLOCKED" else 1
+    return 0 if result["decision"] == "REJECTED" else 1
 
 
 if __name__ == "__main__":

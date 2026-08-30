@@ -17,7 +17,12 @@ from cmpilot.flask_cors_backend import (
     FlaskCORSBackendError,
     build_flask_cors_backend,
 )
-from scripts.validate_flask_cors_family import BLOCKERS, SCHEMA, validate
+from scripts.validate_flask_cors_family import (
+    BLOCKERS,
+    REJECTION_STATUS,
+    SCHEMA,
+    validate,
+)
 
 
 ROOT = Path(__file__).parents[1]
@@ -35,11 +40,12 @@ def package(tmp_path: Path) -> Path:
     return destination
 
 
-def test_scaffolding_passes_but_family_remains_blocked(package: Path) -> None:
+def test_scaffolding_passes_but_family_is_rejected(package: Path) -> None:
     result = validate(package)
 
     assert result["schema"] == SCHEMA
-    assert result["decision"] == "BLOCKED"
+    assert result["decision"] == "REJECTED"
+    assert result["status"] == REJECTION_STATUS
     assert result["executable_scaffolding_pass"] is True
     assert result["family_freeze_permitted"] is False
     assert result["freeze_manifest_created"] is False
@@ -61,11 +67,18 @@ def test_scaffolding_passes_but_family_remains_blocked(package: Path) -> None:
 def test_rejected_memory_attempt_cannot_be_treatment(package: Path) -> None:
     status_path = package / "memories/memory-status.json"
     status = json.loads(status_path.read_text(encoding="utf-8"))
+    rejection_path = package / "memories/rejected-attempt-1/rejection.json"
+    rejection = json.loads(rejection_path.read_text(encoding="utf-8"))
 
     assert status_path.read_bytes() == canonical_json_bytes(status)
-    assert status["status"] == "REJECTED_INVALID_GENERATION_CHRONOLOGY"
+    assert status["status"] == REJECTION_STATUS
     assert status["final_treatment_eligible"] is False
+    assert status["regeneration_permitted_within_expansion_attempt"] is False
     assert status["replacement_generated"] is False
+    assert rejection_path.read_bytes() == canonical_json_bytes(rejection)
+    assert rejection["status"] == REJECTION_STATUS
+    assert rejection["regeneration_performed"] is False
+    assert rejection["regeneration_permitted_within_expansion_attempt"] is False
     assert validate(package)["scaffolding_checks"]["memory_rejected"] is True
 
 
