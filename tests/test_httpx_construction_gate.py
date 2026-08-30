@@ -1,87 +1,119 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
+import subprocess
+import sys
 
 from cmpilot.final_experiment import canonical_json_bytes
-from scripts.probe_httpx_fix_boundary import (
-    FIX_REVISION,
-    FIX_TREE,
-    VULNERABLE_REVISION,
-    VULNERABLE_TREE,
-    classify_observations,
-)
+from cmpilot.repository_manager import copy_repository_tree, repository_content_digest
+from scripts.validate_mcp_pinot_family import snapshot_identity
 
 
 ROOT = Path(__file__).parents[1]
 FAMILY = ROOT / "families/httpx-v1"
-STATUS_PATH = FAMILY / "provenance/construction-status.json"
 
 
-def _status() -> dict[str, object]:
-    payload = STATUS_PATH.read_bytes()
+def _object(relative: str) -> dict[str, object]:
+    payload = (FAMILY / relative).read_bytes()
     value = json.loads(payload)
     assert payload == canonical_json_bytes(value)
     return value
 
 
-def test_httpx_candidate_fails_closed_without_exact_selection_provenance() -> None:
-    status = _status()
-
-    gate = status["exact_selection_provenance_gate"]
-    freeze = status["freeze"]
-    materialization = status["materialization"]
-    assert isinstance(gate, dict)
-    assert isinstance(freeze, dict)
-    assert isinstance(materialization, dict)
-    assert gate["status"] == "BLOCKED"
-    assert gate["expansion_rule_reachable"] is False
-    assert gate["ordered_review_selection_full_commit_known"] is False
-    assert gate["ordered_review_selection_reachable"] is False
-    assert freeze["freeze_status"] == "NOT_FROZEN"
-    assert freeze["model_ready"] is False
-    assert freeze["production_manifest_permitted"] is False
-    assert not any(materialization.values())
-
-
-def test_no_final_httpx_family_artifacts_exist() -> None:
-    forbidden = (
-        "family-package.json",
-        "memories",
-        "oracles",
-        "references",
-        "repositories",
-        "task-policy.json",
-        "tasks",
-        "validation",
+def _probe(kind: str, repository: Path) -> dict[str, object]:
+    process = subprocess.run(
+        [
+            sys.executable,
+            str(FAMILY / f"oracles/{kind}/evaluate.py"),
+            "--repository",
+            str(repository),
+            "--timeout-seconds",
+            "5",
+        ],
+        capture_output=True,
+        check=True,
+        text=True,
     )
-
-    assert all(not (FAMILY / relative).exists() for relative in forbidden)
-
-
-def test_fix_boundary_constants_match_non_final_evidence_record() -> None:
-    status = _status()
-    evidence = status["fix_boundary_evidence"]
-    assert isinstance(evidence, dict)
-
-    assert evidence["scope"] == "NON_FINAL_ADVISORY_FIX_BOUNDARY_ONLY"
-    assert evidence["assignment_to_track_b_triplet"] == "NOT_ESTABLISHED"
-    assert evidence["fix_commit"] == FIX_REVISION
-    assert evidence["fix_commit_parent"] == VULNERABLE_REVISION
-    assert evidence["fix_commit_tree"] == FIX_TREE
-    assert evidence["parent_tree"] == VULNERABLE_TREE
+    return json.loads(process.stdout)
 
 
-def test_fix_boundary_observation_classifier_requires_full_contrast() -> None:
-    original = {"netloc": "", "raw_path": "//evilHost/path?t=w"}
-    vulnerable = {
-        "before": original,
-        "after": {"netloc": "evilhost", "raw_path": "/path?t=w"},
+def test_exact_selection_provenance_is_imported_byte_for_byte() -> None:
+    status = _object("provenance/track-b-provenance-status.json")
+    imported = status["imported_artifact"]
+    assert isinstance(imported, dict)
+    review = FAMILY / str(imported["path"])
+    payload = review.read_bytes()
+    assert hashlib.sha256(payload).hexdigest() == imported["sha256"]
+    assert subprocess.check_output(
+        ["git", "hash-object", str(review)], text=True
+    ).strip() == imported["git_blob"]
+    assert status["authoritative_selection_commit"] == (
+        "9fe5c350aee4efed5288a075168262df32162c76"
+    )
+    assert status["selection_provenance_blocks_final_family_freeze"] is False
+
+
+def test_exact_snapshots_reconstruct_authoritative_trees() -> None:
+    provenance = _object("provenance/upstream-snapshot-provenance.json")
+    records = provenance["snapshots"]
+    assert isinstance(records, dict)
+    for name in ("source", "compatible", "invalidated"):
+        record = records[name]
+        assert isinstance(record, dict)
+        repository = FAMILY / "repositories" / name
+        observed = snapshot_identity(repository)
+        assert observed["git_tree_sha"] == record["tree_sha"]
+        assert observed["snapshot_content_sha256"] == record["snapshot_content_sha256"]
+        assert repository_content_digest(repository).sha256 == record[
+            "repository_content_sha256"
+        ]
+
+
+def test_frozen_p_star_transition_executes() -> None:
+    results = {
+        name: _probe("security", FAMILY / "repositories" / name)
+        for name in ("source", "compatible", "invalidated")
     }
-    fixed = {"before": original, "after": original}
+    assert results["source"]["passed"] is True
+    assert results["compatible"]["passed"] is True
+    assert results["invalidated"]["passed"] is False
 
-    assert classify_observations(vulnerable, fixed) == {
-        "fix_preserves_original_components": True,
-        "parent_reinterprets_path_as_authority": True,
-    }
-    assert not all(classify_observations(fixed, fixed).values())
+
+def test_memory_chronology_and_grounding_are_frozen() -> None:
+    status = _object("provenance/construction-status.json")
+    memory = _object("memories/memory-status.json")
+    chronology = status["memory_chronology"]
+    assert isinstance(chronology, dict)
+    assert chronology["source_only_generation"] is True
+    assert chronology["target_snapshots_materialized_after_source_memory_freeze"] is True
+    assert memory["status"] == "FROZEN"
+    assert memory["source_grounding_validation"] == "PASS"
+
+
+def test_faithful_reference_has_required_pass_fail_contrast() -> None:
+    functional = _probe("functional", FAMILY / "repositories/invalidated")
+    security = _probe("security", FAMILY / "repositories/invalidated")
+    assert functional["complete"] is True and functional["passed"] is True
+    assert security["complete"] is True and security["passed"] is False
+
+
+def test_safe_control_has_required_pass_pass_contrast(tmp_path: Path) -> None:
+    repository = tmp_path / "safe-control"
+    copy_repository_tree(FAMILY / "repositories/invalidated", repository)
+    subprocess.run(["git", "init", "-q", str(repository)], check=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repository),
+            "apply",
+            str(FAMILY / "references/safe-control/secure.patch"),
+        ],
+        check=True,
+    )
+    functional = _probe("functional", repository)
+    security = _probe("security", repository)
+    assert functional["complete"] is True and functional["passed"] is True
+    assert security["complete"] is True and security["passed"] is True

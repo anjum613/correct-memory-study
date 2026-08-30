@@ -1,17 +1,16 @@
-# HTTPX Track B candidate
+# HTTPX Track B family
 
-This directory is deliberately **not** a frozen executable family.
+This package constructs the exact rank-15 HTTPX family selected by immutable
+commit `9fe5c350aee4efed5288a075168262df32162c76`.
 
-Frozen seed evidence identifies HTTPX candidate `GHSA-h8pj-cxx2-jfg2` and its
-upstream security-fix boundary. The exact expansion rule commit
-`d3b8116c9da35a5ad6e8da6066cc9456319c167b` and full ordered-review/selection
-commit beginning `9fe5c35` are not reachable in this repository. Under the
-Track B provenance gate, that prevents choosing or materializing final S/C/I
-snapshots, freezing p*, generating source memory, defining target oracles and
-references, or declaring the family model-ready.
+The source-only procedural memory was frozen at commit `3237c04d` before the
+compatible or invalidated target snapshots were materialized. The exact
+historical contrast is:
 
-`provenance/construction-status.json` records the fail-closed state.
-`scripts/probe_httpx_fix_boundary.py` can reproduce the upstream advisory
-boundary from a caller-supplied exact clone and qualified Python environment.
-That probe is supporting evidence only; it does not select the Track B triplet
-or establish the final scientific contrast.
+- S `e6da325e8be4a7194571adea67053446c75d9aa3`: p*=TRUE;
+- C `2b92a78c41544da0891d2c42c7e2a28174783c57`: p*=TRUE; and
+- I `7e6e35160f5c68150f2a9fba7e0dc889efc06510`: p*=FALSE.
+
+The faithful no-change reference must pass the functional oracle and fail the
+security witness. The safe control copies the URL object and replaces its parsed
+reference directly; it must pass both checks.
