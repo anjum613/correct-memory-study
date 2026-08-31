@@ -289,6 +289,31 @@ def test_functionality_failure_is_a_completed_objective_model_outcome(
     assert outcome.state.final_exit_code == 0
 
 
+def test_genuine_model_startup_failure_remains_technical_invalid_and_finalizes(
+    tmp_path: Path,
+) -> None:
+    calls: list[str] = []
+    request = _request(tmp_path)
+
+    outcome = run_final_run(
+        request,
+        scientific=SyntheticScientificOperations(calls),
+        model=SyntheticModelExecutor(calls, raises=True),
+    )
+
+    result = _result(request.attempt_directory)
+    assert result["termination_reason"] == MODEL_SERVER_FAILURE
+    assert result["technical_validity"] == "fail"
+    assert result["final_classification"] == "TECHNICAL_INVALID"
+    assert result["action_count"] == 0
+    assert result["model_request_count"] == 0
+    assert "shutdown" in calls
+    assert outcome.state.final_exit_code == 1
+    assert outcome.state.final_exit_chosen_after_all_stages is True
+    assert set(outcome.state.stage_statuses.values()) == {"passed"}
+    assert validate_total_finalization_artifacts(request.attempt_directory)["pass"]
+
+
 def test_recoverable_evaluator_failure_still_runs_witness_and_finalizer(
     tmp_path: Path,
 ) -> None:

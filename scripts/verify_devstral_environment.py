@@ -57,6 +57,7 @@ from cmpilot.environment_fingerprint import (  # noqa: E402
 
 
 PROFILE_CONFIG = ROOT / "configs/models/devstral-small-2507.json"
+VERIFIER_SUBPROCESS_TIMEOUT_SECONDS = 300
 
 
 def sha256_file(path: Path) -> str:
@@ -76,18 +77,70 @@ def installed_versions() -> dict[str, str]:
     return versions
 
 
-def _command_pass(command: tuple[str, ...]) -> tuple[bool, str]:
-    completed = subprocess.run(
-        command,
-        cwd=ROOT,
-        check=False,
-        capture_output=True,
-        text=True,
-        env={"PYTHONDONTWRITEBYTECODE": "1", "PYTHONNOUSERSITE": "1"},
-        timeout=90,
-    )
-    detail = (completed.stdout + completed.stderr).strip()
-    return completed.returncode == 0, detail
+def _timeout_output(value: str | bytes | None) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return value
+
+
+def _stream_evidence(value: str) -> dict[str, object]:
+    payload = value.encode("utf-8")
+    return {
+        "length_bytes": len(payload),
+        "sha256": hashlib.sha256(payload).hexdigest(),
+    }
+
+
+def _command_pass(
+    command: tuple[str, ...],
+    *,
+    timeout_seconds: int = VERIFIER_SUBPROCESS_TIMEOUT_SECONDS,
+) -> tuple[bool, str, dict[str, object]]:
+    try:
+        completed = subprocess.run(
+            command,
+            cwd=ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+            env={"PYTHONDONTWRITEBYTECODE": "1", "PYTHONNOUSERSITE": "1"},
+            timeout=timeout_seconds,
+        )
+    except subprocess.TimeoutExpired as error:
+        stdout = _timeout_output(error.stdout)
+        stderr = _timeout_output(error.stderr)
+        detail = (stdout + stderr).strip()
+        if not detail:
+            detail = f"TimeoutExpired after {timeout_seconds} seconds"
+        return False, detail, {
+            "argv": list(command),
+            "pass": False,
+            "returncode": None,
+            "stderr": _stream_evidence(stderr),
+            "stdout": _stream_evidence(stdout),
+            "timed_out": True,
+            "timeout": {
+                "exception_type": "TimeoutExpired",
+                "timeout_seconds": timeout_seconds,
+            },
+            "timeout_seconds": timeout_seconds,
+        }
+    stdout = completed.stdout or ""
+    stderr = completed.stderr or ""
+    detail = (stdout + stderr).strip()
+    passed = completed.returncode == 0
+    return passed, detail, {
+        "argv": list(command),
+        "pass": passed,
+        "returncode": completed.returncode,
+        "stderr": _stream_evidence(stderr),
+        "stdout": _stream_evidence(stdout),
+        "timed_out": False,
+        "timeout": None,
+        "timeout_seconds": timeout_seconds,
+    }
 
 
 def _requirements(path: Path) -> list[str]:
@@ -156,23 +209,23 @@ def verification_result() -> dict[str, object]:
     alternative_shards_present = sum(
         (MODEL_SNAPSHOT / name).is_file() for name in ALTERNATIVE_WEIGHT_SHARD_FILES
     )
-    server_pip_check, server_pip_detail = _command_pass(
+    server_pip_check, server_pip_detail, server_pip_evidence = _command_pass(
         (str(SERVER_PYTHON), "-m", "pip", "check")
     )
-    server_freeze, server_freeze_detail = _command_pass(
+    server_freeze, server_freeze_detail, server_freeze_evidence = _command_pass(
         (str(SERVER_PYTHON), "-m", "pip", "freeze", "--all")
     )
-    server_imports, server_import_detail = _command_pass(
+    server_imports, server_import_detail, server_import_evidence = _command_pass(
         (
             str(SERVER_PYTHON),
             "-c",
             "import torch,transformers,tokenizers,mistral_common,vllm,xgrammar,outlines_core",
         )
     )
-    agent_pip_check, agent_pip_detail = _command_pass(
+    agent_pip_check, agent_pip_detail, agent_pip_evidence = _command_pass(
         (str(AGENT_PYTHON), "-m", "pip", "check")
     )
-    agent_freeze, agent_freeze_detail = _command_pass(
+    agent_freeze, agent_freeze_detail, agent_freeze_evidence = _command_pass(
         (str(AGENT_PYTHON), "-m", "pip", "freeze", "--all")
     )
     agent_probe = (
@@ -182,7 +235,7 @@ def verification_result() -> dict[str, object]:
         "print(json.dumps({'prefix':sys.prefix,'python':platform.python_version(),"
         "'versions':{name:version(name) for name in names}}))"
     )
-    agent_imports, agent_import_detail = _command_pass(
+    agent_imports, agent_import_detail, agent_import_evidence = _command_pass(
         (str(AGENT_PYTHON), "-c", agent_probe)
     )
     agent_identity_matches = False
@@ -320,6 +373,14 @@ def verification_result() -> dict[str, object]:
         "agent_pip_detail": agent_pip_detail,
         "staged_file_sha256": staged_hashes,
         "snapshot_files": snapshot_files,
+        "subprocess_evidence": {
+            "agent_freeze": agent_freeze_evidence,
+            "agent_imports": agent_import_evidence,
+            "agent_pip_check": agent_pip_evidence,
+            "server_freeze": server_freeze_evidence,
+            "server_imports": server_import_evidence,
+            "server_pip_check": server_pip_evidence,
+        },
         "runtime_weight": {
             "expected_sha256": EXPECTED_CONSOLIDATED_SHA256,
             "expected_size": EXPECTED_CONSOLIDATED_SIZE,

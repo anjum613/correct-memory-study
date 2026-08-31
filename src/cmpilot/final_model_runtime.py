@@ -37,6 +37,7 @@ from .devstral_profile import (
     MODEL_REVISION as DEVSTRAL_MODEL_REVISION,
     SNAPSHOT_FREEZE_SHA256,
     SNAPSHOT_IDENTITY_SHA256,
+    devstral_runtime_amendment_record,
 )
 from .experiment_models import ModelProfile, QWEN32B_PROFILE
 from .final_experiment import (
@@ -88,7 +89,10 @@ QWEN_SERVICE_SCHEMA = "cmpilot-final-qwen32b-service-v1"
 DEVSTRAL_SERVICE_SCHEMA = "cmpilot-final-devstral-service-v1"
 QWEN_FROZEN_STEP_LIMIT = 15
 QWEN_AGENT_TIMEOUT_SECONDS = 600
-QWEN_SERVER_STARTUP_TIMEOUT_SECONDS = 600
+POST_LAUNCH_HEALTH_TIMEOUT_SECONDS = 600
+QWEN_SERVER_STARTUP_TIMEOUT_SECONDS = POST_LAUNCH_HEALTH_TIMEOUT_SECONDS
+QWEN_GPU_ALLOCATION_PROBE_TIMEOUT_SECONDS = 30
+DEVSTRAL_GPU_ALLOCATION_PROBE_TIMEOUT_SECONDS = 300
 
 _BASE_GENERATED_RUNTIME_NAMES = (
     "mini_swe_adapter.py",
@@ -626,6 +630,32 @@ def _run_checked(
     )
 
 
+def _timeout_output(value: str | bytes | None) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return value
+
+
+def _timeout_evidence(
+    error: subprocess.TimeoutExpired, *, timeout_seconds: int
+) -> dict[str, Any]:
+    command = error.cmd
+    argv = (
+        [command]
+        if isinstance(command, str)
+        else [str(item) for item in command]
+    )
+    return {
+        "argv": argv,
+        "exception_type": "TimeoutExpired",
+        "stderr": _timeout_output(error.stderr),
+        "stdout": _timeout_output(error.stdout),
+        "timeout_seconds": timeout_seconds,
+    }
+
+
 def _attest_qwen_runtime(
     profile: ModelProfile,
     *,
@@ -798,6 +828,7 @@ def _inspect_a100_allocation(
     server_python: Path,
     tensor_parallel_size: int,
     environment: Mapping[str, str],
+    timeout_seconds: int = QWEN_GPU_ALLOCATION_PROBE_TIMEOUT_SECONDS,
 ) -> Mapping[str, Any]:
     torch_command = (
         str(server_python),
@@ -814,43 +845,79 @@ def _inspect_a100_allocation(
         "--query-gpu=index,name,uuid,memory.total,memory.used,memory.free",
         "--format=csv,noheader,nounits",
     )
-    torch_result = _run_checked(torch_command, environment=environment, timeout=30)
-    nvidia_result = _run_checked(
-        nvidia_command, environment=environment, timeout=30
-    )
+    torch_timeout: dict[str, Any] | None = None
+    nvidia_timeout: dict[str, Any] | None = None
     try:
-        visible = json.loads(torch_result.stdout)
+        torch_result = _run_checked(
+            torch_command,
+            environment=environment,
+            timeout=timeout_seconds,
+        )
+    except subprocess.TimeoutExpired as error:
+        torch_result = None
+        torch_timeout = _timeout_evidence(
+            error, timeout_seconds=timeout_seconds
+        )
+    try:
+        nvidia_result = _run_checked(
+            nvidia_command,
+            environment=environment,
+            timeout=timeout_seconds,
+        )
+    except subprocess.TimeoutExpired as error:
+        nvidia_result = None
+        nvidia_timeout = _timeout_evidence(
+            error, timeout_seconds=timeout_seconds
+        )
+    try:
+        visible = (
+            json.loads(torch_result.stdout) if torch_result is not None else {}
+        )
     except (json.JSONDecodeError, TypeError):
         visible = {}
     count = visible.get("count") if isinstance(visible, dict) else None
     names = visible.get("names") if isinstance(visible, dict) else None
     nvidia_rows = [
-        row.strip() for row in nvidia_result.stdout.splitlines() if row.strip()
+        row.strip()
+        for row in (
+            nvidia_result.stdout if nvidia_result is not None else ""
+        ).splitlines()
+        if row.strip()
     ]
     passed = (
-        torch_result.returncode == 0
+        torch_result is not None
+        and nvidia_result is not None
+        and torch_result.returncode == 0
         and count == tensor_parallel_size
         and isinstance(names, list)
         and len(names) == tensor_parallel_size
         and all(isinstance(name, str) and "A100" in name for name in names)
     )
+    nvidia_record: dict[str, Any] = {
+        "command": list(nvidia_command),
+        "returncode": (
+            nvidia_result.returncode if nvidia_result is not None else None
+        ),
+        "rows": nvidia_rows,
+        "stderr": nvidia_result.stderr if nvidia_result is not None else "",
+    }
+    if nvidia_timeout is not None:
+        nvidia_record["timeout"] = nvidia_timeout
+    torch_record: dict[str, Any] = {
+        "command": list(torch_command),
+        "count": count,
+        "names": names,
+        "returncode": torch_result.returncode if torch_result is not None else None,
+        "stderr": torch_result.stderr if torch_result is not None else "",
+    }
+    if torch_timeout is not None:
+        torch_record["timeout"] = torch_timeout
     return {
         "cuda_visible_devices": environment.get("CUDA_VISIBLE_DEVICES"),
         "expected_gpu_count": tensor_parallel_size,
-        "nvidia_smi": {
-            "command": list(nvidia_command),
-            "returncode": nvidia_result.returncode,
-            "rows": nvidia_rows,
-            "stderr": nvidia_result.stderr,
-        },
+        "nvidia_smi": nvidia_record,
         "pass": passed,
-        "torch_visible_allocation": {
-            "command": list(torch_command),
-            "count": count,
-            "names": names,
-            "returncode": torch_result.returncode,
-            "stderr": torch_result.stderr,
-        },
+        "torch_visible_allocation": torch_record,
     }
 
 
@@ -905,6 +972,8 @@ class _ProfileModelService:
     runtime_attestor_default: Callable[..., Mapping[str, Any]]
     service_schema: str
     shutdown_schema: str
+    gpu_probe_timeout_seconds = QWEN_GPU_ALLOCATION_PROBE_TIMEOUT_SECONDS
+    technical_runtime_record: Callable[[Path], Mapping[str, Any]] | None = None
 
     def __init__(
         self,
@@ -988,6 +1057,12 @@ class _ProfileModelService:
             slurm_job_id=slurm_job_id, attempt_id=attempt_id
         )
         started = self.monotonic()
+        phase_durations: dict[str, float | None] = {
+            "gpu_inspection": None,
+            "runtime_attestation": None,
+            "process_launch": None,
+            "post_launch_health_wait": None,
+        }
         startup_record: dict[str, Any] = {
             "base_url": f"http://127.0.0.1:{port}/v1",
             "pass": False,
@@ -997,8 +1072,17 @@ class _ProfileModelService:
             "attempt_id": attempt_id,
             "runtime_owner_id": runtime_owner_id,
             "slurm_job_id": slurm_job_id,
+            "phase_durations_seconds": phase_durations,
+            "timeout_budgets_seconds": {
+                "gpu_allocation_probe": self.gpu_probe_timeout_seconds,
+                "post_launch_health": POST_LAUNCH_HEALTH_TIMEOUT_SECONDS,
+            },
         }
         try:
+            if self.technical_runtime_record is not None:
+                startup_record["technical_runtime_amendment"] = dict(
+                    self.technical_runtime_record(self.project_root)
+                )
             # This is an early diagnostic only.  It cannot eliminate the bind
             # TOCTOU; vLLM's own preserved bind/startup result is authoritative.
             if not self.port_available(port):
@@ -1029,29 +1113,55 @@ class _ProfileModelService:
                 attempt / "runtime-scratch-preparation.json", preparation
             )
             environment = self._server_environment(self.runtime_path)
-            gpu = self.gpu_inspector(
-                server_python=self.profile.environment.server_python,
-                tensor_parallel_size=self.profile.server.tensor_parallel_size,
-                environment=environment,
-            )
+            phase_started = self.monotonic()
+            try:
+                gpu_arguments: dict[str, Any] = {
+                    "server_python": self.profile.environment.server_python,
+                    "tensor_parallel_size": (
+                        self.profile.server.tensor_parallel_size
+                    ),
+                    "environment": environment,
+                }
+                if (
+                    self.gpu_probe_timeout_seconds
+                    != QWEN_GPU_ALLOCATION_PROBE_TIMEOUT_SECONDS
+                ):
+                    gpu_arguments["timeout_seconds"] = (
+                        self.gpu_probe_timeout_seconds
+                    )
+                gpu = self.gpu_inspector(**gpu_arguments)
+            finally:
+                phase_durations["gpu_inspection"] = (
+                    self.monotonic() - phase_started
+                )
             write_new_canonical_json(attempt / "gpu-allocation.json", gpu)
             if gpu.get("pass") is not True:
                 raise FinalModelRuntimeError("allocated GPUs do not match 2 x A100")
-            integrity = self.runtime_attestor(
-                self.profile,
-                project_root=self.project_root,
-                attempt=attempt,
-                environment=environment,
-            )
+            phase_started = self.monotonic()
+            try:
+                integrity = self.runtime_attestor(
+                    self.profile,
+                    project_root=self.project_root,
+                    attempt=attempt,
+                    environment=environment,
+                )
+            finally:
+                phase_durations["runtime_attestation"] = (
+                    self.monotonic() - phase_started
+                )
             if integrity.get("pass") is not True:
                 raise FinalModelRuntimeError(
                     f"{self.model_label} runtime attestation failed"
                 )
             argv = self.profile.server_argv(port=port)
             write_new_canonical_json(attempt / "server-command.json", list(argv))
-            stdout_handle = (attempt / "server.stdout").open("xb")
-            stderr_handle = (attempt / "server.stderr").open("xb")
+            phase_started = self.monotonic()
+            stdout_handle = None
+            stderr_handle = None
+            post_launch_health_started: float | None = None
             try:
+                stdout_handle = (attempt / "server.stdout").open("xb")
+                stderr_handle = (attempt / "server.stderr").open("xb")
                 self.process = self.process_factory(
                     argv,
                     cwd=self.project_root,
@@ -1060,27 +1170,47 @@ class _ProfileModelService:
                     stderr=stderr_handle,
                     start_new_session=True,
                 )
+                post_launch_health_started = self.monotonic()
             finally:
-                stdout_handle.close()
-                stderr_handle.close()
-            _write_new_text(attempt / "server.pid", f"{self.process.pid}\n")
-            deadline = started + QWEN_SERVER_STARTUP_TIMEOUT_SECONDS
-            health = HealthProbe(False, None, "not yet probed", None)
-            base = f"http://127.0.0.1:{port}"
-            while self.monotonic() < deadline:
-                if self.process.poll() is not None:
-                    raise FinalModelRuntimeError(
-                        f"{self.model_label} vLLM server exited during startup: "
-                        f"{self.process.poll()}"
-                    )
-                health = self.health_probe(base)
-                if health.ok:
-                    break
-                self.sleeper(1.0)
-            else:
-                raise FinalModelRuntimeError(
-                    f"{self.model_label} vLLM health timeout: {health.diagnostic}"
+                if stdout_handle is not None:
+                    stdout_handle.close()
+                if stderr_handle is not None:
+                    stderr_handle.close()
+                phase_durations["process_launch"] = (
+                    self.monotonic() - phase_started
                 )
+            if post_launch_health_started is None:  # pragma: no cover - Popen raised
+                raise FinalModelRuntimeError("vLLM process launch timestamp is missing")
+            _write_new_text(attempt / "server.pid", f"{self.process.pid}\n")
+            deadline = (
+                post_launch_health_started + POST_LAUNCH_HEALTH_TIMEOUT_SECONDS
+            )
+            health = HealthProbe(False, None, "not yet probed", None)
+            health_probe_count = 0
+            base = f"http://127.0.0.1:{port}"
+            try:
+                while True:
+                    if self.process.poll() is not None:
+                        raise FinalModelRuntimeError(
+                            f"{self.model_label} vLLM server exited during startup: "
+                            f"{self.process.poll()}"
+                        )
+                    health = self.health_probe(base)
+                    health_probe_count += 1
+                    if health.ok:
+                        break
+                    remaining = deadline - self.monotonic()
+                    if remaining <= 0:
+                        raise FinalModelRuntimeError(
+                            f"{self.model_label} vLLM health timeout: "
+                            f"{health.diagnostic}"
+                        )
+                    self.sleeper(min(1.0, remaining))
+            finally:
+                phase_durations["post_launch_health_wait"] = (
+                    self.monotonic() - post_launch_health_started
+                )
+                startup_record["health_probe_count"] = health_probe_count
             write_new_canonical_json(
                 attempt / "server-health.json",
                 {
@@ -1222,6 +1352,8 @@ class DevstralModelService(_ProfileModelService):
     runtime_attestor_default = staticmethod(_attest_devstral_runtime)
     service_schema = DEVSTRAL_SERVICE_SCHEMA
     shutdown_schema = "cmpilot-final-devstral-shutdown-v1"
+    gpu_probe_timeout_seconds = DEVSTRAL_GPU_ALLOCATION_PROBE_TIMEOUT_SECONDS
+    technical_runtime_record = staticmethod(devstral_runtime_amendment_record)
 
 
 class _ProfileFinalModelExecutor:

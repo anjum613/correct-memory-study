@@ -211,6 +211,29 @@ PRODUCTION_PROFILE_FILES = (
     ),
 )
 
+# The frozen model-profile identity above is part of each already-frozen family
+# manifest and therefore remains byte-for-byte unchanged.  This separate,
+# pre-rerun technical binding replaces only the verifier implementation used by
+# the runtime gate.  The clean project commit and amendment record bind the
+# corrected infrastructure without changing the model or generation identity.
+TECHNICAL_RUNTIME_AMENDMENT_ID = "devstral-startup-pre-rerun-v1"
+TECHNICAL_RUNTIME_AMENDMENT_SCHEMA = (
+    "cmpilot-devstral-pre-rerun-technical-amendment-v1"
+)
+TECHNICAL_RUNTIME_AMENDMENT_PATH = Path(
+    "docs/methodology/devstral-startup-pre-rerun-technical-amendment-v1.json"
+)
+ENVIRONMENT_VERIFIER_PATH = Path("scripts/verify_devstral_environment.py")
+AMENDED_ENVIRONMENT_VERIFIER_SHA256 = (
+    "f0b578694f1ec6e13eddd1ea04fbbe9a0fb7d52dfa6ce266cb67cc80dc2da746"
+)
+TECHNICAL_RUNTIME_PROFILE_FILES = tuple(
+    FrozenProjectFile(item.relative_path, AMENDED_ENVIRONMENT_VERIFIER_SHA256)
+    if item.relative_path == ENVIRONMENT_VERIFIER_PATH
+    else item
+    for item in PRODUCTION_PROFILE_FILES
+)
+
 SERVER_SETTINGS = ServerSettings(
     dtype="bfloat16",
     tensor_parallel_size=2,
@@ -533,6 +556,88 @@ def _load_exact_json(path: Path, *, expected_sha256: str) -> dict[str, object]:
     return value
 
 
+def _load_technical_runtime_amendment(
+    project_root: Path,
+) -> tuple[Path, dict[str, object]]:
+    root = Path(project_root).resolve(strict=True)
+    candidate = root / TECHNICAL_RUNTIME_AMENDMENT_PATH
+    if candidate.is_symlink() or not candidate.is_file():
+        raise DevstralProfileError(
+            "Devstral technical amendment is missing or unsafe"
+        )
+    path = candidate.resolve(strict=True)
+    try:
+        path.relative_to(root)
+    except ValueError as error:
+        raise DevstralProfileError(
+            "Devstral technical amendment escapes the project root"
+        ) from error
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise DevstralProfileError(
+            "Devstral technical amendment is not valid JSON"
+        ) from error
+    if not isinstance(value, dict):
+        raise DevstralProfileError(
+            "Devstral technical amendment must be a JSON object"
+        )
+    correction = value.get("correction")
+    scientific_inputs = value.get("scientific_inputs")
+    technical_files = value.get("technical_files")
+    verifier = (
+        technical_files.get(ENVIRONMENT_VERIFIER_PATH.as_posix())
+        if isinstance(technical_files, dict)
+        else None
+    )
+    if (
+        value.get("schema") != TECHNICAL_RUNTIME_AMENDMENT_SCHEMA
+        or value.get("amendment_id") != TECHNICAL_RUNTIME_AMENDMENT_ID
+        or value.get("affected_slurm_array_job_id") != "29552"
+        or value.get("frozen_model_profile_sha256")
+        != "67b76bfa32b0a32bdf5b2e95b97283dff39a29457839664752f1e635764883b0"
+        or not isinstance(correction, dict)
+        or correction.get("devstral_gpu_probe_timeout_seconds") != 300
+        or correction.get("devstral_verifier_subprocess_timeout_seconds") != 300
+        or correction.get("post_launch_health_timeout_seconds") != 600
+        or correction.get("post_launch_health_deadline_anchor")
+        != "immediately_after_successful_popen"
+        or not isinstance(scientific_inputs, dict)
+        or scientific_inputs.get("status") != "UNCHANGED"
+        or not isinstance(verifier, dict)
+        or verifier.get("after_sha256")
+        != AMENDED_ENVIRONMENT_VERIFIER_SHA256
+    ):
+        raise DevstralProfileError(
+            "Devstral technical amendment does not match the pre-rerun correction"
+        )
+    return path, value
+
+
+def devstral_runtime_amendment_record(
+    project_root: Path,
+) -> dict[str, object]:
+    """Return the project-commit-bound technical identity used at startup."""
+
+    root = Path(project_root).resolve(strict=True)
+    amendment_path, _ = _load_technical_runtime_amendment(root)
+    verified_files = [item.verify(root) for item in TECHNICAL_RUNTIME_PROFILE_FILES]
+    return {
+        "active_profile_files": [
+            {"path": item.relative_path.as_posix(), "sha256": item.sha256}
+            for item in TECHNICAL_RUNTIME_PROFILE_FILES
+        ],
+        "amendment_id": TECHNICAL_RUNTIME_AMENDMENT_ID,
+        "amendment_path": TECHNICAL_RUNTIME_AMENDMENT_PATH.as_posix(),
+        "amendment_sha256": _sha256_file(amendment_path),
+        "frozen_model_profile_sha256": (
+            DEVSTRAL_PRODUCTION_PROFILE.identity_sha256()
+        ),
+        "schema": "cmpilot-devstral-runtime-amendment-binding-v1",
+        "verified_file_count": len(verified_files),
+    }
+
+
 def verify_devstral_production_qualification(project_root: Path) -> tuple[Path, ...]:
     """Verify the frozen profile and already-passed technical qualification.
 
@@ -542,7 +647,8 @@ def verify_devstral_production_qualification(project_root: Path) -> tuple[Path, 
     """
 
     root = Path(project_root).resolve(strict=True)
-    verified = [item.verify(root) for item in PRODUCTION_PROFILE_FILES]
+    amendment_path, _ = _load_technical_runtime_amendment(root)
+    verified = [item.verify(root) for item in TECHNICAL_RUNTIME_PROFILE_FILES]
     freeze_path = FrozenProjectFile(
         SNAPSHOT_FREEZE, SNAPSHOT_FREEZE_SHA256
     ).verify(root)
@@ -637,6 +743,7 @@ def verify_devstral_production_qualification(project_root: Path) -> tuple[Path, 
         verified.append(executable.resolve(strict=True))
     return (
         *verified,
+        amendment_path,
         freeze_path,
         TECHNICAL_SMOKE_RESULT.resolve(strict=True),
         TECHNICAL_SMOKE_ENVIRONMENT_VERIFICATION.resolve(strict=True),
@@ -738,6 +845,7 @@ __all__ = [
     "AGENT_ENVIRONMENT_ID",
     "AGENT_ENVIRONMENT_PATH",
     "AGENT_PYTHON",
+    "AMENDED_ENVIRONMENT_VERIFIER_SHA256",
     "CANDIDATE_AGENT_LOCK",
     "CANDIDATE_AGENT_LOCK_SHA256",
     "CANDIDATE_AGENT_FREEZE",
@@ -758,6 +866,7 @@ __all__ = [
     "DevstralProductionModelProfile",
     "DevstralProfileError",
     "ENVIRONMENT_ID",
+    "ENVIRONMENT_VERIFIER_PATH",
     "ENVIRONMENT_PATH",
     "ENVIRONMENT_CONTENT_DIGEST_SHA256",
     "ENVIRONMENT_CONTENT_DISTRIBUTIONS",
@@ -786,8 +895,13 @@ __all__ = [
     "TECHNICAL_SMOKE_JOB_ID",
     "TECHNICAL_SMOKE_RESULT",
     "TECHNICAL_SMOKE_RESULT_SHA256",
+    "TECHNICAL_RUNTIME_AMENDMENT_ID",
+    "TECHNICAL_RUNTIME_AMENDMENT_PATH",
+    "TECHNICAL_RUNTIME_AMENDMENT_SCHEMA",
+    "TECHNICAL_RUNTIME_PROFILE_FILES",
     "VerifiedDevstralIdentity",
     "build_devstral_server_argv",
+    "devstral_runtime_amendment_record",
     "normalize_package_name",
     "validate_candidate_agent_environment",
     "validate_candidate_environment",

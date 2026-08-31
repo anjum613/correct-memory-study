@@ -12,6 +12,7 @@ from cmpilot.calculator_finalizer import (
 from cmpilot import devstral_profile
 from cmpilot.devstral_profile import (
     AGENT_PYTHON,
+    AMENDED_ENVIRONMENT_VERIFIER_SHA256,
     DEVSTRAL_PRODUCTION_PROFILE,
     EXPECTED_CONSOLIDATED_SHA256,
     EXPECTED_CONSOLIDATED_SIZE,
@@ -19,6 +20,9 @@ from cmpilot.devstral_profile import (
     MODEL_REVISION as DEVSTRAL_MODEL_REVISION,
     SNAPSHOT_FREEZE_SHA256,
     SNAPSHOT_IDENTITY_SHA256,
+    TECHNICAL_RUNTIME_AMENDMENT_ID,
+    TECHNICAL_RUNTIME_PROFILE_FILES,
+    devstral_runtime_amendment_record,
     verify_devstral_production_qualification,
 )
 from cmpilot.experiment_models import (
@@ -252,6 +256,27 @@ def test_devstral_production_profile_rejects_missing_or_wrong_freeze(
     monkeypatch.setattr(devstral_profile, "SNAPSHOT_FREEZE_SHA256", "0" * 64)
     with pytest.raises(ModelProfileError, match="frozen project input changed"):
         verify_devstral_production_qualification(ROOT)
+
+
+def test_devstral_technical_amendment_preserves_frozen_model_profile() -> None:
+    record = DEVSTRAL_PRODUCTION_PROFILE.final_experiment_record(step_limit=15)
+    amendment = devstral_runtime_amendment_record(ROOT)
+    active_verifier = next(
+        item
+        for item in TECHNICAL_RUNTIME_PROFILE_FILES
+        if item.relative_path.as_posix()
+        == "scripts/verify_devstral_environment.py"
+    )
+
+    assert record["profile_sha256"] == (
+        "67b76bfa32b0a32bdf5b2e95b97283dff39a29457839664752f1e635764883b0"
+    )
+    assert record["generation_parameters_sha256"] == (
+        "b8485f5f8fc2572154e1284e0ef05df23b17b4f8d293bad8d4078b0d08b5e705"
+    )
+    assert active_verifier.sha256 == AMENDED_ENVIRONMENT_VERIFIER_SHA256
+    assert amendment["amendment_id"] == TECHNICAL_RUNTIME_AMENDMENT_ID
+    assert amendment["frozen_model_profile_sha256"] == record["profile_sha256"]
 
 
 @pytest.mark.parametrize(

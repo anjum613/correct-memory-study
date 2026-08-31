@@ -22,6 +22,7 @@ from cmpilot.devstral_profile import (
 )
 from cmpilot.qualification import MODEL_SNAPSHOT as QWEN_MODEL_SNAPSHOT
 from cmpilot.qualification import VLLM_PYTHON as QWEN_VLLM_PYTHON
+from scripts import verify_devstral_environment
 
 
 ROOT = Path(__file__).parents[1]
@@ -77,6 +78,38 @@ def test_exact_transitive_freezes_are_hash_bound() -> None:
     ).hexdigest() == CANDIDATE_AGENT_FREEZE_SHA256
 
 
+def test_verifier_timeout_expired_is_structured_not_raised(
+    monkeypatch,
+) -> None:
+    command = (str(SERVER_PYTHON), "-m", "pip", "check")
+
+    def timeout_run(argv, **kwargs):
+        assert tuple(argv) == command
+        assert kwargs["timeout"] == 300
+        raise subprocess.TimeoutExpired(
+            argv,
+            kwargs["timeout"],
+            output=b"partial stdout",
+            stderr=b"cold Ceph metadata wait",
+        )
+
+    monkeypatch.setattr(verify_devstral_environment.subprocess, "run", timeout_run)
+    passed, detail, evidence = verify_devstral_environment._command_pass(command)
+
+    assert passed is False
+    assert detail == "partial stdoutcold Ceph metadata wait"
+    assert evidence["argv"] == list(command)
+    assert evidence["pass"] is False
+    assert evidence["returncode"] is None
+    assert evidence["timed_out"] is True
+    assert evidence["timeout"] == {
+        "exception_type": "TimeoutExpired",
+        "timeout_seconds": 300,
+    }
+    assert evidence["stdout"]["length_bytes"] == len("partial stdout")
+    assert evidence["stderr"]["length_bytes"] == len("cold Ceph metadata wait")
+
+
 def test_environment_verifier_accepts_only_the_frozen_complete_snapshot() -> None:
     completed = subprocess.run(
         (str(SERVER_PYTHON), str(ROOT / "scripts/verify_devstral_environment.py")),
@@ -104,6 +137,10 @@ def test_environment_verifier_accepts_only_the_frozen_complete_snapshot() -> Non
     assert result["checks"]["snapshot_required_files_exist"] is True
     assert result["checks"]["runtime_weight_identity"] is True
     assert result["checks"]["snapshot_identity_frozen"] is True
+    assert all(
+        observation["timed_out"] is False
+        for observation in result["subprocess_evidence"].values()
+    )
     assert result["snapshot_freeze"]["status"] == "READY"
     assert result["snapshot_files"]["consolidated.safetensors"] is True
     assert result["alternative_index"]["present_shards"] == 0
