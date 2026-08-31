@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 import subprocess
 
+import pytest
+
 from cmpilot.devstral_profile import (
     AGENT_ENVIRONMENT_PATH,
     AGENT_PYTHON,
@@ -22,6 +24,7 @@ from cmpilot.devstral_profile import (
 )
 from cmpilot.qualification import MODEL_SNAPSHOT as QWEN_MODEL_SNAPSHOT
 from cmpilot.qualification import VLLM_PYTHON as QWEN_VLLM_PYTHON
+from scripts import verify_devstral_environment as verifier
 
 
 ROOT = Path(__file__).parents[1]
@@ -107,3 +110,39 @@ def test_environment_verifier_accepts_only_the_frozen_complete_snapshot() -> Non
     assert result["snapshot_freeze"]["status"] == "READY"
     assert result["snapshot_files"]["consolidated.safetensors"] is True
     assert result["alternative_index"]["present_shards"] == 0
+
+
+def test_verifier_timeout_is_preserved_as_structured_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    command = (str(SERVER_PYTHON), "-m", "pip", "check")
+    calls: list[tuple[str, ...]] = []
+
+    def timeout_run(argv, **kwargs):
+        calls.append(tuple(argv))
+        assert kwargs["timeout"] == verifier.DEVSTRAL_VERIFIER_SUBPROCESS_TIMEOUT_SECONDS
+        raise subprocess.TimeoutExpired(
+            argv,
+            kwargs["timeout"],
+            output=b"partial pip output",
+            stderr=b"cold Ceph metadata walk",
+        )
+
+    monkeypatch.setattr(verifier.subprocess, "run", timeout_run)
+
+    passed, detail, evidence = verifier._command_pass(command)
+
+    assert passed is False
+    assert detail == "partial pip outputcold Ceph metadata walk"
+    assert calls == [command]
+    assert evidence["command"] == list(command)
+    assert evidence["returncode"] is None
+    assert evidence["timeout"] == {
+        "error_type": "TimeoutExpired",
+        "expired": True,
+        "seconds": verifier.DEVSTRAL_VERIFIER_SUBPROCESS_TIMEOUT_SECONDS,
+    }
+    assert evidence["stdout"] == {
+        "length": len(b"partial pip output"),
+        "sha256": "96688638f1378531c542a22cdde23010524aa4465aeb6fde729221f891cd38d4",
+    }

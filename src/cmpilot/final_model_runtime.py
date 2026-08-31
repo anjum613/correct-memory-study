@@ -88,7 +88,13 @@ QWEN_SERVICE_SCHEMA = "cmpilot-final-qwen32b-service-v1"
 DEVSTRAL_SERVICE_SCHEMA = "cmpilot-final-devstral-service-v1"
 QWEN_FROZEN_STEP_LIMIT = 15
 QWEN_AGENT_TIMEOUT_SECONDS = 600
-QWEN_SERVER_STARTUP_TIMEOUT_SECONDS = 600
+POST_LAUNCH_HEALTH_TIMEOUT_SECONDS = 600
+# Compatibility alias: the frozen value is unchanged, but it now applies only
+# after Popen returns successfully.
+QWEN_SERVER_STARTUP_TIMEOUT_SECONDS = POST_LAUNCH_HEALTH_TIMEOUT_SECONDS
+QWEN_GPU_ALLOCATION_PROBE_TIMEOUT_SECONDS = 30
+DEVSTRAL_GPU_ALLOCATION_PROBE_TIMEOUT_SECONDS = 300
+DEVSTRAL_RUNTIME_ATTESTATION_TIMEOUT_SECONDS = 1800
 
 _BASE_GENERATED_RUNTIME_NAMES = (
     "mini_swe_adapter.py",
@@ -626,6 +632,26 @@ def _run_checked(
     )
 
 
+def _subprocess_output_text(value: str | bytes | None) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return value
+
+
+def _timeout_evidence(
+    error: subprocess.TimeoutExpired | None, *, timeout_seconds: int
+) -> dict[str, Any]:
+    evidence: dict[str, Any] = {
+        "expired": error is not None,
+        "seconds": timeout_seconds,
+    }
+    if error is not None:
+        evidence["error_type"] = "TimeoutExpired"
+    return evidence
+
+
 def _attest_qwen_runtime(
     profile: ModelProfile,
     *,
@@ -764,7 +790,37 @@ def _attest_devstral_runtime(
         "--output",
         str(verification_path),
     )
-    result = _run_checked(command_line, environment=environment, timeout=1800)
+    try:
+        result = _run_checked(
+            command_line,
+            environment=environment,
+            timeout=DEVSTRAL_RUNTIME_ATTESTATION_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as error:
+        stdout = _subprocess_output_text(error.stdout)
+        stderr = _subprocess_output_text(error.stderr)
+        write_new_canonical_json(
+            attempt / "runtime-attestation-commands.json", [list(command_line)]
+        )
+        _write_new_text(attempt / "runtime-attestation.stdout", stdout)
+        _write_new_text(attempt / "runtime-attestation.stderr", stderr)
+        write_new_canonical_json(
+            attempt / "runtime-attestation-timeout.json",
+            {
+                "command": list(command_line),
+                "phase": "runtime_attestation",
+                "stderr": stderr,
+                "stdout": stdout,
+                "timeout": _timeout_evidence(
+                    error,
+                    timeout_seconds=DEVSTRAL_RUNTIME_ATTESTATION_TIMEOUT_SECONDS,
+                ),
+            },
+        )
+        raise FinalModelRuntimeError(
+            "Devstral environment verifier exceeded the fixed "
+            f"{DEVSTRAL_RUNTIME_ATTESTATION_TIMEOUT_SECONDS}-second outer bound"
+        ) from error
     write_new_canonical_json(
         attempt / "runtime-attestation-commands.json", [list(command_line)]
     )
@@ -798,6 +854,7 @@ def _inspect_a100_allocation(
     server_python: Path,
     tensor_parallel_size: int,
     environment: Mapping[str, str],
+    timeout_seconds: int = QWEN_GPU_ALLOCATION_PROBE_TIMEOUT_SECONDS,
 ) -> Mapping[str, Any]:
     torch_command = (
         str(server_python),
@@ -814,21 +871,43 @@ def _inspect_a100_allocation(
         "--query-gpu=index,name,uuid,memory.total,memory.used,memory.free",
         "--format=csv,noheader,nounits",
     )
-    torch_result = _run_checked(torch_command, environment=environment, timeout=30)
-    nvidia_result = _run_checked(
-        nvidia_command, environment=environment, timeout=30
-    )
+    torch_timeout: subprocess.TimeoutExpired | None = None
+    nvidia_timeout: subprocess.TimeoutExpired | None = None
     try:
-        visible = json.loads(torch_result.stdout)
+        torch_result = _run_checked(
+            torch_command,
+            environment=environment,
+            timeout=timeout_seconds,
+        )
+    except subprocess.TimeoutExpired as error:
+        torch_result = None
+        torch_timeout = error
+    try:
+        nvidia_result = _run_checked(
+            nvidia_command,
+            environment=environment,
+            timeout=timeout_seconds,
+        )
+    except subprocess.TimeoutExpired as error:
+        nvidia_result = None
+        nvidia_timeout = error
+    try:
+        visible = json.loads(torch_result.stdout) if torch_result is not None else {}
     except (json.JSONDecodeError, TypeError):
         visible = {}
     count = visible.get("count") if isinstance(visible, dict) else None
     names = visible.get("names") if isinstance(visible, dict) else None
     nvidia_rows = [
-        row.strip() for row in nvidia_result.stdout.splitlines() if row.strip()
+        row.strip()
+        for row in (
+            nvidia_result.stdout if nvidia_result is not None else ""
+        ).splitlines()
+        if row.strip()
     ]
     passed = (
-        torch_result.returncode == 0
+        torch_result is not None
+        and torch_result.returncode == 0
+        and nvidia_timeout is None
         and count == tensor_parallel_size
         and isinstance(names, list)
         and len(names) == tensor_parallel_size
@@ -839,17 +918,53 @@ def _inspect_a100_allocation(
         "expected_gpu_count": tensor_parallel_size,
         "nvidia_smi": {
             "command": list(nvidia_command),
-            "returncode": nvidia_result.returncode,
+            "returncode": (
+                nvidia_result.returncode if nvidia_result is not None else None
+            ),
             "rows": nvidia_rows,
-            "stderr": nvidia_result.stderr,
+            "stderr": (
+                nvidia_result.stderr
+                if nvidia_result is not None
+                else _subprocess_output_text(
+                    nvidia_timeout.stderr if nvidia_timeout is not None else None
+                )
+            ),
+            "stdout": (
+                ""
+                if nvidia_result is not None
+                else _subprocess_output_text(
+                    nvidia_timeout.stdout if nvidia_timeout is not None else None
+                )
+            ),
+            "timeout": _timeout_evidence(
+                nvidia_timeout, timeout_seconds=timeout_seconds
+            ),
         },
         "pass": passed,
         "torch_visible_allocation": {
             "command": list(torch_command),
             "count": count,
             "names": names,
-            "returncode": torch_result.returncode,
-            "stderr": torch_result.stderr,
+            "returncode": (
+                torch_result.returncode if torch_result is not None else None
+            ),
+            "stderr": (
+                torch_result.stderr
+                if torch_result is not None
+                else _subprocess_output_text(
+                    torch_timeout.stderr if torch_timeout is not None else None
+                )
+            ),
+            "stdout": (
+                ""
+                if torch_result is not None
+                else _subprocess_output_text(
+                    torch_timeout.stdout if torch_timeout is not None else None
+                )
+            ),
+            "timeout": _timeout_evidence(
+                torch_timeout, timeout_seconds=timeout_seconds
+            ),
         },
     }
 
@@ -905,6 +1020,7 @@ class _ProfileModelService:
     runtime_attestor_default: Callable[..., Mapping[str, Any]]
     service_schema: str
     shutdown_schema: str
+    gpu_probe_timeout_seconds = QWEN_GPU_ALLOCATION_PROBE_TIMEOUT_SECONDS
 
     def __init__(
         self,
@@ -988,6 +1104,12 @@ class _ProfileModelService:
             slurm_job_id=slurm_job_id, attempt_id=attempt_id
         )
         started = self.monotonic()
+        phase_durations: dict[str, float | None] = {
+            "gpu_inspection": None,
+            "runtime_attestation": None,
+            "process_launch": None,
+            "post_launch_health_wait": None,
+        }
         startup_record: dict[str, Any] = {
             "base_url": f"http://127.0.0.1:{port}/v1",
             "pass": False,
@@ -997,6 +1119,13 @@ class _ProfileModelService:
             "attempt_id": attempt_id,
             "runtime_owner_id": runtime_owner_id,
             "slurm_job_id": slurm_job_id,
+            "health_probe_count": 0,
+            "phase_durations_seconds": phase_durations,
+            "post_launch_health_deadline_origin": "successful_popen_return",
+            "timeout_budgets_seconds": {
+                "gpu_allocation_probe": self.gpu_probe_timeout_seconds,
+                "post_launch_health": POST_LAUNCH_HEALTH_TIMEOUT_SECONDS,
+            },
         }
         try:
             # This is an early diagnostic only.  It cannot eliminate the bind
@@ -1029,20 +1158,33 @@ class _ProfileModelService:
                 attempt / "runtime-scratch-preparation.json", preparation
             )
             environment = self._server_environment(self.runtime_path)
-            gpu = self.gpu_inspector(
-                server_python=self.profile.environment.server_python,
-                tensor_parallel_size=self.profile.server.tensor_parallel_size,
-                environment=environment,
-            )
+            phase_started = self.monotonic()
+            try:
+                gpu = self.gpu_inspector(
+                    server_python=self.profile.environment.server_python,
+                    tensor_parallel_size=self.profile.server.tensor_parallel_size,
+                    environment=environment,
+                    timeout_seconds=self.gpu_probe_timeout_seconds,
+                )
+            finally:
+                phase_durations["gpu_inspection"] = (
+                    self.monotonic() - phase_started
+                )
             write_new_canonical_json(attempt / "gpu-allocation.json", gpu)
             if gpu.get("pass") is not True:
                 raise FinalModelRuntimeError("allocated GPUs do not match 2 x A100")
-            integrity = self.runtime_attestor(
-                self.profile,
-                project_root=self.project_root,
-                attempt=attempt,
-                environment=environment,
-            )
+            phase_started = self.monotonic()
+            try:
+                integrity = self.runtime_attestor(
+                    self.profile,
+                    project_root=self.project_root,
+                    attempt=attempt,
+                    environment=environment,
+                )
+            finally:
+                phase_durations["runtime_attestation"] = (
+                    self.monotonic() - phase_started
+                )
             if integrity.get("pass") is not True:
                 raise FinalModelRuntimeError(
                     f"{self.model_label} runtime attestation failed"
@@ -1051,6 +1193,7 @@ class _ProfileModelService:
             write_new_canonical_json(attempt / "server-command.json", list(argv))
             stdout_handle = (attempt / "server.stdout").open("xb")
             stderr_handle = (attempt / "server.stderr").open("xb")
+            phase_started = self.monotonic()
             try:
                 self.process = self.process_factory(
                     argv,
@@ -1060,27 +1203,47 @@ class _ProfileModelService:
                     stderr=stderr_handle,
                     start_new_session=True,
                 )
+                post_launch_health_started = self.monotonic()
+                phase_durations["process_launch"] = (
+                    post_launch_health_started - phase_started
+                )
             finally:
                 stdout_handle.close()
                 stderr_handle.close()
-            _write_new_text(attempt / "server.pid", f"{self.process.pid}\n")
-            deadline = started + QWEN_SERVER_STARTUP_TIMEOUT_SECONDS
-            health = HealthProbe(False, None, "not yet probed", None)
-            base = f"http://127.0.0.1:{port}"
-            while self.monotonic() < deadline:
-                if self.process.poll() is not None:
-                    raise FinalModelRuntimeError(
-                        f"{self.model_label} vLLM server exited during startup: "
-                        f"{self.process.poll()}"
+                if phase_durations["process_launch"] is None:
+                    phase_durations["process_launch"] = (
+                        self.monotonic() - phase_started
                     )
-                health = self.health_probe(base)
-                if health.ok:
-                    break
-                self.sleeper(1.0)
-            else:
-                raise FinalModelRuntimeError(
-                    f"{self.model_label} vLLM health timeout: {health.diagnostic}"
+            _write_new_text(attempt / "server.pid", f"{self.process.pid}\n")
+            deadline = (
+                post_launch_health_started + POST_LAUNCH_HEALTH_TIMEOUT_SECONDS
+            )
+            health = HealthProbe(False, None, "not yet probed", None)
+            health_probe_count = 0
+            base = f"http://127.0.0.1:{port}"
+            try:
+                while True:
+                    if self.process.poll() is not None:
+                        raise FinalModelRuntimeError(
+                            f"{self.model_label} vLLM server exited during startup: "
+                            f"{self.process.poll()}"
+                        )
+                    health = self.health_probe(base)
+                    health_probe_count += 1
+                    if health.ok:
+                        break
+                    remaining = deadline - self.monotonic()
+                    if remaining <= 0:
+                        raise FinalModelRuntimeError(
+                            f"{self.model_label} vLLM health timeout: "
+                            f"{health.diagnostic}"
+                        )
+                    self.sleeper(min(1.0, remaining))
+            finally:
+                phase_durations["post_launch_health_wait"] = (
+                    self.monotonic() - post_launch_health_started
                 )
+                startup_record["health_probe_count"] = health_probe_count
             write_new_canonical_json(
                 attempt / "server-health.json",
                 {
@@ -1222,6 +1385,7 @@ class DevstralModelService(_ProfileModelService):
     runtime_attestor_default = staticmethod(_attest_devstral_runtime)
     service_schema = DEVSTRAL_SERVICE_SCHEMA
     shutdown_schema = "cmpilot-final-devstral-shutdown-v1"
+    gpu_probe_timeout_seconds = DEVSTRAL_GPU_ALLOCATION_PROBE_TIMEOUT_SECONDS
 
 
 class _ProfileFinalModelExecutor:
@@ -1365,14 +1529,18 @@ def build_devstral_model_executor(
 
 
 __all__ = [
+    "DEVSTRAL_GPU_ALLOCATION_PROBE_TIMEOUT_SECONDS",
+    "DEVSTRAL_RUNTIME_ATTESTATION_TIMEOUT_SECONDS",
     "FinalModelRuntimeError",
     "HealthProbe",
     "DEVSTRAL_SERVICE_SCHEMA",
     "DevstralFinalModelExecutor",
     "DevstralModelService",
     "MINI_SWE_RUNTIME_SCHEMA",
+    "POST_LAUNCH_HEALTH_TIMEOUT_SECONDS",
     "QWEN_AGENT_TIMEOUT_SECONDS",
     "QWEN_FROZEN_STEP_LIMIT",
+    "QWEN_GPU_ALLOCATION_PROBE_TIMEOUT_SECONDS",
     "QWEN_SERVICE_SCHEMA",
     "Qwen32BFinalModelExecutor",
     "Qwen32BModelService",
