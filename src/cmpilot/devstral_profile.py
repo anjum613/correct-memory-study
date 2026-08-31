@@ -182,6 +182,12 @@ TECHNICAL_SMOKE_ENVIRONMENT_VERIFICATION = TECHNICAL_SMOKE_RESULT.with_name(
 TECHNICAL_SMOKE_ENVIRONMENT_VERIFICATION_SHA256 = (
     "886e83ff632021aef51df7a2a5b9a0ed0108df541083eedfa0f56bb686e4cdfe"
 )
+QUALIFIED_ENVIRONMENT_VERIFIER_SHA256 = (
+    "15e85505a790f5f593fae053e9bc8d989866593e3e952ae84c3694500ed1a712"
+)
+AMENDED_ENVIRONMENT_VERIFIER_SHA256 = (
+    "a8b535dc012124a789aea322f6daa3806d915920758e55b20afe19120f66fb4d"
+)
 
 PRODUCTION_PROFILE_FILES = (
     FrozenProjectFile(
@@ -190,7 +196,7 @@ PRODUCTION_PROFILE_FILES = (
     ),
     FrozenProjectFile(
         Path("scripts/verify_devstral_environment.py"),
-        "15e85505a790f5f593fae053e9bc8d989866593e3e952ae84c3694500ed1a712",
+        AMENDED_ENVIRONMENT_VERIFIER_SHA256,
     ),
     FrozenProjectFile(
         Path(
@@ -209,6 +215,23 @@ PRODUCTION_PROFILE_FILES = (
         ),
         "12b7163c23b444f605db65dc7bd705720e61caa4a4a13bfc5359e7830b1ca631",
     ),
+)
+
+# The frozen experiment manifests bind the qualified scientific model profile,
+# including the verifier that produced smoke job 28589.  The pre-rerun timeout
+# amendment changes only the executable runtime verifier.  Keep the scientific
+# profile record byte-for-byte stable while verifying the amended runtime file
+# through PRODUCTION_PROFILE_FILES and the new project commit.
+SCIENTIFIC_PROFILE_IDENTITY_FILES = tuple(
+    FrozenProjectFile(
+        item.relative_path,
+        (
+            QUALIFIED_ENVIRONMENT_VERIFIER_SHA256
+            if item.relative_path == Path("scripts/verify_devstral_environment.py")
+            else item.sha256
+        ),
+    )
+    for item in PRODUCTION_PROFILE_FILES
 )
 
 SERVER_SETTINGS = ServerSettings(
@@ -675,7 +698,7 @@ class DevstralProductionModelProfile(ModelProfile):
             },
             "profile_files": [
                 {"path": item.relative_path.as_posix(), "sha256": item.sha256}
-                for item in PRODUCTION_PROFILE_FILES
+                for item in SCIENTIFIC_PROFILE_IDENTITY_FILES
             ],
             "snapshot_freeze": {
                 "freeze_identity_sha256": SNAPSHOT_FREEZE_IDENTITY_SHA256,
