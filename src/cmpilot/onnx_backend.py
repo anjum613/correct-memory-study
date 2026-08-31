@@ -89,6 +89,129 @@ class _AttemptState:
     binding_sha256: str | None = None
 
 
+@dataclass(frozen=True)
+class _EvaluatorStdoutFrame:
+    diagnostics: bytes
+    result_record: bytes | None
+    payload: dict[str, Any] | None
+    error: str | None
+
+
+def _object_without_duplicate_keys(
+    pairs: list[tuple[str, Any]],
+) -> dict[str, Any]:
+    value: dict[str, Any] = {}
+    for key, item in pairs:
+        if key in value:
+            raise ValueError(f"duplicate JSON object key: {key}")
+        value[key] = item
+    return value
+
+
+def _reject_json_constant(value: str) -> None:
+    raise ValueError(f"non-finite JSON number is forbidden: {value}")
+
+
+def _load_evaluator_json(payload: bytes) -> Any:
+    return json.loads(
+        payload.decode("utf-8"),
+        object_pairs_hook=_object_without_duplicate_keys,
+        parse_constant=_reject_json_constant,
+    )
+
+
+def _canonical_evaluator_record(payload: Mapping[str, Any]) -> bytes:
+    return (
+        json.dumps(
+            payload,
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        )
+        + "\n"
+    ).encode("ascii")
+
+
+def _frame_evaluator_stdout(stdout: bytes) -> _EvaluatorStdoutFrame:
+    """Separate diagnostics from exactly one final canonical JSON record."""
+
+    lines = stdout.splitlines(keepends=True)
+    nonempty = [
+        index
+        for index, line in enumerate(lines)
+        if line.rstrip(b"\r\n").strip()
+    ]
+    if not nonempty:
+        return _EvaluatorStdoutFrame(
+            diagnostics=stdout,
+            result_record=None,
+            payload=None,
+            error="missing final evaluator JSON result record",
+        )
+
+    result_index = nonempty[-1]
+    diagnostics = b"".join(lines[:result_index])
+    result_record = lines[result_index]
+    if not result_record.endswith(b"\n") or result_record.endswith(b"\r\n"):
+        return _EvaluatorStdoutFrame(
+            diagnostics=diagnostics,
+            result_record=result_record,
+            payload=None,
+            error="final evaluator JSON result record is not canonical",
+        )
+
+    result_payload = result_record[:-1]
+    if not result_payload.lstrip().startswith(b"{"):
+        return _EvaluatorStdoutFrame(
+            diagnostics=stdout,
+            result_record=None,
+            payload=None,
+            error="missing final evaluator JSON result record",
+        )
+    try:
+        payload = _load_evaluator_json(result_payload)
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as error:
+        return _EvaluatorStdoutFrame(
+            diagnostics=diagnostics,
+            result_record=result_record,
+            payload=None,
+            error=f"invalid final evaluator JSON result record: {error}",
+        )
+    if not isinstance(payload, dict):
+        return _EvaluatorStdoutFrame(
+            diagnostics=diagnostics,
+            result_record=result_record,
+            payload=None,
+            error="final evaluator JSON result record is not an object",
+        )
+
+    if any(
+        line.rstrip(b"\r\n").lstrip().startswith(b"{")
+        for line in lines[:result_index]
+    ):
+        return _EvaluatorStdoutFrame(
+            diagnostics=diagnostics,
+            result_record=result_record,
+            payload=None,
+            error="multiple evaluator JSON result records",
+        )
+
+    if _canonical_evaluator_record(payload) != result_record:
+        return _EvaluatorStdoutFrame(
+            diagnostics=diagnostics,
+            result_record=result_record,
+            payload=None,
+            error="final evaluator JSON result record is not canonical",
+        )
+    return _EvaluatorStdoutFrame(
+        diagnostics=diagnostics,
+        result_record=result_record,
+        payload=payload,
+        error=None,
+    )
+
+
 def _load_canonical_json(path: Path) -> dict[str, Any]:
     try:
         payload = path.read_bytes()
@@ -620,20 +743,37 @@ class ONNXScientificOperations:
             "returncode": process.returncode,
             "stderr": stderr,
             "stderr_bounded": stderr_bounded,
+            "stdout": stdout,
             "stdout_bounded": stdout_bounded,
             "stdout_sha256": hashlib.sha256(process.stdout).hexdigest(),
         }
         if not stdout_bounded or not stderr_bounded:
+            record["stdout_diagnostics"] = stdout
+            record["stdout_diagnostics_sha256"] = hashlib.sha256(
+                process.stdout[:_MAX_EVALUATOR_OUTPUT_BYTES]
+            ).hexdigest()
             record["error"] = "evaluator output exceeded the fixed bound"
             return EvaluationResult(complete=False, passed=None, record=record)
-        try:
-            payload = json.loads(stdout)
-        except json.JSONDecodeError as error:
-            record["error"] = f"invalid evaluator JSON: {error}"
+        frame = _frame_evaluator_stdout(process.stdout)
+        record["stdout_diagnostics"] = frame.diagnostics.decode(
+            "utf-8", errors="replace"
+        )
+        record["stdout_diagnostics_sha256"] = hashlib.sha256(
+            frame.diagnostics
+        ).hexdigest()
+        if frame.result_record is not None:
+            record["stdout_result_record"] = frame.result_record.decode(
+                "utf-8", errors="replace"
+            )
+            record["stdout_result_record_sha256"] = hashlib.sha256(
+                frame.result_record
+            ).hexdigest()
+        if frame.error is not None:
+            record["error"] = frame.error
             return EvaluationResult(complete=False, passed=None, record=record)
-        if not isinstance(payload, dict):
-            record["error"] = "evaluator output is not a JSON object"
-            return EvaluationResult(complete=False, passed=None, record=record)
+        payload = frame.payload
+        if payload is None:  # pragma: no cover - guaranteed by the frame contract
+            raise ONNXBackendError("evaluator stdout frame lost its JSON payload")
         record["payload"] = payload
         complete = payload.get("complete")
         passed = payload.get("passed")

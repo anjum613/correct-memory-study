@@ -5,6 +5,7 @@ import hashlib
 import json
 from pathlib import Path
 import stat
+import subprocess
 import sys
 from typing import Any
 
@@ -33,10 +34,77 @@ from cmpilot.onnx_backend import (
     ONNX_TARGET_REVISION,
     ONNXBackendError,
     ONNXScientificOperations,
+    _frame_evaluator_stdout,
     build_onnx_backend,
 )
 from cmpilot.repository_manager import git, repository_content_digest
 from cmpilot.task_file_policy import TASK_POLICY_SCHEMA
+
+
+ROOT = Path(__file__).parents[1]
+FROZEN_PROJECT_COMMIT = "b401e9a0e9ed4ef3b4401a0aacb30a0f5b59dfe5"
+FROZEN_SCIENTIFIC_SHA256 = {
+    "configs/experiments/conditions/no-memory-v1.json": (
+        "1540ed91d81d081eee8822aa3dca7b48ea432fceafdadd39e62ece1f39eed06c"
+    ),
+    "configs/experiments/conditions/source-correct-memory-v1.json": (
+        "a312a16719e7f276cd6fff6379bf094dd3b926b26e77619c93431e43aa4280a4"
+    ),
+    "configs/experiments/track-b-onnx-partial-v1.json": (
+        "9698be27fa68082d8df4f0982d46f7d43c35723ff83441c2ecfbaa1efdc60a55"
+    ),
+    "configs/experiments/track-b-onnx-partial-v1.matrix.json": (
+        "ffc8a9d628da2e121822667e588320a3fad674e74837c562f4e95d7dc3c40b4e"
+    ),
+    "docs/methodology/source-procedural-memory-generation-v1.json": (
+        "173ddf06d609609b0036cd60ddb856ad83a8d4a05f5b6b2fe270fb5afb2d0f11"
+    ),
+    "families/onnx-v1/family-package.json": (
+        "37a3fd5883b13b281b224de73be46367d828bcfa9b75a54232822a1a8c97bff7"
+    ),
+    "families/onnx-v1/memories/source-correct-memory.md": (
+        "dc9a2e0643e582c0d6eaa91bd5e1880ee940ea6d1551a5451ad4b4b4ae134571"
+    ),
+    "families/onnx-v1/memories/source-correct-memory.provenance.json": (
+        "66beb54b2bfd04397a4535281663eb40493f07c3f4949c283a0de032fedc56da"
+    ),
+    "families/onnx-v1/oracles/functional/evaluate.py": (
+        "9713fc5e08f21102936acf4bf0fc9568c59730eb3ace7f1e66a8f12e75943875"
+    ),
+    "families/onnx-v1/oracles/manifest.json": (
+        "1b6c0287295b7bb0243c8f7e4460ae7b97b4b7621122b88eddfa24554af933af"
+    ),
+    "families/onnx-v1/oracles/probe_support.py": (
+        "a619fae675d486427e9d598f3fac1488c04a441dac9aad5f1c976d56f4e394bf"
+    ),
+    "families/onnx-v1/oracles/security/evaluate.py": (
+        "8c8316746534a6a0a6e2271bda6f2fa777513960af644d67c5dff1be73e47784"
+    ),
+    "families/onnx-v1/provenance/historical-transition.json": (
+        "0c9eb6cb1bac41ecb36e6a15eb94a7e827f4b3690700dc6b408f03a4c934749c"
+    ),
+    "families/onnx-v1/provenance/upstream-snapshot-provenance.json": (
+        "bbd6b93a036f06855a8bf8d3ae830f01b63b0dedca53243392ea35fe6e91004d"
+    ),
+    "families/onnx-v1/references/faithful-reuse/reference.json": (
+        "3ea63fc49b9655db366d2c8931ad13ce1768df172385e8ec306c8019edc2b3f3"
+    ),
+    "families/onnx-v1/references/safe-control/reference.json": (
+        "e0c36068d4f8d2e3aa039a75f2f6f515cf62c1bc1d32f9c77702963cd89281c4"
+    ),
+    "families/onnx-v1/references/safe-control/secure.patch": (
+        "1b5bec87d510caddfcb0e2845dfdb3347643f28f3594db59452ac68239c73b60"
+    ),
+    "families/onnx-v1/task-policy.json": (
+        "13ddbfc2466639fa5f100fe031c38d734646f433d0d22be797f6fd2ea84d9a48"
+    ),
+    "families/onnx-v1/tasks/target-task.md": (
+        "74b276ec4523fb3b9a3a36f5f9c7c8fdf1bd8c996e18b4e1dede138df4734025"
+    ),
+    "families/onnx-v1/tasks/target-task-provenance.json": (
+        "1ac5690eba9261165c1d4bf1055d114686b9dd1a2ce2e27f34e9f53df8206bb0"
+    ),
+}
 
 
 def _sha256(path: Path) -> str:
@@ -142,7 +210,13 @@ parser.add_argument("--repository", type=Path, required=True)
 parser.add_argument("--timeout-seconds", type=float, required=True)
 args = parser.parse_args()
 passed = (args.repository / "onnx" / "hub.py").is_file()
-print(json.dumps({"complete": True, "passed": passed}, sort_keys=True))
+print("Using cached MNIST model from /controlled/cache/model.onnx")
+print(json.dumps(
+    {"complete": True, "passed": passed},
+    ensure_ascii=True,
+    sort_keys=True,
+    separators=(",", ":"),
+))
 raise SystemExit(0)
 """
     support = package / "oracles" / "probe_support.py"
@@ -157,6 +231,9 @@ raise SystemExit(0)
         evaluator.replace(
             "passed = (args.repository / \"onnx\" / \"hub.py\").is_file()",
             "passed = False",
+        ).replace(
+            'print("Using cached MNIST model from /controlled/cache/model.onnx")\n',
+            "",
         ),
     )
 
@@ -381,6 +458,24 @@ def test_evaluators_capture_patch_integrity_and_cleanup(tmp_path: Path) -> None:
     assert (functionality.complete, functionality.passed) == (True, True)
     assert (security.complete, security.passed) == (True, False)
     assert functionality.record["stdout_bounded"] is True
+    assert functionality.record["stdout"] == (
+        "Using cached MNIST model from /controlled/cache/model.onnx\n"
+        '{"complete":true,"passed":true}\n'
+    )
+    assert functionality.record["stdout_diagnostics"] == (
+        "Using cached MNIST model from /controlled/cache/model.onnx\n"
+    )
+    assert functionality.record["stdout_result_record"] == (
+        '{"complete":true,"passed":true}\n'
+    )
+    assert functionality.record["payload"] == {
+        "complete": True,
+        "passed": True,
+    }
+    assert security.record["stdout_diagnostics"] == ""
+    assert security.record["stdout_result_record"] == (
+        '{"complete":true,"passed":false}\n'
+    )
     assert functionality.record["evaluator_sha256_before"] == (
         functionality.record["evaluator_sha256_after"]
     )
@@ -408,6 +503,184 @@ def test_evaluators_capture_patch_integrity_and_cleanup(tmp_path: Path) -> None:
     assert cleanup["pass"] is True
     assert not scratch.exists()
     assert repository.is_dir()
+
+
+@pytest.mark.parametrize(
+    ("stdout", "error"),
+    (
+        (
+            b"",
+            "missing final evaluator JSON result record",
+        ),
+        (
+            b"Using cached MNIST model from /controlled/cache/model.onnx\n",
+            "missing final evaluator JSON result record",
+        ),
+        (
+            b"diagnostic\n{\"complete\":true,\"passed\":\n",
+            "invalid final evaluator JSON result record",
+        ),
+        (
+            b'{"complete":true,"passed":true}\ntrailing non-JSON\n',
+            "missing final evaluator JSON result record",
+        ),
+    ),
+)
+def test_missing_or_malformed_final_result_is_technical_invalid(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    stdout: bytes,
+    error: str,
+) -> None:
+    fixture = _package(tmp_path)
+    request = fixture.request(tmp_path, SOURCE_CORRECT_MEMORY)
+    backend = ONNXScientificOperations(
+        fixture.context,
+        package_root=fixture.package,
+        evaluator_python=Path(sys.executable).resolve(),
+    )
+    repository = backend.setup_repository(request)
+    monkeypatch.setattr(
+        "cmpilot.onnx_backend.subprocess.run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(
+            args=args[0], returncode=0, stdout=stdout, stderr=b""
+        ),
+    )
+
+    result = backend.evaluate_functionality(request, repository, _execution())
+
+    assert (result.complete, result.passed) == (False, None)
+    assert error in result.record["error"]
+    assert result.record["stdout"] == stdout.decode("utf-8")
+
+
+def test_multiple_conflicting_result_records_are_technical_invalid(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fixture = _package(tmp_path)
+    request = fixture.request(tmp_path, SOURCE_CORRECT_MEMORY)
+    backend = ONNXScientificOperations(
+        fixture.context,
+        package_root=fixture.package,
+        evaluator_python=Path(sys.executable).resolve(),
+    )
+    repository = backend.setup_repository(request)
+    stdout = (
+        b'{"complete":true,"passed":true}\n'
+        b'{"complete":true,"passed":false}\n'
+    )
+    monkeypatch.setattr(
+        "cmpilot.onnx_backend.subprocess.run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(
+            args=args[0], returncode=0, stdout=stdout, stderr=b""
+        ),
+    )
+
+    result = backend.evaluate_functionality(request, repository, _execution())
+
+    assert (result.complete, result.passed) == (False, None)
+    assert result.record["error"] == "multiple evaluator JSON result records"
+    assert result.record["stdout_diagnostics"] == (
+        '{"complete":true,"passed":true}\n'
+    )
+    assert result.record["stdout_result_record"] == (
+        '{"complete":true,"passed":false}\n'
+    )
+
+
+@pytest.mark.parametrize("passed", (False, True))
+def test_framing_does_not_change_functional_pass_fail_semantics(
+    passed: bool,
+) -> None:
+    payload = {"complete": True, "passed": passed}
+    record = (
+        json.dumps(
+            payload,
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("ascii")
+        + b"\n"
+    )
+
+    frame = _frame_evaluator_stdout(b"bounded diagnostic\n" + record)
+
+    assert frame.error is None
+    assert frame.payload == payload
+    assert frame.diagnostics == b"bounded diagnostic\n"
+    assert frame.result_record == record
+
+
+def test_noncanonical_final_result_is_technical_invalid() -> None:
+    frame = _frame_evaluator_stdout(
+        b'{"complete": true, "passed": true}\n'
+    )
+
+    assert frame.payload is None
+    assert frame.error == "final evaluator JSON result record is not canonical"
+
+
+def test_final_nonempty_result_line_allows_trailing_empty_lines() -> None:
+    frame = _frame_evaluator_stdout(
+        b'diagnostic\n{"complete":true,"passed":true}\n\n'
+    )
+
+    assert frame.error is None
+    assert frame.payload == {"complete": True, "passed": True}
+
+
+def test_backend_only_correction_preserves_all_frozen_scientific_inputs() -> None:
+    observed = {
+        relative: _sha256(ROOT / relative)
+        for relative in FROZEN_SCIENTIFIC_SHA256
+    }
+    assert observed == FROZEN_SCIENTIFIC_SHA256
+
+    package = json.loads(
+        (ROOT / "families/onnx-v1/family-package.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert {
+        name: package["inputs"][name]["sha256"]
+        for name in (
+            "source_repository",
+            "compatible_repository",
+            "target_repository",
+        )
+    } == {
+        "source_repository": (
+            "f810c03a012681445277faad891b82fc64aff7b4bd8241ddf5c1db36f3c6fe4a"
+        ),
+        "compatible_repository": (
+            "a4643dd8171f66c31e7100ffd40de3e2c21f9b91830ddccb038eb1916d75666c"
+        ),
+        "target_repository": (
+            "8351d48a9016843e96ac83fb9b661a50580821aff9cbf8efb3b94ee2920c14ee"
+        ),
+    }
+
+    unchanged = subprocess.run(
+        [
+            "git",
+            "diff",
+            "--no-ext-diff",
+            "--exit-code",
+            FROZEN_PROJECT_COMMIT,
+            "--",
+            "configs/experiments/conditions/no-memory-v1.json",
+            "configs/experiments/conditions/source-correct-memory-v1.json",
+            "configs/experiments/track-b-onnx-partial-v1.json",
+            "configs/experiments/track-b-onnx-partial-v1.matrix.json",
+            "docs/methodology/source-procedural-memory-generation-v1.json",
+            "families/onnx-v1",
+        ],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert unchanged.returncode == 0, unchanged.stdout + unchanged.stderr
 
 
 def test_shared_runner_uses_stub_model_with_onnx_backend(tmp_path: Path) -> None:
