@@ -16,6 +16,10 @@ from cmpilot.devstral_profile import (
 from cmpilot.devstral_mini_swe_adapter import write_devstral_production_adapter
 from cmpilot.experiment_models import QWEN32B_PROFILE
 from cmpilot.final_model_runtime import (
+    DEVSTRAL_GPU_ALLOCATION_PROBE_TIMEOUT_SECONDS,
+    DEVSTRAL_RUNTIME_ATTESTATION_TIMEOUT_SECONDS,
+    POST_LAUNCH_HEALTH_TIMEOUT_SECONDS,
+    QWEN_GPU_ALLOCATION_PROBE_TIMEOUT_SECONDS,
     DevstralFinalModelExecutor,
     DevstralModelService,
     FinalModelRuntimeError,
@@ -298,6 +302,17 @@ class _FakeProcess:
         return self.returncode
 
 
+class _FakeClock:
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def __call__(self) -> float:
+        return self.now
+
+    def advance(self, seconds: float) -> None:
+        self.now += seconds
+
+
 def test_qwen_service_uses_exact_profile_argv_and_attempt_local_evidence(
     tmp_path: Path,
 ) -> None:
@@ -311,6 +326,13 @@ def test_qwen_service_uses_exact_profile_argv_and_attempt_local_evidence(
         observed["argv"] = tuple(argv)
         observed["environment"] = kwargs["env"]
         return process
+
+    def fake_gpu_inspector(**kwargs):
+        observed["gpu_probe_timeout"] = kwargs["timeout_seconds"]
+        return {
+            "pass": True,
+            "rows": ["0, NVIDIA A100", "1, NVIDIA A100"],
+        }
 
     service = Qwen32BModelService(
         profile=QWEN32B_PROFILE,
@@ -326,10 +348,7 @@ def test_qwen_service_uses_exact_profile_argv_and_attempt_local_evidence(
             (QWEN32B_PROFILE.served_model_name,),
         ),
         runtime_attestor=lambda *_args, **_kwargs: {"pass": True},
-        gpu_inspector=lambda **_kwargs: {
-            "pass": True,
-            "rows": ["0, NVIDIA A100", "1, NVIDIA A100"],
-        },
+        gpu_inspector=fake_gpu_inspector,
         port_available=lambda _port: True,
         monotonic=lambda: 1.0,
         sleeper=lambda _seconds: None,
@@ -344,6 +363,7 @@ def test_qwen_service_uses_exact_profile_argv_and_attempt_local_evidence(
     assert observed["argv"] == QWEN32B_PROFILE.server_argv(port=47983)
     environment = observed["environment"]
     assert isinstance(environment, dict)
+    assert observed["gpu_probe_timeout"] == QWEN_GPU_ALLOCATION_PROBE_TIMEOUT_SECONDS
     runtime_path = Path(environment["VLLM_RPC_BASE_PATH"])
     assert runtime_path.parent == runtime_root
     assert runtime_path.name.startswith("cmq-")
@@ -440,6 +460,220 @@ def test_devstral_service_uses_qualified_profile_command_and_shared_lifecycle(
     shutdown = service.shutdown()
     assert shutdown["schema"] == "cmpilot-final-devstral-shutdown-v1"
     assert shutdown["pass"] is True
+    runtime_root.rmdir()
+
+
+def test_long_attestation_does_not_consume_post_launch_health_budget(
+    tmp_path: Path,
+) -> None:
+    attempt = tmp_path / "run-devstral" / "attempts" / "slurm-94-0"
+    attempt.mkdir(parents=True)
+    runtime_root = Path(tempfile.mkdtemp(prefix="cmdfrt-"))
+    clock = _FakeClock()
+    process = _FakeProcess()
+    observed: dict[str, float | int] = {}
+
+    def inspect_gpu(**kwargs):
+        observed["gpu_timeout"] = kwargs["timeout_seconds"]
+        clock.advance(17)
+        return {"pass": True}
+
+    def attest(*_args, **_kwargs):
+        clock.advance(699)
+        return {"pass": True}
+
+    def launch(*_args, **_kwargs):
+        observed["popen_at"] = clock()
+        return process
+
+    def health(_base):
+        observed["first_health_probe_at"] = clock()
+        return HealthProbe(True, 200, "HTTP 200", "a" * 64)
+
+    service = DevstralModelService(
+        profile=DEVSTRAL_PRODUCTION_PROFILE,
+        project_root=ROOT,
+        runtime_root=runtime_root,
+        process_factory=launch,
+        health_probe=health,
+        models_probe=lambda _base: ModelProbe(
+            "http://127.0.0.1:47986/v1/models",
+            True,
+            "endpoint responded",
+            200,
+            (DEVSTRAL_PRODUCTION_PROFILE.served_model_name,),
+        ),
+        runtime_attestor=attest,
+        gpu_inspector=inspect_gpu,
+        port_available=lambda _port: True,
+        monotonic=clock,
+        sleeper=clock.advance,
+        port=47986,
+    )
+
+    assert service.start(
+        attempt_directory=attempt, run_id="run-devstral", slurm_job_id="94"
+    ) == "http://127.0.0.1:47986/v1"
+    startup = json.loads((attempt / "server-startup.json").read_text())
+    assert observed == {
+        "first_health_probe_at": 716.0,
+        "gpu_timeout": DEVSTRAL_GPU_ALLOCATION_PROBE_TIMEOUT_SECONDS,
+        "popen_at": 716.0,
+    }
+    assert startup["timeout_budgets_seconds"]["post_launch_health"] == (
+        POST_LAUNCH_HEALTH_TIMEOUT_SECONDS
+    )
+    assert startup["post_launch_health_deadline_origin"] == (
+        "successful_popen_return"
+    )
+    assert startup["health_probe_count"] == 1
+    assert startup["phase_durations_seconds"] == {
+        "gpu_inspection": 17.0,
+        "post_launch_health_wait": 0.0,
+        "process_launch": 0.0,
+        "runtime_attestation": 699.0,
+    }
+
+    process.returncode = 0
+    assert service.shutdown()["pass"] is True
+    runtime_root.rmdir()
+
+
+def test_post_popen_health_loop_receives_full_fixed_budget(tmp_path: Path) -> None:
+    attempt = tmp_path / "run-devstral" / "attempts" / "slurm-95-0"
+    attempt.mkdir(parents=True)
+    runtime_root = Path(tempfile.mkdtemp(prefix="cmdfrt-"))
+    clock = _FakeClock()
+    process = _FakeProcess()
+    probes: list[float] = []
+
+    def attest(*_args, **_kwargs):
+        clock.advance(601)
+        return {"pass": True}
+
+    def health(_base):
+        probes.append(clock())
+        return HealthProbe(False, None, "not ready", None)
+
+    service = DevstralModelService(
+        profile=DEVSTRAL_PRODUCTION_PROFILE,
+        project_root=ROOT,
+        runtime_root=runtime_root,
+        process_factory=lambda *_args, **_kwargs: process,
+        health_probe=health,
+        models_probe=lambda _base: (_ for _ in ()).throw(
+            AssertionError("models probe must not run after a health timeout")
+        ),
+        runtime_attestor=attest,
+        gpu_inspector=lambda **_kwargs: {"pass": True},
+        port_available=lambda _port: True,
+        monotonic=clock,
+        sleeper=clock.advance,
+        port=47987,
+    )
+
+    with pytest.raises(Exception, match="vLLM health timeout: not ready"):
+        service.start(
+            attempt_directory=attempt,
+            run_id="run-devstral",
+            slurm_job_id="95",
+        )
+    startup = json.loads((attempt / "server-startup.json").read_text())
+    assert probes[0] == 601.0
+    assert probes[-1] - probes[0] == POST_LAUNCH_HEALTH_TIMEOUT_SECONDS
+    assert len(probes) > 1
+    assert startup["health_probe_count"] == len(probes)
+    assert startup["phase_durations_seconds"]["post_launch_health_wait"] == (
+        POST_LAUNCH_HEALTH_TIMEOUT_SECONDS
+    )
+
+    process.returncode = 0
+    assert service.shutdown()["pass"] is True
+    runtime_root.rmdir()
+
+
+def test_successful_popen_always_allows_a_health_probe_after_long_prelaunch(
+    tmp_path: Path,
+) -> None:
+    attempt = tmp_path / "run-devstral" / "attempts" / "slurm-96-0"
+    attempt.mkdir(parents=True)
+    runtime_root = Path(tempfile.mkdtemp(prefix="cmdfrt-"))
+    clock = _FakeClock()
+    process = _FakeProcess()
+    probes: list[float] = []
+
+    def attest(*_args, **_kwargs):
+        clock.advance(POST_LAUNCH_HEALTH_TIMEOUT_SECONDS + 1)
+        return {"pass": True}
+
+    def health(_base):
+        probes.append(clock())
+        return HealthProbe(True, 200, "HTTP 200", "a" * 64)
+
+    service = DevstralModelService(
+        profile=DEVSTRAL_PRODUCTION_PROFILE,
+        project_root=ROOT,
+        runtime_root=runtime_root,
+        process_factory=lambda *_args, **_kwargs: process,
+        health_probe=health,
+        models_probe=lambda _base: ModelProbe(
+            "http://127.0.0.1:47988/v1/models",
+            True,
+            "endpoint responded",
+            200,
+            (DEVSTRAL_PRODUCTION_PROFILE.served_model_name,),
+        ),
+        runtime_attestor=attest,
+        gpu_inspector=lambda **_kwargs: {"pass": True},
+        port_available=lambda _port: True,
+        monotonic=clock,
+        sleeper=clock.advance,
+        port=47988,
+    )
+
+    service.start(
+        attempt_directory=attempt, run_id="run-devstral", slurm_job_id="96"
+    )
+    assert probes == [POST_LAUNCH_HEALTH_TIMEOUT_SECONDS + 1]
+
+    process.returncode = 0
+    assert service.shutdown()["pass"] is True
+    runtime_root.rmdir()
+
+
+def test_attestation_failure_prevents_popen_health_and_models(
+    tmp_path: Path,
+) -> None:
+    attempt = tmp_path / "run-devstral" / "attempts" / "slurm-97-0"
+    attempt.mkdir(parents=True)
+    runtime_root = Path(tempfile.mkdtemp(prefix="cmdfrt-"))
+    forbidden: list[str] = []
+
+    service = DevstralModelService(
+        profile=DEVSTRAL_PRODUCTION_PROFILE,
+        project_root=ROOT,
+        runtime_root=runtime_root,
+        process_factory=lambda *_args, **_kwargs: forbidden.append("popen"),
+        health_probe=lambda _base: forbidden.append("health"),
+        models_probe=lambda _base: forbidden.append("models"),
+        runtime_attestor=lambda *_args, **_kwargs: {"pass": False},
+        gpu_inspector=lambda **_kwargs: {"pass": True},
+        port_available=lambda _port: True,
+        monotonic=lambda: 1.0,
+        port=47989,
+    )
+
+    with pytest.raises(Exception, match="runtime attestation failed"):
+        service.start(
+            attempt_directory=attempt,
+            run_id="run-devstral",
+            slurm_job_id="97",
+        )
+    assert forbidden == []
+    startup = json.loads((attempt / "server-startup.json").read_text())
+    assert startup["phase_durations_seconds"]["process_launch"] is None
+    assert startup["phase_durations_seconds"]["post_launch_health_wait"] is None
+    assert service.shutdown()["pass"] is True
     runtime_root.rmdir()
 
 
@@ -559,12 +793,95 @@ def test_gpu_gate_uses_two_visible_torch_a100s_not_all_physical_gpus(
     assert observed[0][0] == str(QWEN32B_PROFILE.environment.server_python)
 
 
-def test_model_and_mcp_pinot_scientific_registries_are_ready() -> None:
+def test_gpu_probe_timeout_is_preserved_as_structured_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed: list[tuple[tuple[str, ...], int]] = []
+
+    def fake_run(argv, *, environment, timeout):
+        del environment
+        command_line = tuple(argv)
+        observed.append((command_line, timeout))
+        if command_line[0] == str(DEVSTRAL_PRODUCTION_PROFILE.environment.server_python):
+            raise subprocess.TimeoutExpired(
+                command_line,
+                timeout,
+                output=b"partial torch output",
+                stderr=b"cold CUDA initialization",
+            )
+        return subprocess.CompletedProcess(command_line, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(final_model_runtime, "_run_checked", fake_run)
+    record = final_model_runtime._inspect_a100_allocation(
+        server_python=DEVSTRAL_PRODUCTION_PROFILE.environment.server_python,
+        tensor_parallel_size=2,
+        environment={"CUDA_VISIBLE_DEVICES": "0,1"},
+        timeout_seconds=DEVSTRAL_GPU_ALLOCATION_PROBE_TIMEOUT_SECONDS,
+    )
+
+    torch = record["torch_visible_allocation"]
+    assert record["pass"] is False
+    assert torch["returncode"] is None
+    assert torch["stdout"] == "partial torch output"
+    assert torch["stderr"] == "cold CUDA initialization"
+    assert torch["timeout"] == {
+        "error_type": "TimeoutExpired",
+        "expired": True,
+        "seconds": DEVSTRAL_GPU_ALLOCATION_PROBE_TIMEOUT_SECONDS,
+    }
+    assert len(observed) == 2
+    assert all(
+        timeout == DEVSTRAL_GPU_ALLOCATION_PROBE_TIMEOUT_SECONDS
+        for _command, timeout in observed
+    )
+
+
+def test_outer_attestation_timeout_is_preserved_as_structured_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def timeout_run(argv, *, environment, timeout):
+        del environment
+        assert timeout == DEVSTRAL_RUNTIME_ATTESTATION_TIMEOUT_SECONDS
+        raise subprocess.TimeoutExpired(
+            argv,
+            timeout,
+            output=b"partial verifier output",
+            stderr=b"cold filesystem timeout",
+        )
+
+    monkeypatch.setattr(final_model_runtime, "_run_checked", timeout_run)
+
+    with pytest.raises(
+        FinalModelRuntimeError,
+        match=f"fixed {DEVSTRAL_RUNTIME_ATTESTATION_TIMEOUT_SECONDS}-second",
+    ):
+        final_model_runtime._attest_devstral_runtime(
+            DEVSTRAL_PRODUCTION_PROFILE,
+            project_root=ROOT,
+            attempt=tmp_path,
+            environment={"PYTHONNOUSERSITE": "1"},
+        )
+
+    evidence = json.loads(
+        (tmp_path / "runtime-attestation-timeout.json").read_text()
+    )
+    assert evidence["phase"] == "runtime_attestation"
+    assert evidence["stdout"] == "partial verifier output"
+    assert evidence["stderr"] == "cold filesystem timeout"
+    assert evidence["timeout"] == {
+        "error_type": "TimeoutExpired",
+        "expired": True,
+        "seconds": DEVSTRAL_RUNTIME_ATTESTATION_TIMEOUT_SECONDS,
+    }
+    assert not (tmp_path / "runtime-integrity.json").exists()
+
+
+def test_model_and_scientific_registries_are_ready() -> None:
     assert tuple(MODEL_EXECUTORS) == (
         QWEN32B_PROFILE.profile_id,
         DEVSTRAL_PRODUCTION_PROFILE.profile_id,
     )
-    assert tuple(SCIENTIFIC_BACKENDS) == ("mcp-pinot-v1",)
+    assert tuple(SCIENTIFIC_BACKENDS) == ("djoser-v1", "mcp-pinot-v1")
     context = {
         "model_profile_key": QWEN32B_PROFILE.profile_id,
         "model_profile": QWEN32B_PROFILE.final_experiment_record(
