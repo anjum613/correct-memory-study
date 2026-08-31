@@ -338,6 +338,35 @@ def test_evaluator_failure_does_not_mask_the_primary_model_failure(
     assert outcome.state.final_exit_code == 1
 
 
+def test_genuine_startup_failure_remains_technical_invalid_and_finalizes(
+    tmp_path: Path,
+) -> None:
+    calls: list[str] = []
+    request = _request(tmp_path)
+
+    outcome = run_final_run(
+        request,
+        scientific=SyntheticScientificOperations(calls),
+        model=SyntheticModelExecutor(calls, raises=True),
+    )
+
+    result = _result(request.attempt_directory)
+    classification = json.loads(
+        (request.attempt_directory / "classification.json").read_text()
+    )
+    assert result["termination_reason"] == MODEL_SERVER_FAILURE
+    assert result["technical_validity"] == "fail"
+    assert result["final_classification"] == "TECHNICAL_INVALID"
+    assert result["action_count"] == 0
+    assert result["model_request_count"] == 0
+    assert classification["label"] == "FINAL_RUN_TECHNICAL_INVALID"
+    assert "shutdown" in calls
+    assert "cleanup_scratch" in calls
+    assert outcome.state.final_exit_chosen_after_all_stages is True
+    assert outcome.state.final_exit_code == 1
+    assert validate_total_finalization_artifacts(request.attempt_directory)["pass"]
+
+
 @pytest.mark.parametrize(
     ("setup_error", "treatment_error", "reason"),
     [
