@@ -1,0 +1,49 @@
+diff --git a/onnx/hub.py b/onnx/hub.py
+index 2e1ca36..0000000 100644
+--- a/onnx/hub.py
++++ b/onnx/hub.py
+@@ -139,7 +139,31 @@ def _download_file(url: str, file_name: str) -> None:
+                 break
+             f.write(chunk)
+ 
+ 
++def _extract_model_archive(archive_path: str, destination: str) -> None:
++    """Extract regular archive contents within the selected destination."""
++    destination = os.path.abspath(destination)
++    with tarfile.open(archive_path) as archive:
++        members = archive.getmembers()
++        for member in members:
++            target = os.path.abspath(join(destination, member.name))
++            try:
++                target_is_contained = (
++                    os.path.commonpath([destination, target]) == destination
++                )
++            except ValueError:
++                target_is_contained = False
++            if not target_is_contained:
++                raise ValueError(
++                    f"Archive member escapes extraction directory: {member.name}"
++                )
++            if not (member.isfile() or member.isdir()):
++                raise ValueError(
++                    f"Archive member has unsupported type: {member.name}"
++                )
++        archive.extractall(destination, members=members)
++
++
+ def list_models(
+     repo: str = "onnx/models:main",
+     model: Optional[str] = None,
+@@ -336,11 +360,10 @@ def download_model_with_test_data(
+                 )
+             )
+ 
+-    model_with_data_zipped = tarfile.open(local_model_with_data_path)
+     local_model_with_data_dir_path = local_model_with_data_path[
+         0 : len(local_model_with_data_path) - 7
+     ]
+-    model_with_data_zipped.extractall(local_model_with_data_dir_path)
++    _extract_model_archive(local_model_with_data_path, local_model_with_data_dir_path)
+     model_with_data_path = (
+         local_model_with_data_dir_path
+         + "/"
