@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """Run frozen functionality/security controls without model inference.
 
-The three historical expansion worktrees contain ignored files that were used
-when their frozen reference checks were produced but were never committed.
-They are read only; every evaluator runs against a disposable copy inside the
-V2 worktree so this command cannot mutate a V1 family or artifact.
+Axios, Aim, and HTTPX are reconstructed from V2-only content-addressed overlays.
+Every evaluator runs against a disposable copy, so no V1 family or artifact is
+mutated and no preserved historical dirty worktree is required.
 """
 
 from __future__ import annotations
@@ -18,6 +17,8 @@ import subprocess
 import tempfile
 from typing import Any
 
+from cmpilot.v2_snapshot_overlay import reconstruct_snapshot
+
 
 ROOT = Path(__file__).parents[1]
 OUTPUT = ROOT / "artifacts/v2-preflight/control-matrix.json"
@@ -29,20 +30,8 @@ FAMILIES = (
     "httpx-v1",
     "djoser-v1",
 )
-HISTORICAL_FAMILY_ROOTS = {
-    "axios-v1": Path(
-        "/home/s224049759/projects/correct-memory-study-worktrees/"
-        "track-b-mcp-pinot-v01/families/axios-v1"
-    ),
-    "aim-v1": Path(
-        "/home/s224049759/projects/correct-memory-study-worktrees/"
-        "track-b-aim-v01/families/aim-v1"
-    ),
-    "httpx-v1": Path(
-        "/home/s224049759/projects/correct-memory-study-worktrees/"
-        "track-b-httpx-v01/families/httpx-v1"
-    ),
-}
+OVERLAY_FAMILIES = frozenset(("axios-v1", "aim-v1", "httpx-v1"))
+OVERLAY_MANIFEST = ROOT / "v2/fixtures/snapshot-overlays/manifest.json"
 AXIOS_NODE = Path(
     "/home/s224049759/projects/correct-memory-study-worktrees/"
     "track-b-mcp-pinot-v01/tmp/axios-node-runtime-v1/bin/node"
@@ -163,8 +152,7 @@ def _apply_safe_patch(family_root: Path, repository: Path) -> dict[str, Any]:
 
 
 def run_family(family: str, scratch_root: Path) -> dict[str, Any]:
-    committed = ROOT / "families" / family
-    family_root = HISTORICAL_FAMILY_ROOTS.get(family, committed)
+    family_root = ROOT / "families" / family
     if not family_root.is_dir():
         return {"family": family, "status": "BLOCKED", "reason": "family source unavailable"}
     reference = json.loads(
@@ -173,8 +161,20 @@ def run_family(family: str, scratch_root: Path) -> dict[str, Any]:
     application = reference.get("application")
     if isinstance(application, dict):
         application = application.get("application")
-    source_repo = family_root / "repositories/invalidated"
     family_scratch = scratch_root / family
+    if family in OVERLAY_FAMILIES:
+        source_repo = family_scratch / "reconstructed-invalidated"
+        reconstruct_snapshot(
+            repository_root=ROOT,
+            manifest_path=OVERLAY_MANIFEST,
+            family=family,
+            state="invalidated",
+            destination=source_repo,
+        )
+        source_kind = "v2_content_addressed_overlay"
+    else:
+        source_repo = family_root / "repositories/invalidated"
+        source_kind = "v2_git_checkout"
     baseline = family_scratch / "baseline"
     shutil.copytree(source_repo, baseline, symlinks=True)
 
@@ -204,7 +204,7 @@ def run_family(family: str, scratch_root: Path) -> dict[str, Any]:
         "family": family,
         "status": "PASS",
         "family_source": str(family_root),
-        "family_source_kind": "historical_worktree" if family in HISTORICAL_FAMILY_ROOTS else "v2_git_checkout",
+        "family_source_kind": source_kind,
         "faithful_application": application,
         "states": {
             **aliased,
@@ -214,8 +214,8 @@ def run_family(family: str, scratch_root: Path) -> dict[str, Any]:
     }
 
 
-def build_matrix(output: Path) -> dict[str, Any]:
-    temporary_parent = ROOT / "artifacts/v2-preflight"
+def build_matrix(output: Path, *, temporary_parent: Path | None = None) -> dict[str, Any]:
+    temporary_parent = Path(tempfile.gettempdir()) if temporary_parent is None else temporary_parent
     temporary_parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="control-matrix-", dir=temporary_parent) as name:
         rows = [run_family(family, Path(name)) for family in FAMILIES]

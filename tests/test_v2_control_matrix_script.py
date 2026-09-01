@@ -9,15 +9,13 @@ ROOT = Path(__file__).parents[1]
 def test_all_six_families_have_a_source() -> None:
     assert len(matrix.FAMILIES) == 6
     for family in matrix.FAMILIES:
-        assert matrix.HISTORICAL_FAMILY_ROOTS.get(
-            family, ROOT / "families" / family
-        ).is_dir()
+        assert (ROOT / "families" / family).is_dir()
 
 
-def test_historical_sources_are_never_outputs() -> None:
+def test_incomplete_snapshots_use_committed_v2_overlays() -> None:
     assert matrix.OUTPUT.is_relative_to(ROOT)
-    for path in matrix.HISTORICAL_FAMILY_ROOTS.values():
-        assert not path.is_relative_to(ROOT)
+    assert matrix.OVERLAY_FAMILIES == {"axios-v1", "aim-v1", "httpx-v1"}
+    assert matrix.OVERLAY_MANIFEST.is_file()
 
 
 def test_axios_uses_the_exact_qualified_node() -> None:
