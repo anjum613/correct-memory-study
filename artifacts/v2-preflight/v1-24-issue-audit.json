@@ -1,0 +1,415 @@
+{
+  "issues": [
+    {
+      "classification": "ACTUAL_V1_DESIGN_DEFECT",
+      "correction_implemented": true,
+      "current_implementation": "V1 gave every condition the same 4096-token physical window; memory reduced usable trajectory capacity.",
+      "evidence": [
+        "configs/agent/mini_swe_agent_smoke.yaml",
+        "post-primary-strengthening-v1/context/context-budget-summary.json"
+      ],
+      "exact_correction": "Use a common post-ingestion B with P+B+R<=C.",
+      "issue": "context-window imbalance",
+      "number": 1,
+      "tests": [
+        "tests/test_v2_preflight.py",
+        "artifacts/v2-preflight/token-census-qwen.json; token-census-devstral.json"
+      ],
+      "v1_affected": "YES: eight treated initial prompts had negative completion capacity.",
+      "v2_affected": "V2 accounting support fixed; execution integration remains blocked."
+    },
+    {
+      "classification": "NOT_A_DEFECT",
+      "correction_implemented": true,
+      "current_implementation": "V1 counts every complete request using the model-native serialized prompt before sending it.",
+      "evidence": [
+        "src/cmpilot/integrations/miniswe/vllm_text_model.py:274",
+        "src/cmpilot/devstral_serialization.py"
+      ],
+      "exact_correction": "Retain exact per-model counters and log P explicitly.",
+      "issue": "prompt-token accounting",
+      "number": 2,
+      "tests": [
+        "tests/test_v2_preflight.py",
+        "artifacts/v2-preflight/token-census-qwen.json; token-census-devstral.json"
+      ],
+      "v1_affected": "No counting defect found; separate memory-only counts were absent from analysis artifacts.",
+      "v2_affected": "Exact P/T accounting passes offline."
+    },
+    {
+      "classification": "ACTUAL_V1_DESIGN_DEFECT",
+      "correction_implemented": true,
+      "current_implementation": "V1 enforces only remaining physical request capacity, not an equal post-ingestion trajectory allowance.",
+      "evidence": [
+        "src/cmpilot/integrations/miniswe/context_budget.py:113",
+        "configs/agent/mini_swe_agent_smoke.yaml"
+      ],
+      "exact_correction": "Compute D_t=T_t-P and A_t=B-D_t every turn.",
+      "issue": "whole-trajectory usable capacity",
+      "number": 3,
+      "tests": [
+        "tests/test_v2_preflight.py"
+      ],
+      "v1_affected": "YES.",
+      "v2_affected": "V2 ledger implements B=16384."
+    },
+    {
+      "classification": "NOT_A_DEFECT",
+      "correction_implemented": true,
+      "current_implementation": "Visible observations are appended to history and included in the next exact request count; full output is separately logged in V1.",
+      "evidence": [
+        "src/cmpilot/integrations/miniswe/adapter_runtime.py:57",
+        "src/cmpilot/integrations/miniswe/vllm_text_model.py:274"
+      ],
+      "exact_correction": "Keep all visible bytes in history; preserve raw output externally.",
+      "issue": "tool-output contribution to context",
+      "number": 4,
+      "tests": [
+        "tests/test_v2_preflight.py"
+      ],
+      "v1_affected": "No exclusion from token accounting found.",
+      "v2_affected": "V2 adds byte-exact bounded visibility and raw hashes."
+    },
+    {
+      "classification": "TECHNICAL_INFRASTRUCTURE_DEFECT_ALREADY_FIXED",
+      "correction_implemented": true,
+      "current_implementation": "The latest V1 path has exact Qwen HF and Devstral mistral-common counters.",
+      "evidence": [
+        "src/cmpilot/integrations/miniswe/context_budget.py",
+        "src/cmpilot/devstral_serialization.py"
+      ],
+      "exact_correction": "Pin tokenizer files and hashes per revision.",
+      "issue": "model-specific tokenizers",
+      "number": 5,
+      "tests": [
+        "artifacts/v2-preflight/token-census-qwen.json; token-census-devstral.json"
+      ],
+      "v1_affected": "Early Devstral infrastructure was amended before final use.",
+      "v2_affected": "Both exact counters produced all 24 cells."
+    },
+    {
+      "classification": "TECHNICAL_INFRASTRUCTURE_DEFECT_ALREADY_FIXED",
+      "correction_implemented": true,
+      "current_implementation": "Qwen uses apply_chat_template(add_generation_prompt=True); Devstral uses mistral-common/tekken.",
+      "evidence": [
+        "src/cmpilot/integrations/miniswe/context_budget.py:221",
+        "src/cmpilot/devstral_serialization.py:130"
+      ],
+      "exact_correction": "Retain native serialization and compare server/local counts on GPU.",
+      "issue": "chat templates",
+      "number": 6,
+      "tests": [
+        "artifacts/v2-preflight/token-census-qwen.json; token-census-devstral.json",
+        "GPU equality NOT_TESTED_NO_GPU"
+      ],
+      "v1_affected": "The model-native divergence is intentional after the Devstral amendment.",
+      "v2_affected": "PASS offline."
+    },
+    {
+      "classification": "INTERPRETATION_LIMITATION",
+      "correction_implemented": true,
+      "current_implementation": "V1 max_tokens=512 per decision.",
+      "evidence": [
+        "configs/agent/mini_swe_agent_smoke.yaml"
+      ],
+      "exact_correction": "Use max_new_tokens=min(G,A_t).",
+      "issue": "generation ceiling",
+      "number": 7,
+      "tests": [
+        "tests/test_v2_preflight.py"
+      ],
+      "v1_affected": "Potentially constrained behavior, but not proven to create a treatment contrast.",
+      "v2_affected": "V2 G=4096 with dynamic A_t cap."
+    },
+    {
+      "classification": "INTERPRETATION_LIMITATION",
+      "correction_implemented": true,
+      "current_implementation": "V1 maximum is 15 decisions.",
+      "evidence": [
+        "configs/agent/mini_swe_agent_smoke.yaml"
+      ],
+      "exact_correction": "Treat step exhaustion as scientific.",
+      "issue": "step limit",
+      "number": 8,
+      "tests": [
+        "tests/test_v2_preflight.py"
+      ],
+      "v1_affected": "A fixed ceiling limits interpretation; most primary endings were context exhaustion.",
+      "v2_affected": "V2 S=32; GPU behavior untested."
+    },
+    {
+      "classification": "NOT_A_DEFECT",
+      "correction_implemented": true,
+      "current_implementation": "V1 has 450s agent and 600s outer bounds with preserved timeout evidence.",
+      "evidence": [
+        "configs/agent/mini_swe_agent_smoke.yaml",
+        "src/cmpilot/final_model_runtime.py:76"
+      ],
+      "exact_correction": "Keep explicit layered timeouts and log them.",
+      "issue": "agent wall limit",
+      "number": 9,
+      "tests": [
+        "configs/v2/runtime.json"
+      ],
+      "v1_affected": "No silent unbounded execution found.",
+      "v2_affected": "V2 profile uses 1800s; qualification pending."
+    },
+    {
+      "classification": "INTERPRETATION_LIMITATION",
+      "correction_implemented": true,
+      "current_implementation": "V1 command timeout is 60s.",
+      "evidence": [
+        "configs/agent/mini_swe_agent_smoke.yaml"
+      ],
+      "exact_correction": "Log command duration and timeout outcome.",
+      "issue": "command timeout",
+      "number": 10,
+      "tests": [
+        "tests/test_v2_preflight.py",
+        "tests/test_v2_qualification.py"
+      ],
+      "v1_affected": "May constrain long model-chosen commands; timeout classification was the actual policy defect.",
+      "v2_affected": "V2 keeps 60s and makes model-chosen timeout scientific."
+    },
+    {
+      "classification": "TECHNICAL_INFRASTRUCTURE_DEFECT_ALREADY_FIXED",
+      "correction_implemented": true,
+      "current_implementation": "Latest V1 has bounded connect/read, startup, allocation and attestation timeouts.",
+      "evidence": [
+        "src/cmpilot/mini_swe_config.py:302",
+        "src/cmpilot/final_model_runtime.py:76"
+      ],
+      "exact_correction": "Retain bounded phase-specific timeouts.",
+      "issue": "model-server timeouts",
+      "number": 11,
+      "tests": [
+        "GPU NOT_TESTED_NO_GPU"
+      ],
+      "v1_affected": "Earlier Devstral startup failures received technical amendments and preserved replacements.",
+      "v2_affected": "V2 values explicit; real server test pending."
+    },
+    {
+      "classification": "NOT_A_DEFECT",
+      "correction_implemented": true,
+      "current_implementation": "V1 requests temperature=0 and vLLM server seed=0.",
+      "evidence": [
+        "src/cmpilot/experiment_models.py:586",
+        "src/cmpilot/experiment_models.py:583"
+      ],
+      "exact_correction": "Run three excluded-task repetitions on target server.",
+      "issue": "deterministic decoding",
+      "number": 12,
+      "tests": [
+        "configs/v2/runtime.json",
+        "GPU NOT_TESTED_NO_GPU"
+      ],
+      "v1_affected": "Greedy decoding was configured.",
+      "v2_affected": "V2 makes temperature=0, do_sample=false, top_p=1 explicit."
+    },
+    {
+      "classification": "INTERPRETATION_LIMITATION",
+      "correction_implemented": true,
+      "current_implementation": "V1 run seeds were identity/randomization fields; request seed was null under greedy decoding.",
+      "evidence": [
+        "src/cmpilot/experiment_models.py:213",
+        "post-primary-strengthening-v1/seed-diversity/seed-diversity-summary.md"
+      ],
+      "exact_correction": "Treat runs as deterministic replicates and qualify repeatability.",
+      "issue": "seed effectiveness",
+      "number": 13,
+      "tests": [
+        "GPU NOT_TESTED_NO_GPU"
+      ],
+      "v1_affected": "Seeds did not create independent stochastic draws.",
+      "v2_affected": "No repeated study seeds invented."
+    },
+    {
+      "classification": "ACTUAL_V1_DESIGN_DEFECT",
+      "correction_implemented": false,
+      "current_implementation": "Every invalidated target already satisfies the requested behavior and faithful reuse is NO_CHANGE_BASELINE.",
+      "evidence": [
+        "families/*-v1/tasks/target-task.md",
+        "families/*-v1/references/faithful-reuse/reference.json"
+      ],
+      "exact_correction": "Prospectively redesign tasks or revise the required control semantics; neither is authorized here.",
+      "issue": "task-completion semantics",
+      "number": 14,
+      "tests": [
+        "artifacts/v2-preflight/control-matrix.json",
+        "src/cmpilot/v2_task_completion.py"
+      ],
+      "v1_affected": "YES: no action can count as functional success.",
+      "v2_affected": "BLOCKED: final-state identifiability is impossible under the required matrix."
+    },
+    {
+      "classification": "ACTUAL_V1_DESIGN_DEFECT",
+      "correction_implemented": false,
+      "current_implementation": "V1 oracles test continued target behavior, not whether the requested engineering task was completed.",
+      "evidence": [
+        "families/*-v1/oracles/functional/evaluate.py",
+        "artifacts/v2-preflight/control-matrix.json"
+      ],
+      "exact_correction": "Keep V1_FUNCTIONALITY and TASK_COMPLETION separate.",
+      "issue": "functionality-oracle semantics",
+      "number": 15,
+      "tests": [
+        "artifacts/v2-preflight/control-matrix.json"
+      ],
+      "v1_affected": "YES.",
+      "v2_affected": "V1 oracle preserved; TASK_COMPLETION cannot be identified for these frozen tasks."
+    },
+    {
+      "classification": "ACTUAL_V1_DESIGN_DEFECT",
+      "correction_implemented": false,
+      "current_implementation": "Untouched, empty, irrelevant and faithful states all pass V1 functionality in all six families.",
+      "evidence": [
+        "artifacts/v2-preflight/control-matrix.json",
+        "post-primary-strengthening-v1/analysis-summary.md:19"
+      ],
+      "exact_correction": "Require prospective task fixtures where untouched fails and both implementation controls pass.",
+      "issue": "empty-patch/no-op semantics",
+      "number": 16,
+      "tests": [
+        "artifacts/v2-preflight/control-matrix.json"
+      ],
+      "v1_affected": "YES: 46/48 final patches were empty.",
+      "v2_affected": "BLOCKED by state identity."
+    },
+    {
+      "classification": "NOT_A_DEFECT",
+      "correction_implemented": true,
+      "current_implementation": "Witnesses were externally held, hash-bound and unchanged; safe and unsafe controls show the frozen contrast.",
+      "evidence": [
+        "families/*-v1/oracles/manifest.json",
+        "artifacts/v2-preflight/v1-immutability.json"
+      ],
+      "exact_correction": "Continue hash binding and external evaluation.",
+      "issue": "security witness integrity",
+      "number": 17,
+      "tests": [
+        "artifacts/v2-preflight/control-matrix.json"
+      ],
+      "v1_affected": "No outcome-conditioned witness change found.",
+      "v2_affected": "Security controls PASS."
+    },
+    {
+      "classification": "ACTUAL_V1_DESIGN_DEFECT",
+      "correction_implemented": true,
+      "current_implementation": "NO_MEMORY injects nothing; memory injects exact frozen bytes, but usable context differed and the wrapper was non-neutral.",
+      "evidence": [
+        "src/cmpilot/mcp_pinot_backend.py:450",
+        "src/cmpilot/mcp_pinot_backend.py:501"
+      ],
+      "exact_correction": "Differ only in exact memory availability; do not pad.",
+      "issue": "treatment construction",
+      "number": 18,
+      "tests": [
+        "tests/test_v2_prompting.py",
+        "artifacts/v2-preflight/token-census-qwen.json; token-census-devstral.json"
+      ],
+      "v1_affected": "YES.",
+      "v2_affected": "V2 neutral wrapper and common B implemented."
+    },
+    {
+      "classification": "ACTUAL_V1_DESIGN_DEFECT",
+      "correction_implemented": true,
+      "current_implementation": "V1 labels content SOURCE_CORRECT_PROCEDURAL_MEMORY, cueing source/correctness.",
+      "evidence": [
+        "src/cmpilot/mcp_pinot_backend.py:70"
+      ],
+      "exact_correction": "Use the prospectively fixed neutral wrapper.",
+      "issue": "memory rendering",
+      "number": 19,
+      "tests": [
+        "tests/test_v2_prompting.py"
+      ],
+      "v1_affected": "YES as a cueing limitation.",
+      "v2_affected": "V2 uses ADDITIONAL_TASK_CONTEXT without changing memory bytes."
+    },
+    {
+      "classification": "NOT_A_DEFECT",
+      "correction_implemented": true,
+      "current_implementation": "Both models share the same text-action loop, policies, repository and evaluator path; only native serialization/server loader differ.",
+      "evidence": [
+        "src/cmpilot/final_model_runtime.py",
+        "src/cmpilot/devstral_mini_swe_adapter.py"
+      ],
+      "exact_correction": "Qualify both exact servers with the same synthetic checklist.",
+      "issue": "model adapter parity",
+      "number": 20,
+      "tests": [
+        "tests/test_v2_qualification.py",
+        "GPU NOT_TESTED_NO_GPU"
+      ],
+      "v1_affected": "No accidental scientific-path asymmetry found in latest V1.",
+      "v2_affected": "Static V2 profiles are aligned; GPU parity untested."
+    },
+    {
+      "classification": "ACTUAL_V1_DESIGN_DEFECT",
+      "correction_implemented": true,
+      "current_implementation": "V1 often derives technical validity from process exit/adapter metrics, so model-produced malformed/limit outcomes can be invalid.",
+      "evidence": [
+        "src/cmpilot/final_model_runtime.py:337"
+      ],
+      "exact_correction": "Classify listed model outcomes scientific and infrastructure failures technical invalid.",
+      "issue": "technical-invalid policy",
+      "number": 21,
+      "tests": [
+        "tests/test_v2_preflight.py"
+      ],
+      "v1_affected": "YES: scientific and infrastructure causes are not cleanly separated.",
+      "v2_affected": "V2 exhaustive policy added."
+    },
+    {
+      "classification": "NOT_A_DEFECT",
+      "correction_implemented": true,
+      "current_implementation": "Attempts are atomically reserved in new slurm-<job> directories and old attempts are never reused.",
+      "evidence": [
+        "src/cmpilot/final_experiment.py:1363"
+      ],
+      "exact_correction": "Preserve every attempt and allocate a new path.",
+      "issue": "replacement policy",
+      "number": 22,
+      "tests": [
+        "tests/test_v2_logging.py"
+      ],
+      "v1_affected": "No overwrite defect found.",
+      "v2_affected": "V2 log writer also refuses overwrite."
+    },
+    {
+      "classification": "INTERPRETATION_LIMITATION",
+      "correction_implemented": true,
+      "current_implementation": "V1 preserves trajectories, transports, patches and full command output, but omits several requested reconstruction fields and per-command raw hashes.",
+      "evidence": [
+        "src/cmpilot/integrations/miniswe/adapter_runtime.py:57",
+        "post-primary-strengthening-v1/output-manifest.json"
+      ],
+      "exact_correction": "Populate V2RunLog from the eventual runner.",
+      "issue": "trajectory logging",
+      "number": 23,
+      "tests": [
+        "tests/test_v2_logging.py"
+      ],
+      "v1_affected": "Analysis is possible but not fully self-describing.",
+      "v2_affected": "V2 schema enforces requested metadata; live integration untested."
+    },
+    {
+      "classification": "UNRESOLVED",
+      "correction_implemented": false,
+      "current_implementation": "Agent repositories omit oracles/references and command authorization blocks declared paths, but same-user filesystem access is not an OS security boundary.",
+      "evidence": [
+        "src/cmpilot/integrations/miniswe/command_authorization.py:436",
+        "families/*-v1/task-policy.json"
+      ],
+      "exact_correction": "Run agents in a sandbox exposing only the working copy and required runtime.",
+      "issue": "leakage/blinding",
+      "number": 24,
+      "tests": [
+        "tests/test_command_authorization.py",
+        "OS isolation NOT_TESTED"
+      ],
+      "v1_affected": "No observed leakage, but containment is policy-level.",
+      "v2_affected": "UNRESOLVED until a mount/container test proves hidden paths inaccessible."
+    }
+  ]
+}
