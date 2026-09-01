@@ -21,8 +21,11 @@ ROOT = Path(__file__).parents[1]
 ARTIFACT_ROOT = ROOT / "artifacts/v2-prospective-discovery"
 PROTOCOL_PATH = ROOT / "protocols/v2-prospective-family-discovery-v1.json"
 DEFAULT_SOURCE_ROOT = ROOT / ".cache/v2-prospective-discovery/sources"
+DEFAULT_UPSTREAM_ROOT = ROOT / ".cache/v2-prospective-discovery/upstreams"
 LEDGER_PATH = ARTIFACT_ROOT / "ordered-candidate-ledger.jsonl"
 SOURCE_MANIFEST_PATH = ARTIFACT_ROOT / "source-dataset-manifest.json"
+SCREENING_EVIDENCE_ROOT = ARTIFACT_ROOT / "screening-evidence"
+STAGE_B_QUESTIONS = tuple(f"T{index}" for index in range(1, 9)) + ("H1",)
 
 SOURCE_LAYOUT = {
     "vcc-eval": {
@@ -49,6 +52,13 @@ GITHUB_COMMIT_RE = re.compile(
     r"https?://github\.com/([^/\s]+/[^/\s]+?)(?:\.git)?/commit/([0-9a-fA-F]{7,64})"
 )
 REPO_COMMENT_RE = re.compile(r"^# Repo\s*:\s*([^\s]+/[^\s]+)\s*$", re.MULTILINE)
+EXECUTABLE_EXTENSIONS = {
+    ".java", ".kt", ".kts", ".scala", ".groovy", ".js", ".cjs", ".mjs",
+    ".ts", ".tsx", ".py", ".c", ".cc", ".cpp", ".cxx", ".h", ".hpp",
+    ".go", ".rs", ".rb", ".php", ".cs", ".sh",
+}
+EXCLUDED_TOP_LEVEL_PATHS = {"doc", "docs", "documentation", "test", "tests", "testing", "example", "examples"}
+EXCLUDED_ANY_PATH_PARTS = {"fixture", "fixtures", "vendor", "vendored", "generated", "benchmark", "benchmarks"}
 
 
 def sha256_bytes(value: bytes) -> str:
@@ -100,6 +110,17 @@ def git(repo: Path, *args: str, text: bool = True) -> str | bytes:
         text=text,
     )
     return result.stdout
+
+
+def run_git(repo: Path, *args: str) -> dict[str, Any]:
+    command = ["git", "-C", str(repo), *args]
+    result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    return {
+        "command": command,
+        "returncode": result.returncode,
+        "stdout": result.stdout,
+        "stderr": result.stderr,
+    }
 
 
 def git_blob(repo: Path, path: str) -> bytes:
@@ -436,6 +457,255 @@ def validate_registration_ledger(ledger_path: Path, manifest_path: Path) -> dict
     }
 
 
+def registration_records(ledger_path: Path, manifest_path: Path) -> list[dict[str, Any]]:
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    prefix = ledger_path.read_bytes()[: manifest["initial_registration_ledger_bytes"]]
+    return [json.loads(line) for line in prefix.decode("utf-8").splitlines()]
+
+
+def upstream_cache_path(repository: str, upstream_root: Path) -> Path:
+    slug = repository.removeprefix("https://github.com/").replace("/", "__")
+    return upstream_root / f"{slug}.git"
+
+
+def is_production_executable(path: str) -> bool:
+    parts = Path(path).parts
+    directories = tuple(part.lower() for part in parts[:-1])
+    excluded = (
+        (directories and directories[0] in EXCLUDED_TOP_LEVEL_PATHS)
+        or bool(set(directories) & EXCLUDED_ANY_PATH_PARTS)
+        or any(pair in {("src", "test"), ("src", "tests")} for pair in zip(directories, directories[1:]))
+    )
+    return Path(path).suffix.lower() in EXECUTABLE_EXTENSIONS and not excluded
+
+
+def static_screen_record(row: dict[str, Any], upstream_root: Path) -> tuple[dict[str, Any], dict[str, Any]]:
+    position = row["position"]
+    repository = row["repository"]
+    intro = row["INTRO/U"]
+    fix = row["FIX/R"]
+    evidence: dict[str, Any] = {
+        "schema": "v2-prospective-stage-a-static-evidence-v1",
+        "position": position,
+        "repository": repository,
+        "INTRO/U": intro,
+        "FIX/R": fix,
+        "gates": {},
+        "commands": [],
+    }
+    failure: str | None = None
+    parent: str | None = None
+
+    if not repository or not intro or not fix:
+        failure = "REJECT_A1_MISSING_REPOSITORY_INTRO_OR_FIX"
+        evidence["gates"]["A1"] = {"status": "FAIL", "reason": failure}
+    else:
+        repo = upstream_cache_path(repository, upstream_root)
+        remote_check = run_git(repo, "config", "--get", "remote.origin.url") if repo.is_dir() else None
+        a2_pass = bool(remote_check and remote_check["returncode"] == 0)
+        evidence["gates"]["A2"] = {
+            "status": "PASS" if a2_pass else "FAIL",
+            "cache_path": repo.relative_to(ROOT).as_posix() if repo.is_relative_to(ROOT) else str(repo),
+            "remote": remote_check,
+        }
+        if not a2_pass:
+            failure = "REJECT_A2_UPSTREAM_NOT_RECONSTRUCTIBLE"
+        else:
+            type_results = {revision: run_git(repo, "cat-file", "-t", revision) for revision in (intro, fix)}
+            evidence["commands"].extend(type_results.values())
+            a1_pass = all(
+                result["returncode"] == 0 and result["stdout"].strip() == "commit"
+                for result in type_results.values()
+            )
+            evidence["gates"]["A1"] = {"status": "PASS" if a1_pass else "FAIL", "objects": type_results}
+            if not a1_pass:
+                failure = "REJECT_A1_COMMIT_OBJECT_MISSING"
+            else:
+                ancestor = run_git(repo, "merge-base", "--is-ancestor", intro, fix)
+                evidence["commands"].append(ancestor)
+                evidence["gates"]["A3"] = {"status": "PASS" if ancestor["returncode"] == 0 else "FAIL", "result": ancestor}
+                if ancestor["returncode"] != 0:
+                    failure = "REJECT_A3_INTRO_NOT_ANCESTOR_OF_FIX"
+                parents_result = run_git(repo, "show", "-s", "--format=%P", intro)
+                evidence["commands"].append(parents_result)
+                parents = parents_result["stdout"].strip().split()
+                if len(parents) == 1:
+                    parent = parents[0]
+                evidence["gates"]["A4"] = {
+                    "status": "PASS" if parent else "FAIL",
+                    "parents": parents,
+                    "documented_pre_state": None,
+                }
+                if failure is None and parent is None:
+                    failure = "REJECT_A4_INTRO_NOT_SINGLE_PARENT"
+
+                diff_result = run_git(repo, "diff-tree", "--no-commit-id", "--numstat", "-r", f"{intro}^", intro)
+                evidence["commands"].append(diff_result)
+                changed: list[dict[str, Any]] = []
+                for line in diff_result["stdout"].splitlines():
+                    fields = line.split("\t", 2)
+                    if len(fields) != 3:
+                        continue
+                    added, deleted, path = fields
+                    changed.append(
+                        {
+                            "path": path,
+                            "added": int(added) if added.isdigit() else None,
+                            "deleted": int(deleted) if deleted.isdigit() else None,
+                            "production_executable": is_production_executable(path),
+                        }
+                    )
+                executable = [item for item in changed if item["production_executable"]]
+                a8_pass = diff_result["returncode"] == 0 and bool(executable)
+                evidence["gates"]["A8"] = {"status": "PASS" if a8_pass else "FAIL", "changed_paths": changed, "qualifying_paths": executable}
+                if failure is None and not a8_pass:
+                    failure = "REJECT_A8_NO_EXECUTABLE_CODE_CHANGE"
+
+                message_result = run_git(repo, "show", "-s", "--format=%s%n%b", intro)
+                evidence["commands"].append(message_result)
+                added_executable_lines = sum(item["added"] or 0 for item in executable)
+                a9_pass = bool(message_result["stdout"].strip()) and added_executable_lines > 0
+                evidence["gates"]["A9"] = {
+                    "status": "PASS" if a9_pass else "FAIL",
+                    "commit_message": message_result["stdout"],
+                    "added_executable_lines": added_executable_lines,
+                }
+                if failure is None and not a9_pass:
+                    failure = "REJECT_A9_NO_POTENTIALLY_DISTINGUISHABLE_FUNCTIONAL_CHANGE"
+
+    evidence["static_decision"] = "REJECTED" if failure else "PASS_PENDING_STAGE_B"
+    evidence["rejection_reason"] = failure
+    evidence_bytes = (json.dumps(evidence, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    event = dict(row)
+    event.update(
+        {
+            "event_type": "STAGE_A_STATIC_RESULT",
+            "B": parent,
+            "build_status": "NOT_RUN_EARLY_STATIC",
+            "final_decision": "REJECTED" if failure else "PENDING_STAGE_B",
+            "rejection_reason": failure,
+            "stage_statuses": {
+                "A": "FAIL" if failure else "STATIC_PASS_DYNAMIC_DEFERRED",
+                "B": "NOT_SCREENED",
+                "C": "NOT_SCREENED",
+            },
+            "evidence_hashes": {"stage_a_static": sha256_bytes(evidence_bytes)},
+        }
+    )
+    return event, evidence
+
+
+def screen_static(
+    ledger_path: Path,
+    manifest_path: Path,
+    upstream_root: Path,
+    evidence_root: Path,
+    start: int,
+    end: int,
+) -> dict[str, Any]:
+    validation = validate_registration_ledger(ledger_path, manifest_path)
+    if validation["append_bytes"] != 0:
+        raise ValueError("static screening requires a registration-only ledger")
+    rows = registration_records(ledger_path, manifest_path)
+    selected = [row for row in rows if start <= row["position"] <= end]
+    if [row["position"] for row in selected] != list(range(start, end + 1)):
+        raise ValueError("requested screening range is not contiguous in candidate ledger")
+    events: list[dict[str, Any]] = []
+    for row in selected:
+        event, evidence = static_screen_record(row, upstream_root)
+        evidence_bytes = (json.dumps(evidence, indent=2, sort_keys=True) + "\n").encode("utf-8")
+        evidence_path = evidence_root / f"position-{row['position']:04d}" / "stage-a-static.json"
+        evidence_path.parent.mkdir(parents=True, exist_ok=True)
+        if evidence_path.exists():
+            raise FileExistsError(f"refusing to overwrite {evidence_path}")
+        evidence_path.write_bytes(evidence_bytes)
+        events.append(event)
+    with ledger_path.open("a", encoding="utf-8") as handle:
+        for event in events:
+            handle.write(canonical_json(event) + "\n")
+    rejected = sum(event["final_decision"] == "REJECTED" for event in events)
+    return {"screened": len(events), "rejected": rejected, "pending_stage_b": len(events) - rejected}
+
+
+def ledger_events(ledger_path: Path) -> list[dict[str, Any]]:
+    return [json.loads(line) for line in ledger_path.read_text(encoding="utf-8").splitlines()]
+
+
+def validate_stage_b_form(value: dict[str, Any], expected_position: int) -> None:
+    if value.get("schema") != "v2-prospective-stage-b-task-review-v1":
+        raise ValueError("invalid Stage B form schema")
+    if value.get("position") != expected_position:
+        raise ValueError("Stage B form position mismatch")
+    answers = value.get("answers")
+    if not isinstance(answers, dict) or tuple(answers) != STAGE_B_QUESTIONS:
+        raise ValueError("Stage B form must contain T1-T8 and H1 in order")
+    for key, answer in answers.items():
+        if answer.get("answer") not in {"YES", "NO"}:
+            raise ValueError(f"invalid answer for {key}")
+        if not answer.get("evidence"):
+            raise ValueError(f"missing evidence for {key}")
+    all_yes = all(answer["answer"] == "YES" for answer in answers.values())
+    expected_decision = "PASS_STATIC_IDENTIFIABLE_PENDING_EXECUTION" if all_yes else "REJECTED"
+    if value.get("decision") != expected_decision:
+        raise ValueError("Stage B decision does not follow unanimous rule")
+    if all_yes and value.get("rejection_reason") is not None:
+        raise ValueError("passing Stage B form has rejection reason")
+    if not all_yes and not value.get("rejection_reason"):
+        raise ValueError("rejected Stage B form lacks rejection reason")
+
+
+def record_stage_b(
+    ledger_path: Path,
+    manifest_path: Path,
+    evidence_root: Path,
+    start: int,
+    end: int,
+) -> dict[str, Any]:
+    validate_registration_ledger(ledger_path, manifest_path)
+    events = ledger_events(ledger_path)
+    existing_stage_b = {event["position"] for event in events if event["event_type"] == "STAGE_B_RESULT"}
+    if existing_stage_b & set(range(start, end + 1)):
+        raise ValueError("refusing to append duplicate Stage B event")
+    latest: dict[int, dict[str, Any]] = {}
+    for event in events:
+        latest[event["position"]] = event
+    output: list[dict[str, Any]] = []
+    for position in range(start, end + 1):
+        prior = latest.get(position)
+        if not prior or prior["event_type"] != "STAGE_A_STATIC_RESULT":
+            raise ValueError(f"position {position} lacks Stage A static result")
+        if prior["final_decision"] == "REJECTED":
+            continue
+        form_path = evidence_root / f"position-{position:04d}" / "stage-b-task-identifiability.json"
+        form = json.loads(form_path.read_text(encoding="utf-8"))
+        validate_stage_b_form(form, position)
+        form_sha = sha256_bytes(form_path.read_bytes())
+        passed = form["decision"] == "PASS_STATIC_IDENTIFIABLE_PENDING_EXECUTION"
+        event = dict(prior)
+        hashes = dict(prior["evidence_hashes"])
+        hashes["stage_b_task_identifiability"] = form_sha
+        event.update(
+            {
+                "event_type": "STAGE_B_RESULT",
+                "task_identifiability": form["decision"],
+                "final_decision": "PENDING_STAGE_C" if passed else "REJECTED",
+                "rejection_reason": form["rejection_reason"],
+                "stage_statuses": {
+                    "A": prior["stage_statuses"]["A"],
+                    "B": "STATIC_PASS_EXECUTION_DEFERRED" if passed else "FAIL",
+                    "C": "NOT_SCREENED",
+                },
+                "evidence_hashes": hashes,
+            }
+        )
+        output.append(event)
+    with ledger_path.open("a", encoding="utf-8") as handle:
+        for event in output:
+            handle.write(canonical_json(event) + "\n")
+    rejected = sum(event["final_decision"] == "REJECTED" for event in output)
+    return {"recorded": len(output), "rejected": rejected, "pending_stage_c": len(output) - rejected}
+
+
 def main(argv: Iterable[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -446,12 +716,54 @@ def main(argv: Iterable[str] | None = None) -> int:
     validate_parser = subparsers.add_parser("validate")
     validate_parser.add_argument("--ledger", type=Path, default=LEDGER_PATH)
     validate_parser.add_argument("--manifest", type=Path, default=SOURCE_MANIFEST_PATH)
+    static_parser = subparsers.add_parser("screen-static")
+    static_parser.add_argument("--ledger", type=Path, default=LEDGER_PATH)
+    static_parser.add_argument("--manifest", type=Path, default=SOURCE_MANIFEST_PATH)
+    static_parser.add_argument("--upstream-root", type=Path, default=DEFAULT_UPSTREAM_ROOT)
+    static_parser.add_argument("--evidence-root", type=Path, default=SCREENING_EVIDENCE_ROOT)
+    static_parser.add_argument("--start", type=int, required=True)
+    static_parser.add_argument("--end", type=int, required=True)
+    stage_b_parser = subparsers.add_parser("record-stage-b")
+    stage_b_parser.add_argument("--ledger", type=Path, default=LEDGER_PATH)
+    stage_b_parser.add_argument("--manifest", type=Path, default=SOURCE_MANIFEST_PATH)
+    stage_b_parser.add_argument("--evidence-root", type=Path, default=SCREENING_EVIDENCE_ROOT)
+    stage_b_parser.add_argument("--start", type=int, required=True)
+    stage_b_parser.add_argument("--end", type=int, required=True)
     args = parser.parse_args(list(argv) if argv is not None else None)
     if args.command == "materialize":
         print(json.dumps(materialize(args.source_root, args.ledger, args.manifest), sort_keys=True))
         return 0
     if args.command == "validate":
         print(json.dumps(validate_registration_ledger(args.ledger, args.manifest), sort_keys=True))
+        return 0
+    if args.command == "screen-static":
+        print(
+            json.dumps(
+                screen_static(
+                    args.ledger,
+                    args.manifest,
+                    args.upstream_root,
+                    args.evidence_root,
+                    args.start,
+                    args.end,
+                ),
+                sort_keys=True,
+            )
+        )
+        return 0
+    if args.command == "record-stage-b":
+        print(
+            json.dumps(
+                record_stage_b(
+                    args.ledger,
+                    args.manifest,
+                    args.evidence_root,
+                    args.start,
+                    args.end,
+                ),
+                sort_keys=True,
+            )
+        )
         return 0
     raise AssertionError(args.command)
 

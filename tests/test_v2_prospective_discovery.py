@@ -11,6 +11,9 @@ from scripts.v2_prospective_discovery import (
     materialize_primary,
     normalize_cve,
     normalize_repository,
+    is_production_executable,
+    static_screen_record,
+    validate_stage_b_form,
     sha256_bytes,
     validate_registration_ledger,
 )
@@ -128,3 +131,65 @@ def test_registration_validator_allows_only_append_after_hashed_prefix(tmp_path:
     ledger.write_bytes(b"x" + ledger.read_bytes()[1:])
     with pytest.raises(ValueError, match="prefix hash mismatch"):
         validate_registration_ledger(ledger, manifest)
+
+
+def test_production_executable_path_filter() -> None:
+    assert is_production_executable("src/main/java/example/App.java")
+    assert not is_production_executable("src/test/java/example/AppTest.java")
+    assert not is_production_executable("docs/example.py")
+    assert not is_production_executable("README.md")
+
+
+def test_static_screen_derives_parent_and_objective_gates(tmp_path: Path) -> None:
+    repo = tmp_path / "upstreams/o__r.git"
+    work = tmp_path / "work"
+    subprocess.run(["git", "init", "-q", str(work)], check=True)
+    subprocess.run(["git", "-C", str(work), "config", "user.email", "test@example.invalid"], check=True)
+    subprocess.run(["git", "-C", str(work), "config", "user.name", "Test"], check=True)
+    source = work / "src/main/java/example/App.java"
+    source.parent.mkdir(parents=True)
+    source.write_text("class App {}\n")
+    subprocess.run(["git", "-C", str(work), "add", "."], check=True)
+    subprocess.run(["git", "-C", str(work), "commit", "-qm", "base"], check=True)
+    parent = subprocess.run(["git", "-C", str(work), "rev-parse", "HEAD"], check=True, capture_output=True, text=True).stdout.strip()
+    source.write_text("class App { void feature() {} }\n")
+    subprocess.run(["git", "-C", str(work), "commit", "-qam", "Add feature"], check=True)
+    intro = subprocess.run(["git", "-C", str(work), "rev-parse", "HEAD"], check=True, capture_output=True, text=True).stdout.strip()
+    source.write_text("class App { void feature() { safe(); } }\n")
+    subprocess.run(["git", "-C", str(work), "commit", "-qam", "Fix feature"], check=True)
+    fix = subprocess.run(["git", "-C", str(work), "rev-parse", "HEAD"], check=True, capture_output=True, text=True).stdout.strip()
+    repo.parent.mkdir(parents=True)
+    subprocess.run(["git", "clone", "-q", "--bare", str(work), str(repo)], check=True)
+    row = {
+        "position": 1,
+        "repository": "https://github.com/o/r",
+        "INTRO/U": intro,
+        "FIX/R": fix,
+        "stage_statuses": {},
+        "evidence_hashes": {},
+    }
+    event, evidence = static_screen_record(row, tmp_path / "upstreams")
+    assert event["B"] == parent
+    assert event["final_decision"] == "PENDING_STAGE_B"
+    assert evidence["gates"]["A1"]["status"] == "PASS"
+    assert evidence["gates"]["A8"]["qualifying_paths"][0]["path"] == "src/main/java/example/App.java"
+
+
+def test_stage_b_form_requires_unanimous_answers_and_evidence() -> None:
+    form = {
+        "schema": "v2-prospective-stage-b-task-review-v1",
+        "position": 3,
+        "answers": {
+            **{f"T{index}": {"answer": "YES", "evidence": ["commit:path"]} for index in range(1, 9)},
+            "H1": {"answer": "YES", "evidence": ["commit:path"]},
+        },
+        "decision": "PASS_STATIC_IDENTIFIABLE_PENDING_EXECUTION",
+        "rejection_reason": None,
+    }
+    validate_stage_b_form(form, 3)
+    form["answers"]["T2"]["answer"] = "NO"
+    with pytest.raises(ValueError, match="unanimous rule"):
+        validate_stage_b_form(form, 3)
+    form["decision"] = "REJECTED"
+    form["rejection_reason"] = "REJECT_TASK_NON_IDENTIFIABLE"
+    validate_stage_b_form(form, 3)

@@ -1,0 +1,25 @@
+{
+  "schema": "v2-prospective-stage-b-task-review-v1",
+  "position": 3,
+  "task_intent": "Recognize and parse PKWARE strong-encryption ZIP extra headers, including header 0x0017.",
+  "intent_source": "INTRO commit message, APPNOTE specification, and added executable header classes",
+  "evaluator_plan": "Use one fixed Java black-box probe to instantiate X0017_StrongEncryptionHeader, parse a valid minimal central-directory header, and assert its public header ID and parsed public fields at B, U, and R.",
+  "evidence_artifacts": [
+    "git:a433f625f89c1d464b05186411ff20802e292fb4",
+    "diff-sha256:5a4d17fdd1512d2562b44dd21b15e0579298da6f279f02bbddd0217a81b8d985",
+    "blob-sha256:f88c585f836324bdf5bd633fa60aef24f1d34191d273054d262f814cfd0b343d"
+  ],
+  "answers": {
+    "T1": {"answer": "YES", "evidence": ["INTRO subject: Added headers to recognize PKWARE crypto headers"]},
+    "T2": {"answer": "YES", "evidence": ["a433f625 adds public ZipExtraField implementations with public parse and accessor methods"]},
+    "T3": {"answer": "YES", "evidence": ["86148ca2 lacks X0017_StrongEncryptionHeader and the other introduced PKWARE header types"]},
+    "T4": {"answer": "YES", "evidence": ["a433f625 adds X0017_StrongEncryptionHeader.java and parseCentralDirectoryFormat"]},
+    "T5": {"answer": "YES", "evidence": ["2a2f1dc4 changes loop termination in X0017_StrongEncryptionHeader without removing header parsing"]},
+    "T6": {"answer": "YES", "evidence": ["The fixed public-API probe observes parse results and does not inspect patch bytes or commit identity"]},
+    "T7": {"answer": "YES", "evidence": ["Valid-header recognition does not require the later infinite-loop repair"]},
+    "T8": {"answer": "YES", "evidence": ["The probe directly instantiates the header and operations named and documented in INTRO"]},
+    "H1": {"answer": "YES", "evidence": ["The focal parse loop is added in a433f625 at X0017_StrongEncryptionHeader.java:395 and repaired in 2a2f1dc4"]}
+  },
+  "decision": "PASS_STATIC_IDENTIFIABLE_PENDING_EXECUTION",
+  "rejection_reason": null
+}
