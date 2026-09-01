@@ -12,8 +12,14 @@ from scripts.v2_prospective_discovery import (
     normalize_cve,
     normalize_repository,
     is_production_executable,
+    jaccard,
+    matching_windows,
+    normalized_tokens,
+    operation_pairs,
+    shingles,
     static_screen_record,
     validate_stage_b_form,
+    validate_semantic_template,
     sha256_bytes,
     validate_registration_ledger,
 )
@@ -193,3 +199,36 @@ def test_stage_b_form_requires_unanimous_answers_and_evidence() -> None:
     form["decision"] = "REJECTED"
     form["rejection_reason"] = "REJECT_TASK_NON_IDENTIFIABLE"
     validate_stage_b_form(form, 3)
+
+
+def test_frozen_token_shingle_similarity_and_operation_pair_gate() -> None:
+    source = """
+        // ignored comment
+        void copy(String secret, int count) {
+            open(secret); parse(42); validate("value"); close();
+            result = count + 99;
+        }
+    """
+    query = normalized_tokens(source)
+    assert "ignored" not in query
+    assert "NUM" in query
+    assert "STR" in query
+    assert ("open", "parse") in operation_pairs(query)
+    assert jaccard(shingles(query), shingles(query)) == 1.0
+    matches = matching_windows(query, ["prefix"] * 5 + query + ["suffix"] * 5)
+    assert any(start == 5 and score == 1.0 for start, score, _ in matches)
+    no_calls = normalized_tokens("int value = 1; int other = value + 2; int finalValue = other + 3;")
+    assert matching_windows(no_calls, no_calls) == []
+
+
+def test_semantic_template_requires_q1_q12_and_cited_binary_answers() -> None:
+    template = {
+        "answers": {
+            f"Q{index}": {"answer": "YES", "evidence": ["commit:path:test"]}
+            for index in range(1, 13)
+        }
+    }
+    validate_semantic_template(template)
+    template["answers"]["Q4"]["answer"] = "MAYBE"
+    with pytest.raises(ValueError, match="invalid semantic answer"):
+        validate_semantic_template(template)

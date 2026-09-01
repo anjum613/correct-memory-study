@@ -11,6 +11,7 @@ import json
 import re
 import subprocess
 import sys
+import math
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -26,6 +27,7 @@ LEDGER_PATH = ARTIFACT_ROOT / "ordered-candidate-ledger.jsonl"
 SOURCE_MANIFEST_PATH = ARTIFACT_ROOT / "source-dataset-manifest.json"
 SCREENING_EVIDENCE_ROOT = ARTIFACT_ROOT / "screening-evidence"
 STAGE_B_QUESTIONS = tuple(f"T{index}" for index in range(1, 9)) + ("H1",)
+SEMANTIC_QUESTIONS = tuple(f"Q{index}" for index in range(1, 13))
 
 SOURCE_LAYOUT = {
     "vcc-eval": {
@@ -52,6 +54,14 @@ GITHUB_COMMIT_RE = re.compile(
     r"https?://github\.com/([^/\s]+/[^/\s]+?)(?:\.git)?/commit/([0-9a-fA-F]{7,64})"
 )
 REPO_COMMENT_RE = re.compile(r"^# Repo\s*:\s*([^\s]+/[^\s]+)\s*$", re.MULTILINE)
+LEX_RE = re.compile(
+    r"//[^\n]*|/\*.*?\*/|'(?:\\.|[^'\\])*'|\"(?:\\.|[^\"\\])*\"|"
+    r"[A-Za-z_$][A-Za-z0-9_$]*|0[xX][0-9A-Fa-f]+|[0-9]+(?:\.[0-9]+)?|[^\s]",
+    re.DOTALL,
+)
+IDENTIFIER_RE = re.compile(r"^[A-Za-z_$][A-Za-z0-9_$]*$")
+NUMBER_RE = re.compile(r"^(?:0[xX][0-9A-Fa-f]+|[0-9]+(?:\.[0-9]+)?)$")
+CONTROL_CALL_WORDS = {"if", "for", "while", "switch", "catch", "return", "throw", "new", "synchronized"}
 EXECUTABLE_EXTENSIONS = {
     ".java", ".kt", ".kts", ".scala", ".groovy", ".js", ".cjs", ".mjs",
     ".ts", ".tsx", ".py", ".c", ".cc", ".cpp", ".cxx", ".h", ".hpp",
@@ -108,13 +118,20 @@ def git(repo: Path, *args: str, text: bool = True) -> str | bytes:
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=text,
+        errors="replace" if text else None,
     )
     return result.stdout
 
 
 def run_git(repo: Path, *args: str) -> dict[str, Any]:
     command = ["git", "-C", str(repo), *args]
-    result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    result = subprocess.run(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        errors="replace",
+    )
     return {
         "command": command,
         "returncode": result.returncode,
@@ -706,6 +723,476 @@ def record_stage_b(
     return {"recorded": len(output), "rejected": rejected, "pending_stage_c": len(output) - rejected}
 
 
+def normalized_tokens(source: str) -> list[str]:
+    tokens: list[str] = []
+    for match in LEX_RE.finditer(source):
+        token = match.group(0)
+        if token.startswith("//") or token.startswith("/*"):
+            continue
+        if token.startswith(("'", '"')):
+            tokens.append("STR")
+        elif NUMBER_RE.fullmatch(token):
+            tokens.append("NUM")
+        elif IDENTIFIER_RE.fullmatch(token):
+            tokens.append(token.lower())
+        else:
+            tokens.append(token)
+    return tokens
+
+
+def operation_sequence(tokens: list[str]) -> list[tuple[str, int]]:
+    return [
+        (token, index)
+        for index, token in enumerate(tokens[:-1])
+        if IDENTIFIER_RE.fullmatch(token) and token not in CONTROL_CALL_WORDS and tokens[index + 1] == "("
+    ]
+
+
+def operation_pairs(tokens: list[str]) -> dict[tuple[str, str], list[tuple[int, int]]]:
+    operations = operation_sequence(tokens)
+    pairs: dict[tuple[str, str], list[tuple[int, int]]] = {}
+    for (first, first_index), (second, second_index) in zip(operations, operations[1:]):
+        pairs.setdefault((first, second), []).append((first_index, second_index))
+    return pairs
+
+
+def shingles(tokens: list[str], width: int = 5) -> set[tuple[str, ...]]:
+    return {tuple(tokens[index : index + width]) for index in range(len(tokens) - width + 1)}
+
+
+def jaccard(left: set[tuple[str, ...]], right: set[tuple[str, ...]]) -> float:
+    union = left | right
+    return len(left & right) / len(union) if union else 0.0
+
+
+def matching_windows(
+    query: list[str],
+    source: list[str],
+    query_pairs: dict[tuple[str, str], list[tuple[int, int]]] | None = None,
+    source_pairs: dict[tuple[str, str], list[tuple[int, int]]] | None = None,
+) -> list[tuple[int, float, tuple[str, str]]]:
+    if len(query) < 20 or len(source) < 20:
+        return []
+    query_pairs = query_pairs if query_pairs is not None else operation_pairs(query)
+    source_pairs = source_pairs if source_pairs is not None else operation_pairs(source)
+    shared_pairs = sorted(set(query_pairs) & set(source_pairs))
+    if not shared_pairs:
+        return []
+    query_shingles = shingles(query)
+    window_length = min(len(query), len(source))
+    pair_by_start: dict[int, tuple[str, str]] = {}
+    if len(source) <= len(query):
+        for pair in shared_pairs:
+            pair_by_start.setdefault(0, pair)
+    else:
+        for pair in shared_pairs:
+            for first_index, second_index in source_pairs[pair]:
+                lower = max(0, second_index - window_length + 1)
+                upper = min(first_index, len(source) - window_length)
+                for start in range(lower, upper + 1):
+                    pair_by_start.setdefault(start, pair)
+    if not pair_by_start:
+        return []
+    source_shingles = [tuple(source[index : index + 5]) for index in range(len(source) - 4)]
+    shingle_count = window_length - 4
+    matching_prefix = [0]
+    for source_shingle in source_shingles:
+        matching_prefix.append(matching_prefix[-1] + int(source_shingle in query_shingles))
+    minimum_matching_occurrences = math.ceil(0.75 * len(query_shingles))
+    matches: list[tuple[int, float, tuple[str, str]]] = []
+    for start, pair in sorted(pair_by_start.items()):
+        matching_occurrences = matching_prefix[start + shingle_count] - matching_prefix[start]
+        if matching_occurrences < minimum_matching_occurrences:
+            continue
+        source_set = set(source_shingles[start : start + shingle_count])
+        score = jaccard(query_shingles, source_set)
+        if score >= 0.75:
+            matches.append((start, score, pair))
+    return matches
+
+
+def extract_query_blocks(repo: Path, base: str, intro: str) -> list[dict[str, Any]]:
+    paths_result = run_git(repo, "diff", "--name-only", base, intro)
+    paths = [path for path in paths_result["stdout"].splitlines() if is_production_executable(path)]
+    diff_result = run_git(repo, "diff", "--no-color", "--unified=12", base, intro, "--", *paths)
+    queries: list[dict[str, Any]] = []
+    path: str | None = None
+    hunk_lines: list[str] = []
+    added_lines: list[str] = []
+    hunk_start = 0
+    current_line = 0
+
+    def add_query(kind: str, lines: list[str], start_line: int) -> None:
+        if not path or not lines:
+            return
+        tokens = normalized_tokens("\n".join(lines))
+        if len(tokens) < 20:
+            return
+        pairs = operation_pairs(tokens)
+        if not pairs:
+            return
+        token_bytes = "\n".join(tokens).encode("utf-8")
+        queries.append(
+            {
+                "kind": kind,
+                "path": path,
+                "start_line": start_line,
+                "tokens": tokens,
+                "token_count": len(tokens),
+                "normalized_sha256": sha256_bytes(token_bytes),
+                "operation_pairs": [list(pair) for pair in sorted(pairs)],
+            }
+        )
+
+    def flush_added() -> None:
+        nonlocal added_lines
+        if added_lines:
+            add_query("maximal_added_block", added_lines, current_line - len(added_lines))
+            added_lines = []
+
+    def flush_hunk() -> None:
+        nonlocal hunk_lines
+        flush_added()
+        if hunk_lines:
+            add_query("modified_function_region", hunk_lines, hunk_start)
+            hunk_lines = []
+
+    for line in diff_result["stdout"].splitlines():
+        if line.startswith("+++ b/"):
+            flush_hunk()
+            path = line[6:]
+            continue
+        if line.startswith("@@"):
+            flush_hunk()
+            match = re.search(r"\+([0-9]+)", line)
+            hunk_start = int(match.group(1)) if match else 0
+            current_line = hunk_start
+            continue
+        if not hunk_lines and not added_lines and (line.startswith("diff --git") or line.startswith("--- ")):
+            continue
+        if line.startswith("+") and not line.startswith("+++"):
+            added_lines.append(line[1:])
+            hunk_lines.append(line[1:])
+            current_line += 1
+        elif line.startswith(" "):
+            flush_added()
+            hunk_lines.append(line[1:])
+            current_line += 1
+        elif line.startswith("-") and not line.startswith("---"):
+            flush_added()
+    flush_hunk()
+    deduplicated: dict[tuple[str, str, int, str], dict[str, Any]] = {}
+    for query in queries:
+        key = (query["kind"], query["path"], query["start_line"], query["normalized_sha256"])
+        deduplicated[key] = query
+    return list(deduplicated.values())
+
+
+def reachable_executable_blobs(repo: Path, before: str) -> list[tuple[str, str]]:
+    # The promisor-clone filter option can itself trigger one remote traversal.
+    # Plain --objects walks the locally present commit/tree graph and lists the
+    # promised blob IDs and paths without fetching blob contents.
+    result = run_git(repo, "rev-list", "--objects", before)
+    if result["returncode"] != 0:
+        raise ValueError(result["stderr"] or "git rev-list failed")
+    blobs: dict[tuple[str, str], None] = {}
+    for line in result["stdout"].splitlines():
+        fields = line.split(" ", 1)
+        if len(fields) != 2:
+            continue
+        oid, path = fields
+        if is_production_executable(path):
+            blobs[(oid, path)] = None
+    return sorted(blobs)
+
+
+def iter_blob_bytes(repo: Path, rows: list[tuple[str, str]]) -> Iterable[tuple[str, str, bytes]]:
+    process = subprocess.Popen(
+        ["git", "-C", str(repo), "cat-file", "--batch"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    assert process.stdin is not None
+    assert process.stdout is not None
+    try:
+        for oid, path in rows:
+            process.stdin.write(f"{oid}\n".encode("ascii"))
+            process.stdin.flush()
+            header = process.stdout.readline().decode("ascii", errors="replace").strip().split()
+            if len(header) != 3:
+                raise ValueError(f"unexpected cat-file header for {oid}: {' '.join(header)}")
+            size = int(header[2])
+            raw = process.stdout.read(size)
+            separator = process.stdout.read(1)
+            if len(raw) != size or separator != b"\n":
+                raise ValueError(f"truncated cat-file output for {oid}")
+            if header[1] == "blob":
+                yield oid, path, raw
+        process.stdin.close()
+        returncode = process.wait()
+        if returncode != 0:
+            stderr = process.stderr.read().decode("utf-8", errors="replace") if process.stderr else ""
+            raise ValueError(f"git cat-file --batch failed: {stderr}")
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait()
+
+
+def source_commits_for_blob(repo: Path, before: str, oid: str, path: str) -> list[tuple[str, int]]:
+    history = run_git(repo, "log", "--format=%H %ct", "--reverse", f"--find-object={oid}", before, "--", path)
+    matches: list[tuple[str, int]] = []
+    for line in history["stdout"].splitlines():
+        fields = line.split()
+        if len(fields) != 2:
+            continue
+        commit, timestamp = fields
+        blob = run_git(repo, "rev-parse", f"{commit}:{path}")
+        if blob["returncode"] == 0 and blob["stdout"].strip() == oid:
+            matches.append((commit, int(timestamp)))
+    return matches
+
+
+def retrieve_source_analogues(repo: Path, base: str, intro: str) -> dict[str, Any]:
+    queries = extract_query_blocks(repo, base, intro)
+    query_pair_maps = [operation_pairs(query["tokens"]) for query in queries]
+    queries_by_pair: dict[tuple[str, str], set[int]] = {}
+    for query_index, pair_map in enumerate(query_pair_maps):
+        for pair in pair_map:
+            queries_by_pair.setdefault(pair, set()).add(query_index)
+    blob_rows = reachable_executable_blobs(repo, f"{base}^")
+    matches: list[dict[str, Any]] = []
+    scanned = 0
+    commit_cache: dict[tuple[str, str], list[tuple[str, int]]] = {}
+    for oid, path, raw in iter_blob_bytes(repo, blob_rows):
+        source = normalized_tokens(raw.decode("utf-8", errors="replace"))
+        source_pair_map = operation_pairs(source)
+        relevant_queries: set[int] = set()
+        for pair in source_pair_map:
+            relevant_queries.update(queries_by_pair.get(pair, ()))
+        scanned += 1
+        for query_index in sorted(relevant_queries):
+            query = queries[query_index]
+            for start, score, pair in matching_windows(
+                query["tokens"], source, query_pair_maps[query_index], source_pair_map
+            ):
+                cache_key = (oid, path)
+                if cache_key not in commit_cache:
+                    commit_cache[cache_key] = source_commits_for_blob(repo, f"{base}^", oid, path)
+                commits = commit_cache[cache_key]
+                for commit, timestamp in commits:
+                    window = source[start : start + min(len(query["tokens"]), len(source))]
+                    matches.append(
+                        {
+                            "similarity": score,
+                            "source_commit_timestamp": timestamp,
+                            "source_commit": commit,
+                            "source_blob": oid,
+                            "source_path": path,
+                            "source_start_token_offset": start,
+                            "source_window_token_count": len(window),
+                            "source_window_sha256": sha256_bytes("\n".join(window).encode("utf-8")),
+                            "shared_operation_pair": list(pair),
+                            "query_index": query_index,
+                            "query_path": query["path"],
+                            "query_offset": query["start_line"],
+                            "query_normalized_sha256": query["normalized_sha256"],
+                            "query_token_count": query["token_count"],
+                        }
+                    )
+    unique = {
+        (
+            match["source_commit"], match["source_path"], match["source_start_token_offset"],
+            match["query_normalized_sha256"], match["query_offset"],
+        ): match
+        for match in matches
+    }
+    ordered = sorted(
+        unique.values(),
+        key=lambda match: (
+            -match["similarity"], match["source_commit_timestamp"], match["source_commit"],
+            match["source_path"], match["source_start_token_offset"], match["query_path"], match["query_offset"],
+        ),
+    )
+    public_queries = [{key: value for key, value in query.items() if key != "tokens"} for query in queries]
+    return {
+        "schema": "v2-prospective-stage-c-source-retrieval-v1",
+        "base": base,
+        "intro": intro,
+        "minimum_tokens": 20,
+        "shingle_width": 5,
+        "minimum_similarity": 0.75,
+        "source_scope": f"{base}^",
+        "query_count": len(public_queries),
+        "queries": public_queries,
+        "source_blob_count": len(blob_rows),
+        "source_blobs_scanned": scanned,
+        "analogue_count": len(ordered),
+        "analogues": ordered,
+    }
+
+
+def run_stage_c(
+    ledger_path: Path,
+    manifest_path: Path,
+    upstream_root: Path,
+    evidence_root: Path,
+    position: int,
+) -> dict[str, Any]:
+    validate_registration_ledger(ledger_path, manifest_path)
+    events = ledger_events(ledger_path)
+    if any(event["event_type"] == "STAGE_C_RETRIEVAL_RESULT" and event["position"] == position for event in events):
+        raise ValueError("refusing to append duplicate Stage C event")
+    latest = [event for event in events if event["position"] == position][-1]
+    if latest["event_type"] != "STAGE_B_RESULT" or latest["final_decision"] != "PENDING_STAGE_C":
+        raise ValueError("candidate is not pending Stage C")
+    repo = upstream_cache_path(latest["repository"], upstream_root)
+    retrieval = retrieve_source_analogues(repo, latest["B"], latest["INTRO/U"])
+    retrieval["position"] = position
+    evidence_bytes = (json.dumps(retrieval, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    evidence_path = evidence_root / f"position-{position:04d}" / "stage-c-source-retrieval.json"
+    if evidence_path.exists():
+        raise FileExistsError(f"refusing to overwrite {evidence_path}")
+    evidence_path.write_bytes(evidence_bytes)
+    count = retrieval["analogue_count"]
+    event = dict(latest)
+    hashes = dict(latest["evidence_hashes"])
+    hashes["stage_c_source_retrieval"] = sha256_bytes(evidence_bytes)
+    event.update(
+        {
+            "event_type": "STAGE_C_RETRIEVAL_RESULT",
+            "source_analogue_count": count,
+            "final_decision": "PENDING_SEMANTIC_REVIEW" if count else "REJECTED",
+            "rejection_reason": None if count else "REJECT_NO_QUALIFYING_SOURCE_ANALOGUE",
+            "stage_statuses": {
+                "A": latest["stage_statuses"]["A"],
+                "B": latest["stage_statuses"]["B"],
+                "C": "PASS" if count else "FAIL",
+            },
+            "evidence_hashes": hashes,
+        }
+    )
+    with ledger_path.open("a", encoding="utf-8") as handle:
+        handle.write(canonical_json(event) + "\n")
+    return {"position": position, "query_count": retrieval["query_count"], "source_blob_count": retrieval["source_blob_count"], "analogue_count": count, "decision": event["final_decision"]}
+
+
+def validate_semantic_template(template: dict[str, Any]) -> None:
+    answers = template.get("answers")
+    if not isinstance(answers, dict) or tuple(answers) != SEMANTIC_QUESTIONS:
+        raise ValueError("semantic template must contain Q1-Q12 in order")
+    for question, answer in answers.items():
+        if answer.get("answer") not in {"YES", "NO"}:
+            raise ValueError(f"invalid semantic answer for {question}")
+        if not answer.get("evidence"):
+            raise ValueError(f"missing semantic evidence for {question}")
+
+
+def record_semantic_review(
+    ledger_path: Path,
+    manifest_path: Path,
+    evidence_root: Path,
+    position: int,
+) -> dict[str, Any]:
+    validate_registration_ledger(ledger_path, manifest_path)
+    events = ledger_events(ledger_path)
+    if any(event["event_type"] == "SEMANTIC_REVIEW_RESULT" and event["position"] == position for event in events):
+        raise ValueError("refusing to append duplicate semantic review event")
+    latest = [event for event in events if event["position"] == position][-1]
+    if latest["event_type"] != "STAGE_C_RETRIEVAL_RESULT" or latest["final_decision"] != "PENDING_SEMANTIC_REVIEW":
+        raise ValueError("candidate is not pending semantic review")
+    directory = evidence_root / f"position-{position:04d}"
+    retrieval_path = directory / "stage-c-source-retrieval.json"
+    rule_path = directory / "semantic-review-rule.json"
+    forms_path = directory / "semantic-review-forms.jsonl"
+    summary_path = directory / "semantic-review-summary.json"
+    if forms_path.exists() or summary_path.exists():
+        raise FileExistsError("refusing to overwrite semantic review evidence")
+    retrieval = json.loads(retrieval_path.read_text(encoding="utf-8"))
+    rule = json.loads(rule_path.read_text(encoding="utf-8"))
+    if rule.get("schema") != "v2-prospective-semantic-review-rule-v1" or rule.get("position") != position:
+        raise ValueError("invalid semantic review rule")
+    for template in rule["templates"].values():
+        validate_semantic_template(template)
+    focal_path = rule.get("focal_query_path")
+    reviews: list[dict[str, Any]] = []
+    selected: dict[str, Any] | None = None
+    for occurrence, analogue in enumerate(retrieval["analogues"], start=1):
+        category = "focal" if focal_path and analogue["query_path"] == focal_path else "default"
+        template = rule["templates"][category]
+        context = {
+            "occurrence": occurrence,
+            "source_commit": analogue["source_commit"],
+            "source_path": analogue["source_path"],
+            "source_window_sha256": analogue["source_window_sha256"],
+            "query_path": analogue["query_path"],
+            "query_sha256": analogue["query_normalized_sha256"],
+            "similarity": analogue["similarity"],
+        }
+        answers: dict[str, Any] = {}
+        for question, answer in template["answers"].items():
+            answers[question] = {
+                "answer": answer["answer"],
+                "evidence": [item.format(**context) for item in answer["evidence"]],
+            }
+        all_yes = all(answer["answer"] == "YES" for answer in answers.values())
+        review = {
+            "schema": "v2-prospective-q1-q12-review-v1",
+            "position": position,
+            "occurrence": occurrence,
+            "retrieval_category": category,
+            "analogue": analogue,
+            "trust_predicate": template.get("trust_predicate"),
+            "answers": answers,
+            "decision": "ALL_YES" if all_yes else "REJECTED",
+            "failed_questions": [question for question, answer in answers.items() if answer["answer"] == "NO"],
+        }
+        reviews.append(review)
+        if selected is None and all_yes:
+            selected = review
+            break
+    forms_bytes = ("".join(canonical_json(review) + "\n" for review in reviews)).encode("utf-8")
+    forms_path.write_bytes(forms_bytes)
+    summary = {
+        "schema": "v2-prospective-semantic-review-summary-v1",
+        "position": position,
+        "retrieved_occurrences": retrieval["analogue_count"],
+        "reviewed_occurrences": len(reviews),
+        "all_yes_occurrence": selected["occurrence"] if selected else None,
+        "source_S": selected["analogue"]["source_commit"] if selected else None,
+        "decision": "PASS_PENDING_CONTROLS" if selected else "REJECTED",
+        "rejection_reason": None if selected else "REJECT_NO_ALL_YES_SOURCE_SAFE_ANALOGUE",
+        "forms_sha256": sha256_bytes(forms_bytes),
+        "rule_sha256": sha256_bytes(rule_path.read_bytes()),
+        "retrieval_sha256": sha256_bytes(retrieval_path.read_bytes()),
+    }
+    write_json(summary_path, summary)
+    event = dict(latest)
+    hashes = dict(latest["evidence_hashes"])
+    hashes.update(
+        {
+            "semantic_review_rule": summary["rule_sha256"],
+            "semantic_review_forms": summary["forms_sha256"],
+            "semantic_review_summary": sha256_bytes(summary_path.read_bytes()),
+        }
+    )
+    event.update(
+        {
+            "event_type": "SEMANTIC_REVIEW_RESULT",
+            "source_S": summary["source_S"],
+            "trust_predicate_status": "PASS" if selected else "FAIL",
+            "memory_status": "PENDING_CONSTRUCTION" if selected else "NOT_APPLICABLE",
+            "final_decision": "PENDING_CONTROLS" if selected else "REJECTED",
+            "rejection_reason": summary["rejection_reason"],
+            "evidence_hashes": hashes,
+        }
+    )
+    with ledger_path.open("a", encoding="utf-8") as handle:
+        handle.write(canonical_json(event) + "\n")
+    return summary
+
+
 def main(argv: Iterable[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -729,6 +1216,17 @@ def main(argv: Iterable[str] | None = None) -> int:
     stage_b_parser.add_argument("--evidence-root", type=Path, default=SCREENING_EVIDENCE_ROOT)
     stage_b_parser.add_argument("--start", type=int, required=True)
     stage_b_parser.add_argument("--end", type=int, required=True)
+    stage_c_parser = subparsers.add_parser("run-stage-c")
+    stage_c_parser.add_argument("--ledger", type=Path, default=LEDGER_PATH)
+    stage_c_parser.add_argument("--manifest", type=Path, default=SOURCE_MANIFEST_PATH)
+    stage_c_parser.add_argument("--upstream-root", type=Path, default=DEFAULT_UPSTREAM_ROOT)
+    stage_c_parser.add_argument("--evidence-root", type=Path, default=SCREENING_EVIDENCE_ROOT)
+    stage_c_parser.add_argument("--position", type=int, required=True)
+    semantic_parser = subparsers.add_parser("record-semantic-review")
+    semantic_parser.add_argument("--ledger", type=Path, default=LEDGER_PATH)
+    semantic_parser.add_argument("--manifest", type=Path, default=SOURCE_MANIFEST_PATH)
+    semantic_parser.add_argument("--evidence-root", type=Path, default=SCREENING_EVIDENCE_ROOT)
+    semantic_parser.add_argument("--position", type=int, required=True)
     args = parser.parse_args(list(argv) if argv is not None else None)
     if args.command == "materialize":
         print(json.dumps(materialize(args.source_root, args.ledger, args.manifest), sort_keys=True))
@@ -760,6 +1258,33 @@ def main(argv: Iterable[str] | None = None) -> int:
                     args.evidence_root,
                     args.start,
                     args.end,
+                ),
+                sort_keys=True,
+            )
+        )
+        return 0
+    if args.command == "run-stage-c":
+        print(
+            json.dumps(
+                run_stage_c(
+                    args.ledger,
+                    args.manifest,
+                    args.upstream_root,
+                    args.evidence_root,
+                    args.position,
+                ),
+                sort_keys=True,
+            )
+        )
+        return 0
+    if args.command == "record-semantic-review":
+        print(
+            json.dumps(
+                record_semantic_review(
+                    args.ledger,
+                    args.manifest,
+                    args.evidence_root,
+                    args.position,
                 ),
                 sort_keys=True,
             )
