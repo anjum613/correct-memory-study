@@ -1,0 +1,427 @@
+{
+  "development_only": true,
+  "eligible_levels": [
+    "A",
+    "B",
+    "C"
+  ],
+  "pass_count": 12,
+  "results": [
+    {
+      "classification": "PASS",
+      "derived_without_target_oracle": true,
+      "evidence_command": [
+        "/bin/bash",
+        "-lc",
+        "cd /project && python -m pytest -q tests/test_encrypted_cookie_storage.py -k test_fernet_ttl"
+      ],
+      "evidence_hashes": {
+        "aiohttp_session/cookie_storage.py": "5feddacd8262328a99f34f61f716ac7a0cc862f601a3980169f1542bce3ea0d7",
+        "tests/test_encrypted_cookie_storage.py": "4afce27289bc6968a391cf6e926831e9e99d9d1fbabea813b5d3f82bde81d432"
+      },
+      "evidence_paths": [
+        "aiohttp_session/cookie_storage.py",
+        "tests/test_encrypted_cookie_storage.py"
+      ],
+      "level": "A",
+      "pstar": {
+        "observable_objects": [
+          "cookie bytes",
+          "decrypted session mapping",
+          "max_age"
+        ],
+        "ontology_class": "VALIDATION_BEFORE_USE",
+        "operation": "load_session",
+        "proposition": "Every cookie converted into a non-new Session by load_session has passed Fernet.decrypt with ttl equal to max_age before JSON decoding.",
+        "quantifier_or_boundary": "for every non-new Session returned from a cookie",
+        "source_truth": true,
+        "target_truth": "UNJUSTIFIED",
+        "verification_method": "upstream executable expired-token boundary test"
+      },
+      "scope": "FOCAL_SOURCE_SAFETY_NOT_GLOBAL_SECURITY",
+      "source_id": "src-aio-fernet-load-session"
+    },
+    {
+      "classification": "PASS",
+      "derived_without_target_oracle": true,
+      "evidence_command": [
+        "/bin/bash",
+        "-lc",
+        "cd /project && python -m pytest -q tests/test_encrypted_cookie_storage.py -k test_encrypted_cookie_session_fixation"
+      ],
+      "evidence_hashes": {
+        "aiohttp_session/cookie_storage.py": "5feddacd8262328a99f34f61f716ac7a0cc862f601a3980169f1542bce3ea0d7",
+        "tests/test_encrypted_cookie_storage.py": "4afce27289bc6968a391cf6e926831e9e99d9d1fbabea813b5d3f82bde81d432"
+      },
+      "evidence_paths": [
+        "aiohttp_session/cookie_storage.py",
+        "tests/test_encrypted_cookie_storage.py"
+      ],
+      "level": "A",
+      "pstar": {
+        "observable_objects": [
+          "session mapping",
+          "serialized bytes",
+          "cookie value"
+        ],
+        "ontology_class": "RESOURCE_TRUST_BOUNDARY_ORDERING",
+        "operation": "save_session",
+        "proposition": "Every nonempty session persisted by save_session is serialized and Fernet-encrypted before its value crosses the cookie boundary.",
+        "quantifier_or_boundary": "for every nonempty session persisted to a response cookie",
+        "source_truth": true,
+        "target_truth": "UNJUSTIFIED",
+        "verification_method": "upstream executable session-fixation boundary test plus directly observable call order"
+      },
+      "scope": "FOCAL_SOURCE_SAFETY_NOT_GLOBAL_SECURITY",
+      "source_id": "src-aio-fernet-save-session"
+    },
+    {
+      "classification": "PASS",
+      "derived_without_target_oracle": true,
+      "evidence_command": [
+        "/bin/bash",
+        "-lc",
+        "cd /project && python runtests.py wagtail.documents.tests.test_rich_text.TestEditorHtmlDocumentLinkHandler -v 1"
+      ],
+      "evidence_hashes": {
+        "wagtail/documents/rich_text/editor_html.py": "d7397e05ddc4362e9a5c40368fa59223f4066aa40db85fbe5f3921e8a3525641",
+        "wagtail/documents/tests/test_rich_text.py": "668497b6cf00312d18e455ece3db4199a09b69316c4e50c22407c6cd6f464c9a"
+      },
+      "evidence_paths": [
+        "wagtail/documents/rich_text/editor_html.py",
+        "wagtail/documents/tests/test_rich_text.py"
+      ],
+      "level": "B",
+      "pstar": {
+        "observable_objects": [
+          "parsed anchor",
+          "data-id attribute",
+          "returned id"
+        ],
+        "ontology_class": "PROTOCOL_LAYOUT",
+        "operation": "get_db_attributes",
+        "proposition": "Every identifier emitted by get_db_attributes is copied from the parsed anchor's data-id attribute selected by the document-link conversion rule.",
+        "quantifier_or_boundary": "for every anchor dispatched by the document-link rule",
+        "source_truth": true,
+        "target_truth": "UNJUSTIFIED",
+        "verification_method": "conversion-rule dispatch invariant plus upstream executable attribute test"
+      },
+      "scope": "FOCAL_SOURCE_SAFETY_NOT_GLOBAL_SECURITY",
+      "source_id": "src-wagtail-document-link-attributes"
+    },
+    {
+      "classification": "PASS",
+      "derived_without_target_oracle": true,
+      "evidence_command": [
+        "/bin/bash",
+        "-lc",
+        "cd /project && python runtests.py wagtail.documents.tests.test_rich_text.TestEditorHtmlDocumentLinkHandler -v 1"
+      ],
+      "evidence_hashes": {
+        "wagtail/documents/rich_text/editor_html.py": "d7397e05ddc4362e9a5c40368fa59223f4066aa40db85fbe5f3921e8a3525641",
+        "wagtail/documents/tests/test_rich_text.py": "668497b6cf00312d18e455ece3db4199a09b69316c4e50c22407c6cd6f464c9a"
+      },
+      "evidence_paths": [
+        "wagtail/documents/rich_text/editor_html.py",
+        "wagtail/documents/tests/test_rich_text.py"
+      ],
+      "level": "A",
+      "pstar": {
+        "observable_objects": [
+          "document id",
+          "resolved document",
+          "document URL",
+          "emitted href"
+        ],
+        "ontology_class": "PATH_PROVENANCE",
+        "operation": "expand_db_attributes",
+        "proposition": "Every href emitted by expand_db_attributes is obtained from the URL of a document resolved by id; failed or missing id resolution emits no href.",
+        "quantifier_or_boundary": "for every emitted anchor containing href",
+        "source_truth": true,
+        "target_truth": "UNJUSTIFIED",
+        "verification_method": "upstream executable valid, nonexistent-id, and missing-id boundary tests"
+      },
+      "scope": "FOCAL_SOURCE_SAFETY_NOT_GLOBAL_SECURITY",
+      "source_id": "src-wagtail-document-link-expand"
+    },
+    {
+      "classification": "PASS",
+      "derived_without_target_oracle": true,
+      "evidence_command": [
+        "/bin/bash",
+        "-lc",
+        "cd /project && python runtests.py wagtail.admin.tests.test_rich_text.TestPageLinkHandler -v 1"
+      ],
+      "evidence_hashes": {
+        "wagtail/admin/rich_text/converters/editor_html.py": "a3bbba8d9378b03c290269d60d4746510a17542b79cb6eb66acb35dd482b8e85",
+        "wagtail/admin/tests/test_rich_text.py": "da2d3593da16e08438587f98cfeb1e8235644de96d5a86d1e144b90d5d54fb56"
+      },
+      "evidence_paths": [
+        "wagtail/admin/rich_text/converters/editor_html.py",
+        "wagtail/admin/tests/test_rich_text.py"
+      ],
+      "level": "B",
+      "pstar": {
+        "observable_objects": [
+          "parsed anchor",
+          "data-id attribute",
+          "returned id"
+        ],
+        "ontology_class": "PROTOCOL_LAYOUT",
+        "operation": "get_db_attributes",
+        "proposition": "Every identifier emitted by get_db_attributes is copied from the parsed anchor's data-id attribute selected by the page-link conversion rule.",
+        "quantifier_or_boundary": "for every anchor dispatched by the page-link rule",
+        "source_truth": true,
+        "target_truth": "UNJUSTIFIED",
+        "verification_method": "conversion-rule dispatch invariant plus upstream executable attribute test"
+      },
+      "scope": "FOCAL_SOURCE_SAFETY_NOT_GLOBAL_SECURITY",
+      "source_id": "src-wagtail-page-link-attributes"
+    },
+    {
+      "classification": "PASS",
+      "derived_without_target_oracle": true,
+      "evidence_command": [
+        "/bin/bash",
+        "-lc",
+        "cd /project && python runtests.py wagtail.admin.tests.test_rich_text.TestPageLinkHandler -v 1"
+      ],
+      "evidence_hashes": {
+        "wagtail/admin/rich_text/converters/editor_html.py": "a3bbba8d9378b03c290269d60d4746510a17542b79cb6eb66acb35dd482b8e85",
+        "wagtail/admin/tests/test_rich_text.py": "da2d3593da16e08438587f98cfeb1e8235644de96d5a86d1e144b90d5d54fb56"
+      },
+      "evidence_paths": [
+        "wagtail/admin/rich_text/converters/editor_html.py",
+        "wagtail/admin/tests/test_rich_text.py"
+      ],
+      "level": "B",
+      "pstar": {
+        "observable_objects": [
+          "page id",
+          "resolved page",
+          "localized page URL",
+          "emitted href"
+        ],
+        "ontology_class": "PATH_PROVENANCE",
+        "operation": "expand_db_attributes",
+        "proposition": "Every href emitted by expand_db_attributes is obtained from the localized specific URL of a page resolved by id.",
+        "quantifier_or_boundary": "for every emitted anchor containing href",
+        "source_truth": true,
+        "target_truth": "UNJUSTIFIED",
+        "verification_method": "source invariant plus upstream executable page-resolution test"
+      },
+      "scope": "FOCAL_SOURCE_SAFETY_NOT_GLOBAL_SECURITY",
+      "source_id": "src-wagtail-page-link-expand"
+    },
+    {
+      "classification": "PASS",
+      "derived_without_target_oracle": true,
+      "evidence_command": [
+        "/bin/bash",
+        "-lc",
+        "cd /project && python tests/runtests.py utils_tests.test_crypto.TestUtilsCryptoMisc.test_constant_time_compare -v 2"
+      ],
+      "evidence_hashes": {
+        "django/utils/crypto.py": "f752840c230a021de428033152fd9e41028c123f8481b316444da5563980ce06",
+        "tests/utils_tests/test_crypto.py": "c05b9ce6b734eb5e37a21b8ef3141eff878afb715f510aa7cfab23b2f788303e"
+      },
+      "evidence_paths": [
+        "django/utils/crypto.py",
+        "tests/utils_tests/test_crypto.py"
+      ],
+      "level": "B",
+      "pstar": {
+        "observable_objects": [
+          "left comparison operand",
+          "right comparison operand",
+          "byte operands"
+        ],
+        "ontology_class": "ENCODING_CANONICALIZATION",
+        "operation": "constant_time_compare",
+        "proposition": "Every operand reaching compare_digest through constant_time_compare is first converted to bytes.",
+        "quantifier_or_boundary": "for every comparison call",
+        "source_truth": true,
+        "target_truth": "UNJUSTIFIED",
+        "verification_method": "source invariant plus upstream executable byte/string equivalence test"
+      },
+      "scope": "FOCAL_SOURCE_SAFETY_NOT_GLOBAL_SECURITY",
+      "source_id": "src-django-constant-time-compare"
+    },
+    {
+      "classification": "PASS",
+      "derived_without_target_oracle": true,
+      "evidence_command": [
+        "/bin/bash",
+        "-lc",
+        "cd /project && python tests/runtests.py urlpatterns_reverse.tests.ReverseShortcutTests httpwrappers.tests.HttpResponseTests.test_unsafe_redirect -v 2"
+      ],
+      "evidence_hashes": {
+        "django/shortcuts.py": "02a69b2a45df1687ccc9501b91818165c50c9248b2491bb4f8221e99b7cee9c0",
+        "tests/httpwrappers/tests.py": "563335041ef140283e584a3f81391fa576d0591afdfdbf719e00c308dc496884",
+        "tests/urlpatterns_reverse/tests.py": "a9c5acb9302bd00e0c1f0217f73165986556a74a5dc29b5ac820fd8594341eb0"
+      },
+      "evidence_paths": [
+        "django/shortcuts.py",
+        "tests/urlpatterns_reverse/tests.py",
+        "tests/httpwrappers/tests.py"
+      ],
+      "level": "B",
+      "pstar": {
+        "observable_objects": [
+          "resolved redirect URL",
+          "URL scheme",
+          "response constructor allowlist"
+        ],
+        "ontology_class": "VALIDATION_BEFORE_USE",
+        "operation": "redirect",
+        "proposition": "Every URL resolved by redirect is passed to a redirect response constructor whose initialization rejects a nonempty scheme outside its allowlist.",
+        "quantifier_or_boundary": "for every redirect response constructed",
+        "source_truth": true,
+        "target_truth": "UNJUSTIFIED",
+        "verification_method": "source call-chain invariant plus upstream executable unsafe-scheme boundary test"
+      },
+      "scope": "FOCAL_SOURCE_SAFETY_NOT_GLOBAL_SECURITY",
+      "source_id": "src-django-safe-redirect"
+    },
+    {
+      "classification": "PASS",
+      "derived_without_target_oracle": true,
+      "evidence_command": [
+        "/bin/bash",
+        "-lc",
+        "cd /project && python tests/runtests.py sessions_tests.tests.CookieSessionTests.test_decode sessions_tests.tests.CookieSessionTests.test_decode_failure_logged_to_security sessions_tests.tests.CookieSessionTests.test_decode_serializer_exception -v 2"
+      ],
+      "evidence_hashes": {
+        "django/contrib/sessions/backends/base.py": "c66f51b34648f0444fe9c67e37829d7d5c30dda5a25c2f0572073141635daeac",
+        "tests/sessions_tests/tests.py": "d2f60aba6ef9b70df2a3e93bd890952469867cfe04cdf0eabb17bfa932b05769"
+      },
+      "evidence_paths": [
+        "django/contrib/sessions/backends/base.py",
+        "tests/sessions_tests/tests.py"
+      ],
+      "level": "A",
+      "pstar": {
+        "observable_objects": [
+          "encoded session data",
+          "signature result",
+          "decoded mapping"
+        ],
+        "ontology_class": "VALIDATION_BEFORE_USE",
+        "operation": "decode",
+        "proposition": "Every nonempty mapping returned by decode has passed signing.loads signature verification and deserialization; rejected input returns an empty mapping.",
+        "quantifier_or_boundary": "for every nonempty decoded mapping returned",
+        "source_truth": true,
+        "target_truth": "UNJUSTIFIED",
+        "verification_method": "upstream executable valid-signature, bad-signature, and serializer-failure tests"
+      },
+      "scope": "FOCAL_SOURCE_SAFETY_NOT_GLOBAL_SECURITY",
+      "source_id": "src-django-signed-session-decode"
+    },
+    {
+      "classification": "PASS",
+      "derived_without_target_oracle": true,
+      "evidence_command": [
+        "/bin/bash",
+        "-lc",
+        "cd /project && python -m pytest -q tests/test_requests.py -k test_proxy_env_vars_override_default"
+      ],
+      "evidence_hashes": {
+        "requests/utils.py": "eacc765f7708540f018163a0f28771172fbf95b5831444d4f072387d4e119aac",
+        "tests/test_requests.py": "591bfa463024c5dfbd39b3dfc6bfdd75e790699bf8b5b889dd0fe035a3f47100"
+      },
+      "evidence_paths": [
+        "requests/utils.py",
+        "tests/test_requests.py"
+      ],
+      "level": "B",
+      "pstar": {
+        "observable_objects": [
+          "target URL",
+          "parsed scheme",
+          "bypass decision",
+          "inserted proxy"
+        ],
+        "ontology_class": "PATH_PROVENANCE",
+        "operation": "resolve_proxies",
+        "proposition": "Every environment proxy inserted by resolve_proxies is selected for the parsed target URL scheme only after should_bypass_proxies rejects bypass.",
+        "quantifier_or_boundary": "for every proxy inserted from the environment",
+        "source_truth": true,
+        "target_truth": "UNJUSTIFIED",
+        "verification_method": "source call-order invariant plus upstream executable environment-override test"
+      },
+      "scope": "FOCAL_SOURCE_SAFETY_NOT_GLOBAL_SECURITY",
+      "source_id": "src-requests-resolve-proxies"
+    },
+    {
+      "classification": "PASS",
+      "derived_without_target_oracle": true,
+      "evidence_command": [
+        "/bin/bash",
+        "-lc",
+        "cd /project && python -m pytest -q tests/test_utils.py -k test_should_bypass_proxies"
+      ],
+      "evidence_hashes": {
+        "requests/utils.py": "eacc765f7708540f018163a0f28771172fbf95b5831444d4f072387d4e119aac",
+        "tests/test_utils.py": "5a98862b9e19412592ff497fd9df5920e6c3ab5852f581c21280bbb6af773fc2"
+      },
+      "evidence_paths": [
+        "requests/utils.py",
+        "tests/test_utils.py"
+      ],
+      "level": "A",
+      "pstar": {
+        "observable_objects": [
+          "target URL",
+          "parsed hostname",
+          "no_proxy entries",
+          "bypass decision"
+        ],
+        "ontology_class": "PATH_PROVENANCE",
+        "operation": "should_bypass_proxies",
+        "proposition": "Every positive bypass decision is reached from a hostname absence, an explicit no_proxy boundary match, or the platform proxy_bypass decision.",
+        "quantifier_or_boundary": "for every True result",
+        "source_truth": true,
+        "target_truth": "UNJUSTIFIED",
+        "verification_method": "upstream executable hostname, CIDR, port, explicit-argument, and platform boundary tests"
+      },
+      "scope": "FOCAL_SOURCE_SAFETY_NOT_GLOBAL_SECURITY",
+      "source_id": "src-requests-should-bypass-proxies"
+    },
+    {
+      "classification": "PASS",
+      "derived_without_target_oracle": true,
+      "evidence_command": [
+        "/bin/bash",
+        "-lc",
+        "cd /project && python -m pytest -q tests/test_utils.py -k test_select_proxies"
+      ],
+      "evidence_hashes": {
+        "requests/utils.py": "eacc765f7708540f018163a0f28771172fbf95b5831444d4f072387d4e119aac",
+        "tests/test_utils.py": "5a98862b9e19412592ff497fd9df5920e6c3ab5852f581c21280bbb6af773fc2"
+      },
+      "evidence_paths": [
+        "requests/utils.py",
+        "tests/test_utils.py"
+      ],
+      "level": "A",
+      "pstar": {
+        "observable_objects": [
+          "target URL",
+          "proxy mapping keys",
+          "selected proxy"
+        ],
+        "ontology_class": "PROTOCOL_LAYOUT",
+        "operation": "select_proxy",
+        "proposition": "Every selected proxy is the first present entry in the fixed specificity order scheme-plus-host, scheme, all-plus-host, then all.",
+        "quantifier_or_boundary": "for every non-null selected proxy",
+        "source_truth": true,
+        "target_truth": "UNJUSTIFIED",
+        "verification_method": "upstream executable host-specific, scheme-specific, all-scheme, and missing-host tests"
+      },
+      "scope": "FOCAL_SOURCE_SAFETY_NOT_GLOBAL_SECURITY",
+      "source_id": "src-requests-select-proxy"
+    }
+  ],
+  "schema": "cmpilot-source-focal-safety-results-v1",
+  "scope": "FOCAL_SOURCE_SAFETY_NOT_GLOBAL_SECURITY"
+}

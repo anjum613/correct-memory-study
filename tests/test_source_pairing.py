@@ -18,6 +18,7 @@ from cmpilot.source_pairing import (
     enforce_top_source_lock,
     extract_python_symbol,
     hash_vector,
+    load_frozen_source_corpus,
     rank_sources,
     sealed_validation_request,
     select_top_source,
@@ -186,6 +187,27 @@ def test_b_only_representation_reads_public_workspace_and_has_no_oracle_fields(
         assert term not in serialized
 
 
+def test_source_corpus_load_is_hash_locked_and_audited(tmp_path: Path) -> None:
+    entry = _entry("source", semantic_text="proxy resolution")
+    manifest = {
+        "schema": "cmpilot-source-corpus-manifest-v1",
+        "entries": [entry],
+        "source_corpus_sha256": stable_record_hash([entry]),
+    }
+    (tmp_path / "source-corpus-manifest.json").write_text(
+        json.dumps(manifest), encoding="utf-8"
+    )
+    reader = AuditedWorkspaceReader(tmp_path)
+    assert load_frozen_source_corpus(reader)[0]["source_id"] == "source"
+    assert reader.events[-1]["decision"] == "ALLOW"
+    manifest["source_corpus_sha256"] = "0" * 64
+    (tmp_path / "source-corpus-manifest.json").write_text(
+        json.dumps(manifest), encoding="utf-8"
+    )
+    with pytest.raises(SourcePairingError, match="hash mismatch"):
+        load_frozen_source_corpus(AuditedWorkspaceReader(tmp_path))
+
+
 def test_operation_prevalence_and_definitions_drive_b_only_resolution(tmp_path: Path) -> None:
     statement = (
         "Implement `resolve_proxies` on Session. Proxy settings and proxy URLs "
@@ -230,6 +252,18 @@ def test_exact_python_symbol_extraction_and_ambiguity() -> None:
     exact, start, end = extract_python_symbol(nested, "Right.same")
     assert exact == "    def same(self):\n        return 2\n"
     assert (start, end) == (6, 7)
+
+
+def test_indented_method_source_retains_ast_and_api_features() -> None:
+    features = source_feature_record(
+        "    async def save(self, value):\n        return self.encrypt(value)\n",
+        "test encrypted save",
+    )
+    assert "self.encrypt" in features["API_sequence"]
+    assert any(
+        value.startswith("AsyncFunctionDef:")
+        for value in features["AST_signature"]
+    )
 
 
 def test_timestamp_and_source_gates_precede_deterministic_ranking() -> None:

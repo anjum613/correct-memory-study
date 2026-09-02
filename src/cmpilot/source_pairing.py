@@ -16,6 +16,7 @@ import math
 import os
 from pathlib import Path, PurePosixPath
 import re
+import textwrap
 import tokenize
 from io import BytesIO
 from typing import Any, Iterable, Mapping, Sequence
@@ -460,7 +461,7 @@ def _attribute_name(node: ast.AST) -> str | None:
 
 def python_features(source: str) -> dict[str, tuple[str, ...]]:
     try:
-        tree = ast.parse(source)
+        tree = ast.parse(textwrap.dedent(source))
     except SyntaxError:
         return {
             "imports": (),
@@ -630,6 +631,28 @@ def build_b_only_representation(reader: AuditedWorkspaceReader) -> dict[str, Any
     }
     validate_b_only_mapping(representation)
     return representation
+
+
+def load_frozen_source_corpus(
+    reader: AuditedWorkspaceReader, relative: str = "source-corpus-manifest.json"
+) -> tuple[dict[str, Any], ...]:
+    """Load the immutable matcher corpus through the audited read boundary."""
+
+    value = json.loads(reader.read_text(relative))
+    if not isinstance(value, dict) or value.get("schema") != "cmpilot-source-corpus-manifest-v1":
+        raise SourcePairingError("source corpus manifest schema mismatch")
+    entries = value.get("entries")
+    if not isinstance(entries, list) or not entries:
+        raise SourcePairingError("source corpus has no entries")
+    source_ids = [str(entry.get("source_id", "")) for entry in entries]
+    if any(not source_id for source_id in source_ids) or len(source_ids) != len(set(source_ids)):
+        raise SourcePairingError("source corpus IDs are invalid")
+    observed = stable_record_hash(
+        sorted(entries, key=lambda entry: str(entry["source_id"]))
+    )
+    if observed != value.get("source_corpus_sha256"):
+        raise SourcePairingError("source corpus manifest hash mismatch")
+    return tuple(entries)
 
 
 def validate_b_only_mapping(value: Mapping[str, Any]) -> None:
