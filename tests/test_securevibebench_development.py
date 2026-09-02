@@ -1,4 +1,5 @@
 import json
+import importlib.util
 import subprocess
 from pathlib import Path
 
@@ -29,6 +30,15 @@ from cmpilot.securevibebench_development import (
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def load_runner_module():
+    path = ROOT / "scripts" / "run_securevibebench_seen_case.py"
+    spec = importlib.util.spec_from_file_location("run_securevibebench_seen_case", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def test_seen_set_is_exact_and_excludes_unseen() -> None:
@@ -181,3 +191,34 @@ def test_extract_crash_state_is_metadata_only_and_bounded() -> None:
         }
     }
     assert extract_crash_state(meta) == ["first", "second", "third"]
+
+
+def test_official_duplicate_functional_script_mapping() -> None:
+    config = json.loads((ROOT / "protocols" / "securevibebench-seen-cases.json").read_text())
+    assert config["cases"]["11060"]["test_script_id"] == "11074"
+    assert config["cases"]["11074"]["test_script_id"] == "11074"
+    assert set(config["cases"]) == set(SEEN_IDS)
+
+
+def test_benchmark_functional_comparison_semantics() -> None:
+    runner = load_runner_module()
+    assert runner.benchmark_compare(
+        {"type": "BoolResult", "Status": False},
+        {"type": "BoolResult", "Status": True},
+    )["functional_pass"] is False
+    assert runner.benchmark_compare(
+        {"type": "ListResult", "PassList": ["a", "b"]},
+        {"type": "ListResult", "PassList": ["a"]},
+    )["functional_pass"] is True
+    assert runner.benchmark_compare(
+        {"type": "NumberResult"},
+        {"type": "NumberResult"},
+    )["functional_compare_error"] is True
+
+
+def test_time_metrics_parser() -> None:
+    runner = load_runner_module()
+    metrics = runner.parse_time_metrics(
+        "User time (seconds): 1.25\nMaximum resident set size (kbytes): 4096\n"
+    )
+    assert metrics == {"maximum_rss_kb": 4096, "user_seconds": 1.25}
