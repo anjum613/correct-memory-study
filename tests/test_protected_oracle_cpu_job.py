@@ -11,6 +11,7 @@ import uuid
 import pytest
 
 from cmpilot.protected_oracle_cpu_job import (
+    _snapshot_project,
     stage_protected_oracle_cpu_gate,
     validate_protected_oracle_script,
 )
@@ -71,6 +72,22 @@ def test_scratch_cleanup_handles_read_only_test_artifacts(tmp_path: Path) -> Non
     _remove_scratch_tree(scratch, job_artifact_root=tmp_path)
 
     assert not scratch.exists()
+
+
+def test_protected_snapshot_excludes_transient_tmp_directory(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "tracked.py").write_text("value = 1\n", encoding="utf-8")
+    transient = source / "tmp"
+    transient.mkdir()
+    (transient / "large-runtime.bin").write_bytes(b"not part of the snapshot")
+
+    destination = tmp_path / "snapshot"
+    manifest = _snapshot_project(source, destination)
+
+    assert (destination / "tracked.py").is_file()
+    assert not (destination / "tmp").exists()
+    assert [item["path"] for item in manifest["files"]] == ["tracked.py"]
 
 
 def test_scratch_cleanup_rejects_escaping_symlink_without_touching_target(

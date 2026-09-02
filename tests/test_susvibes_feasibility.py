@@ -23,6 +23,7 @@ from cmpilot.susvibes_feasibility import (
     normalize_state,
     parse_count_logs,
     security_matrix_eligible,
+    split_development_row,
     task_matrix_eligible,
     touched_files,
     unseen_instance_ids,
@@ -176,6 +177,10 @@ FileNotFoundError: [Errno 2] No such file or directory: '/dev/shm'
     )
     assert hostname_failure.status == "infrastructure_error"
     assert hostname_failure.failures is None
+    startup = ParsedRun("startup_error", None, 1, False, None)
+    startup_result = classify_official_runs(startup, parsed, {"func": 0, "sec": 1})
+    assert startup_result["func"]["classification"] == "INFRASTRUCTURE_INVALID"
+    assert startup_result["sec"]["classification"] == "INFRASTRUCTURE_INVALID"
 
 
 def test_security_matrix_classification() -> None:
@@ -265,6 +270,27 @@ assert Path("/workspace/task.md").read_text() == "public"
     assert secret.read_text() == "sealed"
 
 
+def test_oracle_split_seals_fixed_commit_and_all_outcome_fields() -> None:
+    row = {
+        "instance_id": DEVELOPMENT_IDS[0],
+        "project": "example/project",
+        "base_commit": "fixed-r-commit",
+        "language": "python",
+        "image_name": "pinned-b-image",
+        "problem_statement": "Implement the missing operation.",
+        "golden_patch": "safe",
+        "mask_patch": "mask",
+        "security_patch": "u-to-r",
+        "test_patch": "focal-test",
+    }
+    public, sealed = split_development_row(row)
+    assert "base_commit" not in public
+    assert sealed["base_commit"] == "fixed-r-commit"
+    for key in ("golden_patch", "mask_patch", "security_patch", "test_patch"):
+        assert key not in public
+        assert sealed[key] == row[key]
+
+
 def test_b_only_representation_schema_has_no_oracle_fields() -> None:
     schema = load_json(ROOT / "schemas/b-only-target-representation.schema.json")
     artifact_schema = load_json(ARTIFACT_ROOT / "b-only-target-schema.json")
@@ -333,3 +359,115 @@ def test_required_preoutcome_artifacts_exist() -> None:
         "unseen-target-universe.json",
     }
     assert required <= {path.name for path in ARTIFACT_ROOT.iterdir()}
+
+
+def test_generated_feasibility_evidence_and_readiness_are_consistent() -> None:
+    readiness = load_json(ARTIFACT_ROOT / "readiness.json")
+    task = load_json(ARTIFACT_ROOT / "development-task-matrices.json")
+    security = load_json(ARTIFACT_ROOT / "development-security-matrices.json")
+    feature = load_json(ARTIFACT_ROOT / "feature-retention.json")
+    masking = load_json(ARTIFACT_ROOT / "masking-semantics.json")
+    firewall = load_json(ARTIFACT_ROOT / "oracle-firewall-audit.json")
+    container = load_json(ARTIFACT_ROOT / "container-feasibility.json")
+
+    assert (task["pass_count"], task["total"]) == (4, 5)
+    wagtail = next(
+        case for case in task["cases"] if case["instance_id"].startswith("wagtail__")
+    )
+    assert wagtail["results"]["B_UNTOUCHED"] == "INFRASTRUCTURE_INVALID"
+    assert wagtail["matrix_pass"] is False
+    assert (security["pass_count"], security["total"]) == (5, 5)
+    assert all(
+        case["focal_security_results"]["U"] == "FAIL"
+        and case["focal_security_results"]["R"] == "PASS"
+        for case in security["cases"]
+    )
+    assert (feature["pass_count"], feature["total"]) == (5, 5)
+    assert masking["masking_semantics_valid"] is True
+    assert firewall["status"] == "PASS"
+    assert firewall["development_case_pass_count"] == 5
+    assert container["status"] == "PASS"
+
+    assert readiness["development_task_matrix_pass_count"] == task["pass_count"]
+    assert readiness["development_security_matrix_pass_count"] == security["pass_count"]
+    assert readiness["feature_retention_pass_count"] == feature["pass_count"]
+    assert readiness["oracle_firewall_status"] == firewall["status"]
+    assert readiness["susvibes_target_substrate_ready"] is True
+    for key in (
+        "source_corpus_ready",
+        "source_matcher_ready",
+        "confirmatory_screening_authorized",
+        "gpu_qualification_ready",
+        "study_run_authorized",
+        "model_inference_executed",
+    ):
+        assert readiness[key] is False
+
+
+def test_persistent_public_oracle_split_contains_no_explicit_oracle_fields() -> None:
+    audit = load_json(ARTIFACT_ROOT / "oracle-firewall-audit.json")
+    public_root = ROOT / audit["public_root"]
+    sealed_root = ROOT / audit["sealed_root"]
+    assert tuple(case["instance_id"] for case in audit["cases"]) == DEVELOPMENT_IDS
+    forbidden = {
+        "base_commit",
+        "cve_id",
+        "cwe_ids",
+        "expected_pf",
+        "golden_patch",
+        "mask_patch",
+        "security_patch",
+        "test_patch",
+    }
+    for case in audit["cases"]:
+        instance_id = case["instance_id"]
+        assert case["pass"] is True
+        assert all(case["sandbox_checks"].values())
+        assert all(case["semantic_checks"].values())
+        public = load_json(public_root / instance_id / "public-metadata.json")
+        assert forbidden.isdisjoint(public)
+        assert (public_root / instance_id / "task.md").is_file()
+        assert (sealed_root / instance_id / "test_patch.patch").is_file()
+        assert (sealed_root / instance_id / "state-manifest.json").is_file()
+
+
+def test_recorded_evaluator_logs_are_byte_exact() -> None:
+    task = load_json(ARTIFACT_ROOT / "development-task-matrices.json")
+    security = load_json(ARTIFACT_ROOT / "development-security-matrices.json")
+    checked = 0
+    for case in task["cases"]:
+        for state in case["states"].values():
+            evidence = state["evaluation"]
+            path = ROOT / evidence["log_path"]
+            assert hashlib.sha256(path.read_bytes()).hexdigest() == evidence["log_sha256"]
+            checked += 1
+    for case in security["cases"]:
+        for state in case["states"].values():
+            path = ROOT / state["log_path"]
+            assert hashlib.sha256(path.read_bytes()).hexdigest() == state["log_sha256"]
+            checked += 1
+    assert checked == 40
+
+
+def test_reproducibility_and_cost_artifacts_cover_all_development_targets() -> None:
+    reproducibility = load_json(ARTIFACT_ROOT / "reproducibility-manifest.json")
+    costs = load_json(ARTIFACT_ROOT / "runtime-costs.json")
+    assert tuple(case["instance_id"] for case in reproducibility["cases"]) == DEVELOPMENT_IDS
+    assert tuple(case["instance_id"] for case in costs["cases"]) == DEVELOPMENT_IDS
+    assert reproducibility["benchmark_revision"] == SUSVIBES_REVISION
+    for case in reproducibility["cases"]:
+        for key in (
+            "instance_metadata_sha256",
+            "B_sha256",
+            "U_sha256",
+            "R_sha256",
+            "functional_evaluator_sha256",
+            "security_evaluator_sha256",
+        ):
+            assert len(case[key]) == 64
+        assert case["container_manifest_digest"].startswith("sha256:")
+    assert costs["serial_full_186_target_estimate_hours"] > 0
+    assert costs["estimated_storage_for_20_targets_gb"] > 0
+    assert costs["estimated_storage_for_40_targets_gb"] == pytest.approx(
+        2 * costs["estimated_storage_for_20_targets_gb"], abs=0.02
+    )

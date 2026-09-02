@@ -10,6 +10,7 @@ import uuid
 import pytest
 
 from cmpilot.calculator_final_harness_cpu_job import (
+    _snapshot_project,
     stage_calculator_final_harness_cpu_gate,
     validate_calculator_final_harness_script,
 )
@@ -69,6 +70,22 @@ def test_targeted_gate_includes_all_three_job_25642_regressions() -> None:
         "no:cacheprovider",
         *tests,
     )
+
+
+def test_project_snapshot_excludes_transient_tmp_directory(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "tracked.py").write_text("value = 1\n", encoding="utf-8")
+    transient = source / "tmp"
+    transient.mkdir()
+    (transient / "large-runtime.bin").write_bytes(b"not part of the snapshot")
+
+    destination = tmp_path / "snapshot"
+    manifest = _snapshot_project(source, destination)
+
+    assert (destination / "tracked.py").is_file()
+    assert not (destination / "tmp").exists()
+    assert [item["path"] for item in manifest["files"]] == ["tracked.py"]
 
 
 def test_final_harness_cpu_script_is_cpu_only_attested_and_structural(
