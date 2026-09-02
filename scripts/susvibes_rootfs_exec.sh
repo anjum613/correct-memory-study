@@ -30,7 +30,6 @@ if [[ "${1:-}" == "--inside" ]]; then
     mount --bind "/dev/$device" "$rootfs/dev/$device"
   done
   mount -t proc -o nosuid,nodev,noexec proc "$rootfs/proc"
-  /usr/sbin/ip link set lo up
 
   exec /usr/sbin/chroot "$rootfs" /usr/bin/env -i \
     HOME=/root \
@@ -58,7 +57,6 @@ exec unshare \
   --user --map-root-user \
   --mount \
   --pid --fork \
-  --net \
   --ipc \
   --uts \
   "$0" --inside "$rootfs" "$repository" "$@"

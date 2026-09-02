@@ -786,6 +786,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "model_inference_executed": False,
         "runtime": {
             "adapter": "Singularity-expanded rootfs with unprivileged namespace/chroot execution",
+            "network_mode": "host-equivalent connectivity matching the official Docker default",
             "rootfs_launcher": str(args.rootfs_launcher.resolve()),
             "singularity_path": singularity,
             "singularity_version": subprocess.check_output([singularity, "--version"], text=True).strip(),
@@ -812,7 +813,7 @@ def main() -> int:
     parser.add_argument(
         "--run-label",
         default="",
-        choices=("", "infra-retry-1", "infra-retry-2"),
+        choices=("", "infra-retry-1", "infra-retry-2", "infra-retry-3"),
         help="write a new immutable evidence namespace for an infrastructure retry",
     )
     parser.add_argument(
