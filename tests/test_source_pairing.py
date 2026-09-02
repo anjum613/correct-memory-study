@@ -186,6 +186,27 @@ def test_b_only_representation_reads_public_workspace_and_has_no_oracle_fields(
         assert term not in serialized
 
 
+def test_operation_prevalence_and_definitions_drive_b_only_resolution(tmp_path: Path) -> None:
+    statement = (
+        "Implement `resolve_proxies` on Session. Proxy settings and proxy URLs "
+        "must be recomputed for each proxy redirect."
+    )
+    workspace = _workspace(
+        tmp_path,
+        DEVELOPMENT_IDS[0],
+        statement,
+        "def resolve_proxies(url, proxies):\n    return proxies\n",
+    )
+    tests = workspace / "repository/tests"
+    tests.mkdir()
+    (tests / "test_mentions.py").write_text(
+        "# resolve_proxies Session proxy proxy\n", encoding="utf-8"
+    )
+    result = build_b_only_representation(AuditedWorkspaceReader(workspace))
+    assert result["task_described_operation"] == "PROXY_CONFIGURATION"
+    assert result["configuration_context"]["b_code_files"] == "repository/pkg/module.py"
+
+
 def test_b_only_mapping_rejects_unseen_and_oracle_fields() -> None:
     target = _target()
     unseen = copy.deepcopy(target)

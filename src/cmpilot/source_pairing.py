@@ -293,10 +293,11 @@ def ordered_lcs_similarity(left: Sequence[str], right: Sequence[str]) -> float:
 def operation_classes(value: str) -> tuple[str, ...]:
     folded = _camel_boundaries(value).replace("_", " ").casefold()
     matches = []
-    for name, phrases in OPERATION_RULES:
-        if any(phrase in folded for phrase in phrases):
-            matches.append(name)
-    return tuple(matches or ("OTHER",))
+    for rule_index, (name, phrases) in enumerate(OPERATION_RULES):
+        evidence_count = sum(folded.count(phrase) for phrase in phrases)
+        if evidence_count:
+            matches.append((-evidence_count, rule_index, name))
+    return tuple(row[2] for row in sorted(matches)) or ("OTHER",)
 
 
 def classify_task_statement(statement: str) -> dict[str, Any]:
@@ -561,13 +562,22 @@ def build_b_only_representation(reader: AuditedWorkspaceReader) -> dict[str, Any
         for suffix in _candidate_module_suffixes(reference):
             selected_paths.update(path for path in python_paths if path.endswith(suffix))
     if not selected_paths and task_symbols:
-        symbol_patterns = tuple(re.compile(rf"\b{re.escape(symbol)}\b") for symbol in task_symbols)
+        definition_patterns = tuple(
+            re.compile(rf"^\s*(?:async\s+def|def|class)\s+{re.escape(symbol)}\b", re.M)
+            for symbol in task_symbols
+        )
+        mention_patterns = tuple(
+            re.compile(rf"\b{re.escape(symbol)}\b") for symbol in task_symbols
+        )
+        mentioned_paths: list[str] = []
         for path in python_paths:
-            if len(selected_paths) >= 8:
-                break
             text = reader.read_text(path)
-            if any(pattern.search(text) for pattern in symbol_patterns):
+            if any(pattern.search(text) for pattern in definition_patterns):
                 selected_paths.add(path)
+            elif any(pattern.search(text) for pattern in mention_patterns):
+                mentioned_paths.append(path)
+        if not selected_paths:
+            selected_paths.update(mentioned_paths[:8])
     selected = tuple(sorted(selected_paths)[:8])
     aggregate = {
         "imports": [],
