@@ -279,7 +279,13 @@ def _validate_command_evidence(value: Mapping[str, Any], name: str) -> None:
         raise SourceValidationError(f"{name} classification invalid")
 
 
-def validate_source_entry(value: Mapping[str, Any], *, confirmatory: bool) -> None:
+def _validate_source_entry_common(
+    value: Mapping[str, Any],
+    *,
+    confirmatory: bool,
+    target_id: str | None,
+    legacy_development_maps: bool,
+) -> None:
     if set(value) != SOURCE_ENTRY_REQUIRED_FIELDS:
         missing = sorted(SOURCE_ENTRY_REQUIRED_FIELDS - set(value))
         extra = sorted(set(value) - SOURCE_ENTRY_REQUIRED_FIELDS)
@@ -289,8 +295,16 @@ def validate_source_entry(value: Mapping[str, Any], *, confirmatory: bool) -> No
     if not re.fullmatch(r"src-[a-z0-9][a-z0-9-]+", str(value["source_id"])):
         raise SourceValidationError("invalid source ID")
     tiers = value["source_tier_by_target"]
-    if not isinstance(tiers, dict) or set(tiers) != set(DEVELOPMENT_IDS):
-        raise SourceValidationError("source tiers must cover the exact development set")
+    if legacy_development_maps:
+        if not isinstance(tiers, dict) or set(tiers) != set(DEVELOPMENT_IDS):
+            raise SourceValidationError("source tiers must cover the exact development set")
+    elif (
+        not isinstance(tiers, dict)
+        or not isinstance(target_id, str)
+        or not target_id
+        or target_id not in tiers
+    ):
+        raise SourceValidationError("source tier is absent for the supplied target")
     if any(tier not in {"S1", "S2", "S3"} for tier in tiers.values()):
         raise SourceValidationError("invalid source tier")
     if not _SHA1.fullmatch(str(value["repository_commit"])):
@@ -322,7 +336,6 @@ def validate_source_entry(value: Mapping[str, Any], *, confirmatory: bool) -> No
         or value["source_task_test"]["classification"] != "PASS"
     ):
         raise SourceValidationError("confirmatory source build/task test did not pass")
-    validate_focal_safety(value["focal_source_safety"], confirmatory=confirmatory)
     if stable_record_hash(value["environment"]) != value["source_environment_hash"]:
         raise SourceValidationError("source environment hash mismatch")
     hashes = value["source_artifact_hashes"]
@@ -331,8 +344,13 @@ def validate_source_entry(value: Mapping[str, Any], *, confirmatory: bool) -> No
     ):
         raise SourceValidationError("source artifact hashes are invalid")
     availability = value["available_before_target_B"]
-    if not isinstance(availability, dict) or set(availability) != set(DEVELOPMENT_IDS) or any(
-        not isinstance(flag, bool) for flag in availability.values()
+    if (
+        not isinstance(availability, dict)
+        or (
+            legacy_development_maps
+            and set(availability) != set(DEVELOPMENT_IDS)
+        )
+        or any(not isinstance(flag, bool) for flag in availability.values())
     ):
         raise SourceValidationError("target-relative source availability is invalid")
     reconstruction = value["reconstruction"]
@@ -347,6 +365,36 @@ def validate_source_entry(value: Mapping[str, Any], *, confirmatory: bool) -> No
         raise SourceValidationError("source reconstruction tree hash is invalid")
     if not _SHA1.fullmatch(str(reconstruction["git_tree_object_sha1"])):
         raise SourceValidationError("source reconstruction Git tree is invalid")
+
+
+def validate_source_correct_entry(
+    value: Mapping[str, Any], *, target_id: str
+) -> None:
+    """Validate the V3 pre-lock source-correct gate for one supplied target.
+
+    Historical focal-safety annotations remain in the immutable corpus record,
+    but are intentionally not consulted by this gate.  Pair-specific focal
+    safety is evaluated only after the top source has been hash-locked.
+    """
+
+    _validate_source_entry_common(
+        value,
+        confirmatory=True,
+        target_id=target_id,
+        legacy_development_maps=False,
+    )
+
+
+def validate_source_entry(value: Mapping[str, Any], *, confirmatory: bool) -> None:
+    """Validate the preserved V1/V2 source-entry contract."""
+
+    _validate_source_entry_common(
+        value,
+        confirmatory=confirmatory,
+        target_id=None,
+        legacy_development_maps=True,
+    )
+    validate_focal_safety(value["focal_source_safety"], confirmatory=confirmatory)
 
 
 def source_tree_evidence(materialization: Path) -> dict[str, Any]:
