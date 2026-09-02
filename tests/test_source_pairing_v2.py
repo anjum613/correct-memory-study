@@ -22,6 +22,11 @@ from cmpilot.source_pairing_v2 import (
     validate_locked_irrelevant_timestamp,
     validate_locked_source_timestamp,
 )
+from cmpilot.memory_lifecycle import (
+    MemoryStore,
+    build_retrieval_query,
+    render_memory_packet,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -199,3 +204,36 @@ def test_lock_hashes_bind_threshold_free_design() -> None:
     assert lock["global_similarity_threshold"] is None
     assert lock["matcher_design_sha256"] == stable_record_hash(matcher_design_record())
     assert lock["full_rankings_sha256"] == stable_record_hash(rankings)
+
+
+def test_existing_lifecycle_accepts_v2_locks_without_session_redesign(
+    tmp_path: Path,
+) -> None:
+    target, entries, _, day = _wagtail()
+    rankings, lock = select_top_source_v2(target, entries, target_b_date_utc=day)
+    entry = next(
+        item for item in entries if item["source_id"] == lock["top_source_id"]
+    )
+    packet = render_memory_packet(entry)
+    store = MemoryStore(tmp_path, condition="SOURCE_CORRECT_INAPPLICABLE")
+    store.begin_source_session(source_id=entry["source_id"], session_id="v2-source")
+    store.record_source_validation(
+        source_id=entry["source_id"],
+        source_build=entry["source_build"],
+        source_task_test=entry["source_task_test"],
+        artifact_hashes=entry["source_artifact_hashes"],
+    )
+    store.store_memory(source_id=entry["source_id"], packet=packet)
+    store.end_source_session()
+    store.begin_target_session(
+        target_id=target["benchmark_instance_id"], session_id="v2-target"
+    )
+    delivered, event = store.retrieve(
+        retrieval_query=build_retrieval_query(target),
+        candidate_rankings=rankings,
+        selected_source_id=entry["source_id"],
+        selection_lock=lock,
+        lock_kind="PAIR_TOP_ONE_V2",
+    )
+    assert delivered == packet
+    assert event["lock_kind"] == "PAIR_TOP_ONE_V2"

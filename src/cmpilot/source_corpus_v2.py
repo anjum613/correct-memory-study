@@ -114,8 +114,12 @@ OPERATION_RULES_V2: tuple[tuple[str, tuple[str, ...]], ...] = (
         ("session", "cookie", "state", "cache", "invalidate", "identity"),
     ),
     (
+        "MARKUP_LINK_SERIALIZATION",
+        ("link", "anchor", "href", "contentstate", "linktype"),
+    ),
+    (
         "MARKUP_SERIALIZATION",
-        ("html", "markup", "link", "anchor", "template", "render", "xml"),
+        ("html", "markup", "template", "render", "xml"),
     ),
     (
         "FILE_RESOURCE_IO",
@@ -152,6 +156,7 @@ _PSTAR_BY_OPERATION: Mapping[str, str] = {
     "PATH_OR_URL_VALIDATION": "PATH_PROVENANCE",
     "ENCODING_CANONICALIZATION": "ENCODING_CANONICALIZATION",
     "SESSION_STATE_LIFECYCLE": "RESOURCE_TRUST_BOUNDARY_ORDERING",
+    "MARKUP_LINK_SERIALIZATION": "PROTOCOL_LAYOUT",
     "MARKUP_SERIALIZATION": "PROTOCOL_LAYOUT",
     "FILE_RESOURCE_IO": "RESOURCE_TRUST_BOUNDARY_ORDERING",
     "PROTOCOL_LAYOUT": "PROTOCOL_LAYOUT",
@@ -167,6 +172,7 @@ _OBSERVABLES_BY_OPERATION: Mapping[str, tuple[str, ...]] = {
     "PATH_OR_URL_VALIDATION": ("input path or URL", "returned path, URL, or rejection"),
     "ENCODING_CANONICALIZATION": ("input representation", "decoded or encoded representation"),
     "SESSION_STATE_LIFECYCLE": ("input session state", "returned or persisted session state"),
+    "MARKUP_LINK_SERIALIZATION": ("input link data", "rendered or parsed link markup"),
     "MARKUP_SERIALIZATION": ("input markup data", "rendered or parsed markup"),
     "FILE_RESOURCE_IO": ("input resource", "read, written, or rejected resource state"),
     "PROTOCOL_LAYOUT": ("input fields", "parsed or formatted protocol value"),
@@ -611,7 +617,11 @@ def round_robin_candidates(
         discoveries,
         key=lambda item: (
             0 if item.get("tier") == "S1" else 1,
-            str(item.get("repository_url")),
+            (
+                str(item.get("repository_url"))
+                if item.get("tier") == "S1"
+                else str(item.get("repository_order_sha256", ""))
+            ),
             str(item.get("repository_commit")),
         ),
     )

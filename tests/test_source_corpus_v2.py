@@ -127,6 +127,13 @@ def test_operation_ontology_has_multiple_nonweighted_classes() -> None:
     assert "ENCODING_CANONICALIZATION" in classes
     assert "FILE_RESOURCE_IO" in classes
     assert "TIME_BOUNDARY" in classes
+    assert operation_classes_v2("render HTML email template") == (
+        "MARKUP_SERIALIZATION",
+    )
+    assert operation_classes_v2("render an anchor href link")[:2] == (
+        "MARKUP_LINK_SERIALIZATION",
+        "MARKUP_SERIALIZATION",
+    )
 
 
 def test_round_robin_is_deterministic_and_outcome_independent() -> None:
@@ -149,6 +156,29 @@ def test_round_robin_is_deterministic_and_outcome_independent() -> None:
         "b1",
         "a2",
         "b2",
+    ]
+
+
+def test_round_robin_respects_frozen_s2_hash_order() -> None:
+    discoveries = [
+        {
+            "tier": "S2",
+            "repository_url": "https://github.com/a/a.git",
+            "repository_commit": ANCHOR_A,
+            "repository_order_sha256": "f" * 64,
+            "candidates": [{"source_id": "later"}],
+        },
+        {
+            "tier": "S2",
+            "repository_url": "https://github.com/z/z.git",
+            "repository_commit": ANCHOR_B,
+            "repository_order_sha256": "0" * 64,
+            "candidates": [{"source_id": "earlier"}],
+        },
+    ]
+    assert [row["source_id"] for row in round_robin_candidates(discoveries)] == [
+        "earlier",
+        "later",
     ]
 
 

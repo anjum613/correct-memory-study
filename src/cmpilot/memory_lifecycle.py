@@ -389,10 +389,22 @@ class MemoryStore:
             enforce_top_source_lock(selection_lock, selected_source_id)
             if selection_lock.get("target_id") != active["target_id"]:
                 raise MemoryLifecycleError("pair lock target mismatch")
+        elif lock_kind == "PAIR_TOP_ONE_V2":
+            from cmpilot.source_pairing_v2 import enforce_top_source_lock_v2
+
+            enforce_top_source_lock_v2(selection_lock, selected_source_id)
+            if selection_lock.get("target_id") != active["target_id"]:
+                raise MemoryLifecycleError("V2 pair lock target mismatch")
         elif lock_kind == "IRRELEVANT_MATCH":
             enforce_irrelevant_lock(selection_lock, selected_source_id)
             if selection_lock.get("target_id") != active["target_id"]:
                 raise MemoryLifecycleError("irrelevant lock target mismatch")
+        elif lock_kind == "IRRELEVANT_MATCH_V2":
+            from cmpilot.source_pairing_v2 import enforce_irrelevant_lock_v2
+
+            enforce_irrelevant_lock_v2(selection_lock, selected_source_id)
+            if selection_lock.get("target_id") != active["target_id"]:
+                raise MemoryLifecycleError("V2 irrelevant lock target mismatch")
         else:
             raise MemoryLifecycleError("unknown selection lock kind")
         matching = [
