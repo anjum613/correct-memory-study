@@ -646,15 +646,21 @@ def validate_b_only_mapping(value: Mapping[str, Any]) -> None:
 
 
 def extract_python_symbol(source: str, symbol: str) -> tuple[str, int, int]:
-    """Extract exact source lines for one uniquely named class/function."""
+    """Extract exact source lines for one uniquely named or qualified symbol."""
 
     tree = ast.parse(source)
-    candidates = [
-        node
-        for node in ast.walk(tree)
-        if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
-        and node.name == symbol
-    ]
+    candidates: list[ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef] = []
+
+    def visit(body: Sequence[ast.stmt], prefix: tuple[str, ...] = ()) -> None:
+        for node in body:
+            if not isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            qualified = ".".join((*prefix, node.name))
+            if qualified == symbol or ("." not in symbol and node.name == symbol):
+                candidates.append(node)
+            visit(node.body, (*prefix, node.name))
+
+    visit(tree.body)
     if len(candidates) != 1:
         raise SourcePairingError(
             f"source symbol must resolve uniquely: {symbol}: {len(candidates)}"
@@ -792,10 +798,13 @@ def rank_sources(
         eligible = source_entry_eligible(entry, target_timestamp) and bool(
             scores["language_exact"]
         )
+        tiers = entry.get("source_tier_by_target")
+        if not isinstance(tiers, Mapping) or target["benchmark_instance_id"] not in tiers:
+            raise SourcePairingError("source tier is missing for target")
         rows.append(
             {
                 "source_id": source_id,
-                "source_tier": entry["source_tier"],
+                "source_tier": tiers[target["benchmark_instance_id"]],
                 "hard_gate_pass": eligible,
                 "scores": scores,
             }
@@ -855,7 +864,9 @@ def select_top_source(
                 raise SourcePairingError("AMBIGUOUS_TOP_SOURCE")
 
     target_hash = stable_record_hash(target)
-    corpus_hash = stable_record_hash(list(entries))
+    corpus_hash = stable_record_hash(
+        sorted(entries, key=lambda entry: str(entry["source_id"]))
+    )
     ranking_config = {
         "thresholds": dict(sorted(thresholds.items())),
         "ambiguity_margins": dict(sorted(ambiguity_margins.items())),

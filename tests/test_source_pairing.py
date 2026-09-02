@@ -91,7 +91,7 @@ def _entry(source_id: str, *, semantic_text: str, tier: str = "S2") -> dict:
     features = source_feature_record(code, semantic_text)
     return {
         "source_id": source_id,
-        "source_tier": tier,
+        "source_tier_by_target": {target_id: tier for target_id in DEVELOPMENT_IDS},
         "language": "python",
         "commit_timestamp_epoch": 100,
         **features,
@@ -226,6 +226,10 @@ def test_exact_python_symbol_extraction_and_ambiguity() -> None:
     assert (start, end) == (6, 7)
     with pytest.raises(SourcePairingError, match="uniquely"):
         extract_python_symbol("def same(): pass\ndef same(): pass\n", "same")
+    nested = "class Left:\n    def same(self):\n        return 1\n\nclass Right:\n    def same(self):\n        return 2\n"
+    exact, start, end = extract_python_symbol(nested, "Right.same")
+    assert exact == "    def same(self):\n        return 2\n"
+    assert (start, end) == (6, 7)
 
 
 def test_timestamp_and_source_gates_precede_deterministic_ranking() -> None:
@@ -334,3 +338,36 @@ def test_prospective_threshold_calibration_rule() -> None:
 
 def test_pair_lock_hash_is_deterministic() -> None:
     assert stable_record_hash({"b": 2, "a": 1}) == stable_record_hash({"a": 1, "b": 2})
+
+
+def test_pair_lock_corpus_hash_is_entry_order_invariant() -> None:
+    target = _target()
+    first = _entry("first", semantic_text=target["task_statement"])
+    second = _entry("second", semantic_text="proxy redirect resolution")
+    _, forward = select_top_source(
+        target,
+        [first, second],
+        target_timestamp=100,
+        thresholds={},
+        ambiguity_margins={feature: 0.0 for feature in (
+            "api_sequence_similarity",
+            "type_data_role_similarity",
+            "ast_similarity",
+            "token_similarity",
+            "semantic_similarity",
+        )},
+    )
+    _, reverse = select_top_source(
+        target,
+        [second, first],
+        target_timestamp=100,
+        thresholds={},
+        ambiguity_margins={feature: 0.0 for feature in (
+            "api_sequence_similarity",
+            "type_data_role_similarity",
+            "ast_similarity",
+            "token_similarity",
+            "semantic_similarity",
+        )},
+    )
+    assert forward["source_corpus_sha256"] == reverse["source_corpus_sha256"]

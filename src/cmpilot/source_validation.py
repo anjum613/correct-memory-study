@@ -23,13 +23,13 @@ from cmpilot.source_pairing import (
     stable_record_hash,
     validate_pstar,
 )
-from cmpilot.susvibes_feasibility import tree_sha256
+from cmpilot.susvibes_feasibility import DEVELOPMENT_IDS, tree_sha256
 
 
 SOURCE_ENTRY_REQUIRED_FIELDS = frozenset(
     {
         "source_id",
-        "source_tier",
+        "source_tier_by_target",
         "repository_url",
         "repository_commit",
         "commit_timestamp",
@@ -288,7 +288,10 @@ def validate_source_entry(value: Mapping[str, Any], *, confirmatory: bool) -> No
         )
     if not re.fullmatch(r"src-[a-z0-9][a-z0-9-]+", str(value["source_id"])):
         raise SourceValidationError("invalid source ID")
-    if value["source_tier"] not in {"S1", "S2", "S3"}:
+    tiers = value["source_tier_by_target"]
+    if not isinstance(tiers, dict) or set(tiers) != set(DEVELOPMENT_IDS):
+        raise SourceValidationError("source tiers must cover the exact development set")
+    if any(tier not in {"S1", "S2", "S3"} for tier in tiers.values()):
         raise SourceValidationError("invalid source tier")
     if not _SHA1.fullmatch(str(value["repository_commit"])):
         raise SourceValidationError("invalid source commit")
@@ -328,7 +331,7 @@ def validate_source_entry(value: Mapping[str, Any], *, confirmatory: bool) -> No
     ):
         raise SourceValidationError("source artifact hashes are invalid")
     availability = value["available_before_target_B"]
-    if not isinstance(availability, dict) or not availability or any(
+    if not isinstance(availability, dict) or set(availability) != set(DEVELOPMENT_IDS) or any(
         not isinstance(flag, bool) for flag in availability.values()
     ):
         raise SourceValidationError("target-relative source availability is invalid")
@@ -342,6 +345,8 @@ def validate_source_entry(value: Mapping[str, Any], *, confirmatory: bool) -> No
         raise SourceValidationError("source reconstruction evidence is incomplete")
     if not _SHA256.fullmatch(str(reconstruction["tree_sha256"])):
         raise SourceValidationError("source reconstruction tree hash is invalid")
+    if not _SHA1.fullmatch(str(reconstruction["git_tree_object_sha1"])):
+        raise SourceValidationError("source reconstruction Git tree is invalid")
 
 
 def source_tree_evidence(materialization: Path) -> dict[str, Any]:

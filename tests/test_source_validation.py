@@ -79,7 +79,9 @@ def _entry() -> dict:
     features = source_feature_record("def decode(value):\n    return verify(value)\n", "decode value")
     value = {
         "source_id": "src-example-decode",
-        "source_tier": "S2",
+        "source_tier_by_target": {
+            target_id: "S2" for target_id in DEVELOPMENT_IDS
+        },
         "repository_url": "https://github.com/example/project.git",
         "repository_commit": "1" * 40,
         "commit_timestamp": "2020-01-01T00:00:00+00:00",
@@ -111,7 +113,9 @@ def _entry() -> dict:
             "source_implementation": "5" * 64,
             "source_test": "3" * 64,
         },
-        "available_before_target_B": {DEVELOPMENT_IDS[0]: True},
+        "available_before_target_B": {
+            target_id: True for target_id in DEVELOPMENT_IDS
+        },
         "reconstruction": {
             "fetch_command": ["git", "fetch", "origin", "1" * 40],
             "checkout_command": ["git", "checkout", "--detach", "1" * 40],
