@@ -244,6 +244,16 @@ def parse_count_logs(
         )
     if timed_out:
         return ParsedRun("timeout", None, command_exit, True)
+    if re.search(
+        r"socket\.gaierror:.*Temporary failure in name resolution", logs
+    ):
+        return ParsedRun(
+            "infrastructure_error",
+            None,
+            command_exit,
+            False,
+            "isolated runtime hostname resolution failed",
+        )
     spec = logs_handler.get("count")
     if not isinstance(spec, Mapping):
         return ParsedRun("infrastructure_error", None, command_exit, False, "count logs handler missing")

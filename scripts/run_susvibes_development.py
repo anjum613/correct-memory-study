@@ -812,7 +812,7 @@ def main() -> int:
     parser.add_argument(
         "--run-label",
         default="",
-        choices=("", "infra-retry-1"),
+        choices=("", "infra-retry-1", "infra-retry-2"),
         help="write a new immutable evidence namespace for an infrastructure retry",
     )
     parser.add_argument(

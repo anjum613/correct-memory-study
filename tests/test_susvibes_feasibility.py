@@ -167,6 +167,15 @@ FileNotFoundError: [Errno 2] No such file or directory: '/dev/shm'
     )
     assert missing_dev_shm.status == "infrastructure_error"
     assert missing_dev_shm.failures is None
+    hostname_failure = parse_count_logs(
+        "1 failed\nsocket.gaierror: [Errno -3] Temporary failure in name resolution\n",
+        logs_handler=handler,
+        timed_out=False,
+        command_exit=1,
+        runtime_started=True,
+    )
+    assert hostname_failure.status == "infrastructure_error"
+    assert hostname_failure.failures is None
 
 
 def test_security_matrix_classification() -> None:

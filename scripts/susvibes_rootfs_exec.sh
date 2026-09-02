@@ -18,6 +18,8 @@ if [[ "${1:-}" == "--inside" ]]; then
   mount --bind "$rootfs" "$rootfs"
   mount -o remount,ro,bind "$rootfs"
   mount --bind "$repository" "$rootfs/project"
+  mount --bind /etc/hosts "$rootfs/etc/hosts"
+  mount -o remount,ro,bind "$rootfs/etc/hosts"
   mount -t tmpfs -o mode=1777,nodev,nosuid tmpfs "$rootfs/tmp"
   mount -t tmpfs -o mode=0700,nodev,nosuid tmpfs "$rootfs/root"
   mount -t tmpfs -o mode=0755,nodev,nosuid tmpfs "$rootfs/dev"
