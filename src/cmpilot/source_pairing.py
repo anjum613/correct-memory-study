@@ -19,7 +19,7 @@ import re
 import textwrap
 import tokenize
 from io import BytesIO
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Callable, Iterable, Mapping, Sequence
 
 from cmpilot.susvibes_feasibility import DEVELOPMENT_IDS, SUSVIBES_REVISION
 
@@ -544,13 +544,21 @@ def _candidate_module_suffixes(reference: str) -> tuple[str, ...]:
     return ()
 
 
-def build_b_only_representation(reader: AuditedWorkspaceReader) -> dict[str, Any]:
+def build_b_only_representation(
+    reader: AuditedWorkspaceReader,
+    *,
+    target_identity_validator: Callable[[str], None] | None = None,
+) -> dict[str, Any]:
     task_statement = reader.read_text("task.md")
     metadata = json.loads(reader.read_text("public-metadata.json"))
     if not isinstance(metadata, dict) or set(metadata) != PUBLIC_METADATA_FIELDS:
         raise SourcePairingError("public metadata fields changed or include sealed data")
-    if metadata.get("instance_id") not in DEVELOPMENT_IDS:
-        raise PermissionError("B-only extraction is development-ID-only")
+    instance_id = str(metadata.get("instance_id", ""))
+    if target_identity_validator is None:
+        if instance_id not in DEVELOPMENT_IDS:
+            raise PermissionError("B-only extraction is development-ID-only")
+    else:
+        target_identity_validator(instance_id)
     if metadata.get("benchmark_revision") != SUSVIBES_REVISION:
         raise SourcePairingError("SusVibes revision mismatch")
     if metadata.get("language") != "python":
@@ -629,7 +637,9 @@ def build_b_only_representation(reader: AuditedWorkspaceReader) -> dict[str, Any
             ),
         },
     }
-    validate_b_only_mapping(representation)
+    validate_b_only_mapping(
+        representation, target_identity_validator=target_identity_validator
+    )
     return representation
 
 
@@ -655,13 +665,21 @@ def load_frozen_source_corpus(
     return tuple(entries)
 
 
-def validate_b_only_mapping(value: Mapping[str, Any]) -> None:
+def validate_b_only_mapping(
+    value: Mapping[str, Any],
+    *,
+    target_identity_validator: Callable[[str], None] | None = None,
+) -> None:
     serialized = json.dumps(value, sort_keys=True).casefold()
     for forbidden in FORBIDDEN_B_ONLY_KEYS:
         if forbidden in value or re.search(rf'"{re.escape(forbidden)}"\s*:', serialized):
             raise SourcePairingError(f"B-only representation contains forbidden field: {forbidden}")
-    if value.get("benchmark_instance_id") not in DEVELOPMENT_IDS:
-        raise SourcePairingError("B-only representation names a non-development target")
+    target_id = str(value.get("benchmark_instance_id", ""))
+    if target_identity_validator is None:
+        if target_id not in DEVELOPMENT_IDS:
+            raise SourcePairingError("B-only representation names a non-development target")
+    else:
+        target_identity_validator(target_id)
     if value.get("benchmark_revision") != SUSVIBES_REVISION:
         raise SourcePairingError("B-only representation revision mismatch")
     if not re.fullmatch(r"[0-9a-f]{64}", str(value.get("b_snapshot_sha256", ""))):

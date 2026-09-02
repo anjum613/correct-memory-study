@@ -25,7 +25,7 @@ from cmpilot.source_pairing import (
     score_candidate,
     stable_record_hash,
 )
-from cmpilot.source_validation import validate_source_entry
+from cmpilot.source_validation import validate_source_correct_entry, validate_source_entry
 
 
 PHYSICAL_CONTEXT = 32768
@@ -109,8 +109,13 @@ def packet_section(packet: bytes, tag: str) -> bytes:
     return packet[start + len(opening) : end]
 
 
-def render_memory_packet(entry: Mapping[str, Any]) -> bytes:
-    validate_source_entry(entry, confirmatory=True)
+def render_memory_packet(
+    entry: Mapping[str, Any], *, target_id: str | None = None
+) -> bytes:
+    if target_id is None:
+        validate_source_entry(entry, confirmatory=True)
+    else:
+        validate_source_correct_entry(entry, target_id=target_id)
     if entry["source_test_result"] != "PASS":
         raise MemoryLifecycleError("memory source task did not pass")
     task = entry["source_task_description"].encode("utf-8")
@@ -395,6 +400,12 @@ class MemoryStore:
             enforce_top_source_lock_v2(selection_lock, selected_source_id)
             if selection_lock.get("target_id") != active["target_id"]:
                 raise MemoryLifecycleError("V2 pair lock target mismatch")
+        elif lock_kind == "PAIR_TOP_ONE_V3":
+            from cmpilot.source_pairing_v3 import enforce_top_source_lock_v3
+
+            enforce_top_source_lock_v3(selection_lock, selected_source_id)
+            if selection_lock.get("target_id") != active["target_id"]:
+                raise MemoryLifecycleError("V3 pair lock target mismatch")
         elif lock_kind == "IRRELEVANT_MATCH":
             enforce_irrelevant_lock(selection_lock, selected_source_id)
             if selection_lock.get("target_id") != active["target_id"]:
@@ -405,6 +416,12 @@ class MemoryStore:
             enforce_irrelevant_lock_v2(selection_lock, selected_source_id)
             if selection_lock.get("target_id") != active["target_id"]:
                 raise MemoryLifecycleError("V2 irrelevant lock target mismatch")
+        elif lock_kind == "IRRELEVANT_MATCH_V3":
+            from cmpilot.source_pairing_v3 import enforce_irrelevant_lock_v3
+
+            enforce_irrelevant_lock_v3(selection_lock, selected_source_id)
+            if selection_lock.get("target_id") != active["target_id"]:
+                raise MemoryLifecycleError("V3 irrelevant lock target mismatch")
         else:
             raise MemoryLifecycleError("unknown selection lock kind")
         matching = [
@@ -507,8 +524,10 @@ def _ast_complexity(value: str) -> int:
     return sum(int(item.rsplit(":", 1)[1]) for item in features["ast_signature"])
 
 
-def memory_metrics(entry: Mapping[str, Any]) -> dict[str, int]:
-    packet = render_memory_packet(entry)
+def memory_metrics(
+    entry: Mapping[str, Any], *, target_id: str | None = None
+) -> dict[str, int]:
+    packet = render_memory_packet(entry, target_id=target_id)
     implementation = entry["source_implementation_or_patch"]
     return {
         "packet_tokens": len(lexical_tokens(packet)),
