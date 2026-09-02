@@ -52,7 +52,14 @@ _REQUIRED_OPTIONS = (
     "--expected-model-cache-digest",
 )
 _IGNORED_NAMES = frozenset(
-    {".git", ".pytest_cache", "__pycache__", ".mypy_cache", ".ruff_cache"}
+    {
+        ".git",
+        ".pytest_cache",
+        "__pycache__",
+        ".mypy_cache",
+        ".ruff_cache",
+        "tmp",
+    }
 )
 
 
