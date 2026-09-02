@@ -31,6 +31,10 @@ def test_runtime_estimates_use_counts_and_disclose_uncertainty() -> None:
     assert fractions["pstar_pair_review_all_yes"]["numerator"] == 1
     assert result["matcher_pass_rate"]["confirmatory"] == "NOT_ESTIMABLE"
     assert result["matcher_pass_rate"]["do_not_extrapolate_as_confirmatory_yield"] is True
+    assert result["irrelevant_control_yield"]["status"] == "NOT_AVAILABLE"
+    assert result["irrelevant_control_yield"][
+        "sealed_accepted_pairs_with_valid_matched_irrelevant"
+    ] == 0
     assert result["source_pairing_time_per_target"]["confidence"] == "LOW"
     assert len(result["uncertainty"]) >= 5
     assert result["confirmatory_screening_authorized"] is False
@@ -58,8 +62,8 @@ def test_end_to_end_result_is_development_only_and_not_authorization() -> None:
     result = load("development-end-to-end-results.json")
     assert result["development_only"] is True
     assert result["development_targets"] == list(DEVELOPMENT_IDS)
-    assert result["development_end_to_end_pass"] is True
-    assert result["status"] == "PASS_DEVELOPMENT_PLUMBING_ONLY"
+    assert result["development_end_to_end_pass"] is False
+    assert result["status"].startswith("FAIL_MISSING_IRRELEVANT")
     assert result["matcher_thresholds_freezeable"] is False
     assert result["confirmatory_readiness_implication"] == "NONE"
     assert result["confirmatory_screening_authorized"] is False
@@ -71,4 +75,12 @@ def test_end_to_end_result_is_development_only_and_not_authorization() -> None:
         "matcher-threshold-candidate.json",
         "memory-lifecycle-audit.json",
     }
-    assert all(value.startswith("PASS") for value in result["checks"].values())
+    assert result["checks"]["matched_irrelevant_memory_condition"] == (
+        "FAIL_NOT_AVAILABLE"
+    )
+    assert result["checks"]["endpoint_plumbing"].startswith("PARTIAL")
+    assert all(
+        value.startswith("PASS")
+        for key, value in result["checks"].items()
+        if key not in {"matched_irrelevant_memory_condition", "endpoint_plumbing"}
+    )

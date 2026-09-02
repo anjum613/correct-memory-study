@@ -31,11 +31,10 @@ from cmpilot.memory_lifecycle import (
     automated_behavior_features,
     build_retrieval_query,
     context_budget_record,
-    irrelevant_lock,
     lexical_tokens,
     mock_agent_endpoint,
     render_memory_packet,
-    select_irrelevant_memory,
+    rank_irrelevant_memories,
     sha256_bytes,
 )
 from cmpilot.source_pairing import extract_python_symbol, stable_record_hash
@@ -46,7 +45,7 @@ from cmpilot.susvibes_feasibility import DEVELOPMENT_IDS, SUSVIBES_REVISION
 ROOT = Path(__file__).resolve().parents[1]
 ARTIFACT_ROOT = ROOT / "artifacts/context-dependent-memory-source-pairing"
 DEFAULT_MEMORY_ROOT = (
-    ROOT / "tmp/context-dependent-memory-source-pairing/memory-lifecycle-v3"
+    ROOT / "tmp/context-dependent-memory-source-pairing/memory-lifecycle-v5"
 )
 
 
@@ -404,14 +403,13 @@ def main() -> int:
         raise MemoryLifecycleError("accepted sealed pair and matcher lock diverged")
     sources = {entry["source_id"]: entry for entry in manifest["entries"]}
     relevant = sources[pair_lock["top_source_id"]]
-    irrelevant, irrelevant_selection = select_irrelevant_memory(
+    irrelevant_selection = rank_irrelevant_memories(
         target, relevant, manifest["entries"]
     )
-    irrelevant_selection_lock = irrelevant_lock(
-        target_id=target_id,
-        selected_source_id=irrelevant["source_id"],
-        selector_record=irrelevant_selection,
-    )
+    if irrelevant_selection["status"] != "NOT_AVAILABLE":
+        raise MemoryLifecycleError(
+            "strict timestamp/length gates unexpectedly found an irrelevant control"
+        )
 
     no_memory_store = MemoryStore(memory_root / "no_memory", condition="NO_MEMORY")
     no_memory_target_session = "target-no_memory-1"
@@ -449,15 +447,17 @@ def main() -> int:
             "evaluated_model_inference": False,
             "pass": True,
         },
-        lifecycle_condition(
-            root=memory_root,
-            condition="IRRELEVANT_CORRECT_MEMORY",
-            target=target,
-            entry=irrelevant,
-            candidate_rankings=irrelevant_selection["candidate_rankings"],
-            selection_lock=irrelevant_selection_lock,
-            lock_kind="IRRELEVANT_MATCH",
-        ),
+        {
+            "condition": "IRRELEVANT_CORRECT_MEMORY",
+            "source_id": None,
+            "source_session_id": None,
+            "target_session_id": None,
+            "status": "NOT_AVAILABLE",
+            "reason": "No source satisfies the frozen timestamp, relevance, evidence, and packet-token gates for the only sealed-accepted development pair.",
+            "endpoint_executed": False,
+            "evaluated_model_inference": False,
+            "pass": False,
+        },
         lifecycle_condition(
             root=memory_root,
             condition="SOURCE_CORRECT_INAPPLICABLE",
@@ -479,18 +479,11 @@ def main() -> int:
     ]
 
     relevant_packet = render_memory_packet(relevant)
-    irrelevant_packet = render_memory_packet(irrelevant)
     budget_records = [
         context_budget_record(
             condition="NO_MEMORY",
             task_text=target["task_statement"],
             memory_packet=None,
-            revalidation_instruction=None,
-        ),
-        context_budget_record(
-            condition="IRRELEVANT_CORRECT_MEMORY",
-            task_text=target["task_statement"],
-            memory_packet=irrelevant_packet,
             revalidation_instruction=None,
         ),
         context_budget_record(
@@ -512,7 +505,11 @@ def main() -> int:
     source_session_ids = [
         row["source_session_id"] for row in condition_results if row["source_session_id"]
     ]
-    target_session_ids = [row["target_session_id"] for row in condition_results]
+    target_session_ids = [
+        row["target_session_id"]
+        for row in condition_results
+        if row["target_session_id"]
+    ]
     if len(set(source_session_ids)) != len(source_session_ids):
         raise MemoryLifecycleError("source session identifier reused across conditions")
     if len(set(target_session_ids)) != len(target_session_ids):
@@ -546,17 +543,26 @@ def main() -> int:
         ],
         "conditions": condition_results,
         "context_budgets": budget_records,
+        "unconstructed_condition_budget_policy": {
+            "condition": "IRRELEVANT_CORRECT_MEMORY",
+            "post_ingestion_budget": 16384,
+            "condition_constructed": False,
+            "reason": "No valid packet exists; semantic padding or an invalid source was not substituted.",
+        },
         "source_target_session_ids_disjoint": True,
         "condition_store_roots_distinct": True,
         "cross_condition_contamination": False,
         "no_memory_semantic_padding": False,
         "evaluated_model_inference": False,
         "gpu_used": False,
-        "status": "PASS",
+        "memory_lifecycle_mechanism_status": "PASS",
+        "full_condition_construction_status": "FAIL",
+        "irrelevant_control_ready": False,
+        "status": "PARTIAL",
     }
 
     fidelity_sources = []
-    for entry in (relevant, irrelevant):
+    for entry in (relevant,):
         packet = render_memory_packet(entry)
         fidelity_sources.append(
             {
@@ -589,19 +595,22 @@ def main() -> int:
 
     irrelevant_artifact = {
         **irrelevant_selection,
-        "selection_lock": irrelevant_selection_lock,
-        "selected_packet_sha256": sha256_bytes(irrelevant_packet),
+        "selection_lock": None,
+        "selected_packet_sha256": None,
         "relevant_packet_sha256": sha256_bytes(relevant_packet),
         "same_template": True,
-        "source_correct": True,
-        "focal_safe_in_source": True,
-        "different_primary_operation_class": True,
-        "different_pstar_class": True,
-        "secondary_operation_overlap_disclosed": not irrelevant_selection["selected"][
-            "operation_class_disjoint"
-        ],
+        "source_correct": None,
+        "focal_safe_in_source": None,
+        "different_primary_operation_class": None,
+        "different_pstar_class": None,
+        "timestamp_rule_enforced": True,
+        "frozen_packet_tolerance_enforced": True,
+        "no_invalid_source_substitution": True,
+        "supersedes_invalid_development_result_commit": "ec5b05fed137e9760680fc22637b2b18acd6dde8",
+        "superseded_invalid_source_id": "src-django-signed-session-decode",
+        "superseded_result_invalid_reason": "The source commit timestamp is later than the accepted Wagtail target B timestamp; the earlier selector omitted the target-relative timestamp gate.",
         "future_evaluated_tokenizer_recheck_required": True,
-        "development_status": "PASS",
+        "development_status": "FAIL",
     }
 
     applicable = {
@@ -683,7 +692,7 @@ def main() -> int:
         "deadline": "Avoids an unsupported construction and unnecessary arm.",
         "scientific_clarity": "Separates memory relevance from a generic assumption-revalidation instruction without claiming an applicable-memory contrast.",
         "richest_design_selected_automatically": False,
-        "status": "PASS",
+        "status": "BLOCKED_PENDING_VALID_IRRELEVANT_CONTROL_AND_MATCHER_THRESHOLDS",
     }
 
     synthetic_example = automated_behavior_features(
@@ -713,10 +722,10 @@ def main() -> int:
     print(
         json.dumps(
             {
-                "status": "PASS",
+                "status": "PARTIAL",
                 "target_id": target_id,
                 "relevant_source_id": relevant["source_id"],
-                "irrelevant_source_id": irrelevant["source_id"],
+                "irrelevant_source_id": None,
                 "conditions": list(CONDITIONS),
                 "evaluated_model_inference": False,
             },

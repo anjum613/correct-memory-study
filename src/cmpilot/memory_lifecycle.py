@@ -49,8 +49,9 @@ CONDITIONS = (
 
 MEMORY_TAGS = ("SOURCE_TASK", "SOURCE_IMPLEMENTATION", "SOURCE_VALIDATION")
 MEMORY_TOKENIZER = "cmpilot-memory-lexical-tokenizer-v1"
-IRRELEVANT_PACKET_TOKEN_TOLERANCE = 0.40
-IRRELEVANT_IMPLEMENTATION_TOKEN_TOLERANCE = 0.70
+IRRELEVANT_PACKET_TOKEN_TOLERANCE = 0.10
+IRRELEVANT_PACKET_TOKEN_ABSOLUTE_CAP = 128
+IRRELEVANT_IMPLEMENTATION_TOKEN_TOLERANCE = 0.25
 IRRELEVANT_COMPLEXITY_TOLERANCE = 0.35
 IRRELEVANCE_SEMANTIC_MAX = 0.10
 
@@ -507,7 +508,7 @@ def memory_metrics(entry: Mapping[str, Any]) -> dict[str, int]:
     }
 
 
-def select_irrelevant_memory(
+def rank_irrelevant_memories(
     target: Mapping[str, Any],
     relevant_entry: Mapping[str, Any],
     entries: Sequence[Mapping[str, Any]],
@@ -516,10 +517,16 @@ def select_irrelevant_memory(
     implementation_token_tolerance: float = IRRELEVANT_IMPLEMENTATION_TOKEN_TOLERANCE,
     complexity_tolerance: float = IRRELEVANT_COMPLEXITY_TOLERANCE,
     semantic_max: float = IRRELEVANCE_SEMANTIC_MAX,
-) -> tuple[dict[str, Any], dict[str, Any]]:
+) -> dict[str, Any]:
     validate_source_entry(relevant_entry, confirmatory=True)
     relevant_metrics = memory_metrics(relevant_entry)
+    packet_token_tolerance_count = min(
+        math.ceil(packet_token_tolerance * relevant_metrics["packet_tokens"]),
+        IRRELEVANT_PACKET_TOKEN_ABSOLUTE_CAP,
+    )
     target_operations = set(target["operation_categories"])
+    target_id = str(target["benchmark_instance_id"])
+    level_order = {"A": 0, "B": 1, "C": 2, "D": 3}
     candidates = []
     for entry in entries:
         if entry["source_id"] == relevant_entry["source_id"]:
@@ -528,12 +535,19 @@ def select_irrelevant_memory(
         scores = score_candidate(target, entry)
         metrics = memory_metrics(entry)
         deltas = {
+            "packet_token_absolute_difference": abs(
+                relevant_metrics["packet_tokens"] - metrics["packet_tokens"]
+            ),
             "packet_token_relative_difference": _relative_difference(
                 relevant_metrics["packet_tokens"], metrics["packet_tokens"]
             ),
             "implementation_token_relative_difference": _relative_difference(
                 relevant_metrics["implementation_tokens"],
                 metrics["implementation_tokens"],
+            ),
+            "implementation_byte_absolute_difference": abs(
+                relevant_metrics["implementation_bytes"]
+                - metrics["implementation_bytes"]
             ),
             "source_task_complexity_log_relative_difference": _log_relative_difference(
                 relevant_metrics["source_task_complexity"],
@@ -547,12 +561,22 @@ def select_irrelevant_memory(
         different_pstar_class = entry["focal_source_safety"]["pstar"][
             "ontology_class"
         ] != relevant_entry["focal_source_safety"]["pstar"]["ontology_class"]
+        available_before_target = (
+            entry.get("available_before_target_B", {}).get(target_id) is True
+        )
+        same_library_or_api = bool(scores["same_library_or_api"])
+        safety_level_difference = abs(
+            level_order[entry["focal_source_safety"]["level"]]
+            - level_order[relevant_entry["focal_source_safety"]["level"]]
+        )
         hard_pass = bool(
             entry["language"] == relevant_entry["language"]
-            and primary_operation_different
-            and different_pstar_class
+            and available_before_target
+            and operation_disjoint
+            and not same_library_or_api
             and float(scores["semantic_similarity"]) <= semantic_max
-            and deltas["packet_token_relative_difference"] <= packet_token_tolerance
+            and deltas["packet_token_absolute_difference"]
+            <= packet_token_tolerance_count
             and deltas["implementation_token_relative_difference"]
             <= implementation_token_tolerance
             and deltas["source_task_complexity_log_relative_difference"]
@@ -569,9 +593,12 @@ def select_irrelevant_memory(
             {
                 "source_id": entry["source_id"],
                 "hard_gate_pass": hard_pass,
+                "available_before_target_B": available_before_target,
                 "operation_class_disjoint": operation_disjoint,
+                "same_library_or_api": same_library_or_api,
                 "primary_operation_different": primary_operation_different,
                 "different_pstar_class": different_pstar_class,
+                "focal_safety_level_difference": safety_level_difference,
                 "semantic_similarity": scores["semantic_similarity"],
                 "metrics": metrics,
                 "deltas": deltas,
@@ -584,40 +611,66 @@ def select_irrelevant_memory(
     candidates.sort(
         key=lambda row: (
             not row["hard_gate_pass"],
-            row["deltas"]["packet_token_relative_difference"],
-            row["deltas"]["implementation_token_relative_difference"],
+            row["deltas"]["packet_token_absolute_difference"],
+            row["deltas"]["implementation_byte_absolute_difference"],
+            row["focal_safety_level_difference"],
             row["deltas"]["source_task_complexity_log_relative_difference"],
-            not row["operation_class_disjoint"],
-            abs(float(row["semantic_similarity"])),
             row["source_id"],
         )
     )
     accepted = [row for row in candidates if row["hard_gate_pass"]]
-    if not accepted:
-        raise MemoryLifecycleError("NO_MATCHED_IRRELEVANT_MEMORY")
-    selected = accepted[0]
-    entry_by_id = {entry["source_id"]: entry for entry in entries}
     record = {
         "schema": "cmpilot-irrelevant-memory-selection-v1",
-        "target_id": target["benchmark_instance_id"],
+        "target_id": target_id,
         "relevant_source_id": relevant_entry["source_id"],
-        "selected_source_id": selected["source_id"],
+        "selected_source_id": accepted[0]["source_id"] if accepted else None,
+        "status": "PASS" if accepted else "NOT_AVAILABLE",
         "tokenizer": MEMORY_TOKENIZER,
         "thresholds": {
-            "packet_token_relative_difference_max": packet_token_tolerance,
+            "packet_token_tolerance_formula": "MIN(CEIL(0.10 * RELEVANT_PACKET_TOKENS), 128)",
+            "packet_token_absolute_difference_max": packet_token_tolerance_count,
+            "packet_token_relative_parameter": packet_token_tolerance,
             "implementation_token_relative_difference_max": implementation_token_tolerance,
             "source_task_complexity_log_relative_difference_max": complexity_tolerance,
             "semantic_similarity_max": semantic_max,
+            "semantic_threshold_status": "DEVELOPMENT_CANDIDATE_NOT_CONFIRMATORY_FROZEN",
         },
+        "hard_gates": [
+            "SAME_LANGUAGE",
+            "SOURCE_TIMESTAMP_AT_OR_BEFORE_TARGET_B",
+            "OPERATION_CLASS_DISJOINT",
+            "NO_SAME_LIBRARY_OR_API",
+            "SEMANTIC_SIMILARITY_AT_OR_BELOW_DEVELOPMENT_CANDIDATE_MAX",
+            "PACKET_TOKEN_TOLERANCE",
+            "IMPLEMENTATION_TOKEN_TOLERANCE",
+            "SOURCE_TASK_COMPLEXITY_TOLERANCE",
+            "SOURCE_TASK_TEST_PASS",
+            "FOCAL_SOURCE_SAFETY_PASS",
+            "SOURCE_TEST_PATH_COUNT_WITHIN_ONE",
+        ],
         "same_template": True,
         "candidate_rankings": [
             {**row, "rank": index} for index, row in enumerate(candidates, 1)
         ],
-        "selected": selected,
+        "selected": accepted[0] if accepted else None,
+        "accepted_count": len(accepted),
         "selection_uses_target_oracle": False,
         "selection_uses_model_outcome": False,
     }
-    return entry_by_id[selected["source_id"]], record
+    return record
+
+
+def select_irrelevant_memory(
+    target: Mapping[str, Any],
+    relevant_entry: Mapping[str, Any],
+    entries: Sequence[Mapping[str, Any]],
+    **kwargs: Any,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    record = rank_irrelevant_memories(target, relevant_entry, entries, **kwargs)
+    if record["status"] != "PASS" or not record["selected_source_id"]:
+        raise MemoryLifecycleError("NO_MATCHED_IRRELEVANT_MEMORY")
+    entry_by_id = {entry["source_id"]: entry for entry in entries}
+    return entry_by_id[record["selected_source_id"]], record
 
 
 def context_budget_record(
@@ -631,6 +684,8 @@ def context_budget_record(
         raise MemoryLifecycleError("unknown condition")
     if condition == "NO_MEMORY" and memory_packet is not None:
         raise MemoryLifecycleError("NO_MEMORY must not receive padding or memory")
+    if condition != "NO_MEMORY" and memory_packet is None:
+        raise MemoryLifecycleError("memory condition requires an actual memory packet")
     if condition.endswith("REVALIDATE"):
         if revalidation_instruction != REVALIDATION_INSTRUCTION:
             raise MemoryLifecycleError("revalidation wording changed")

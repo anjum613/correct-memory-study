@@ -23,6 +23,7 @@ from cmpilot.memory_lifecycle import (
     irrelevant_lock,
     mock_agent_endpoint,
     packet_section,
+    rank_irrelevant_memories,
     render_memory_packet,
     select_irrelevant_memory,
     sha256_bytes,
@@ -173,55 +174,47 @@ def test_source_validation_must_pass_inside_matching_source_session(
     assert event["source_task_test_result"] == "PASS"
 
 
-def test_irrelevant_selector_is_objective_locked_and_no_fallback(tmp_path: Path) -> None:
+def test_strict_irrelevant_selector_rejects_postdated_or_poorly_matched_sources() -> None:
     target, relevant, _, entries = wagtail_fixture()
-    irrelevant, record = select_irrelevant_memory(target, relevant, entries)
-    assert irrelevant["source_id"] != relevant["source_id"]
-    assert record["selected"]["hard_gate_pass"] is True
-    assert record["selected"]["primary_operation_different"] is True
-    assert record["selected"]["different_pstar_class"] is True
+    record = rank_irrelevant_memories(target, relevant, entries)
+    assert record["status"] == "NOT_AVAILABLE"
+    assert record["selected"] is None
+    assert record["selected_source_id"] is None
+    assert record["accepted_count"] == 0
     assert record["selection_uses_target_oracle"] is False
+    assert all(not row["hard_gate_pass"] for row in record["candidate_rankings"])
+    postdated = next(
+        row
+        for row in record["candidate_rankings"]
+        if row["source_id"] == "src-django-signed-session-decode"
+    )
+    assert postdated["available_before_target_B"] is False
+    with pytest.raises(MemoryLifecycleError, match="NO_MATCHED"):
+        select_irrelevant_memory(target, relevant, entries)
+
+
+def test_irrelevant_lock_is_immutable_and_has_no_fallback() -> None:
+    target, relevant, _, _ = wagtail_fixture()
+    excluded_unit_record = {
+        "scope": "SYNTHETIC_LOCK_MECHANISM_ONLY_NOT_A_SOURCE_SELECTION",
+        "selected_source_id": relevant["source_id"],
+    }
     lock = irrelevant_lock(
         target_id=target["benchmark_instance_id"],
-        selected_source_id=irrelevant["source_id"],
-        selector_record=record,
+        selected_source_id=relevant["source_id"],
+        selector_record=excluded_unit_record,
     )
-    enforce_irrelevant_lock(lock, irrelevant["source_id"])
+    enforce_irrelevant_lock(lock, relevant["source_id"])
     with pytest.raises(PermissionError, match="fallback"):
-        enforce_irrelevant_lock(lock, relevant["source_id"])
-
-    store = MemoryStore(tmp_path, condition="IRRELEVANT_CORRECT_MEMORY")
-    store.begin_source_session(
-        source_id=irrelevant["source_id"], session_id="irrelevant-source-session"
-    )
-    store.record_source_validation(
-        source_id=irrelevant["source_id"],
-        source_build=irrelevant["source_build"],
-        source_task_test=irrelevant["source_task_test"],
-        artifact_hashes=irrelevant["source_artifact_hashes"],
-    )
-    store.store_memory(
-        source_id=irrelevant["source_id"], packet=render_memory_packet(irrelevant)
-    )
-    store.end_source_session()
-    store.begin_target_session(
-        target_id=target["benchmark_instance_id"], session_id="irrelevant-target-session"
-    )
-    with pytest.raises(PermissionError, match="fallback"):
-        store.retrieve(
-            retrieval_query=build_retrieval_query(target),
-            candidate_rankings=record["candidate_rankings"],
-            selected_source_id=relevant["source_id"],
-            selection_lock=lock,
-            lock_kind="IRRELEVANT_MATCH",
-        )
+        enforce_irrelevant_lock(lock, "rank-2-is-forbidden")
 
 
 def test_context_budget_is_equal_and_no_memory_has_no_padding() -> None:
     target, relevant, _, entries = wagtail_fixture()
-    irrelevant, _ = select_irrelevant_memory(target, relevant, entries)
     relevant_packet = render_memory_packet(relevant)
-    irrelevant_packet = render_memory_packet(irrelevant)
+    excluded_unit_packet = render_memory_packet(
+        next(entry for entry in entries if entry["source_id"] != relevant["source_id"])
+    )
     records = [
         context_budget_record(
             condition="NO_MEMORY",
@@ -232,7 +225,7 @@ def test_context_budget_is_equal_and_no_memory_has_no_padding() -> None:
         context_budget_record(
             condition="IRRELEVANT_CORRECT_MEMORY",
             task_text=target["task_statement"],
-            memory_packet=irrelevant_packet,
+            memory_packet=excluded_unit_packet,
             revalidation_instruction=None,
         ),
         context_budget_record(
@@ -271,6 +264,13 @@ def test_context_budget_is_equal_and_no_memory_has_no_padding() -> None:
             task_text="task",
             memory_packet=relevant_packet,
             revalidation_instruction=REVALIDATION_INSTRUCTION + " Extra.",
+        )
+    with pytest.raises(MemoryLifecycleError, match="actual memory"):
+        context_budget_record(
+            condition="IRRELEVANT_CORRECT_MEMORY",
+            task_text="task",
+            memory_packet=None,
+            revalidation_instruction=None,
         )
 
 

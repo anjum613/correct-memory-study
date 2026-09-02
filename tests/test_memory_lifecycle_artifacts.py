@@ -28,7 +28,10 @@ def load(name: str) -> dict:
 
 def test_memory_lifecycle_artifact_is_complete_isolated_and_model_free() -> None:
     audit = load("memory-lifecycle-audit.json")
-    assert audit["status"] == "PASS"
+    assert audit["status"] == "PARTIAL"
+    assert audit["memory_lifecycle_mechanism_status"] == "PASS"
+    assert audit["full_condition_construction_status"] == "FAIL"
+    assert audit["irrelevant_control_ready"] is False
     assert audit["development_only"] is True
     assert audit["development_target_id"] in DEVELOPMENT_IDS
     assert [row["condition"] for row in audit["conditions"]] == list(CONDITIONS)
@@ -42,12 +45,17 @@ def test_memory_lifecycle_artifact_is_complete_isolated_and_model_free() -> None
         "TARGET_ENDPOINT_COMPLETED",
         "TARGET_SESSION_ENDED",
     ]
-    for condition in audit["conditions"]:
+    for condition in (audit["conditions"][0], *audit["conditions"][2:]):
         assert condition["pass"] is True
         assert condition["evaluated_model_inference"] is False
         assert condition["endpoint"]["endpoint"] == "DETERMINISTIC_STUB_NO_MODEL"
         assert condition["endpoint"]["evaluated_model_inference"] is False
-    for condition in audit["conditions"][1:]:
+    unavailable = audit["conditions"][1]
+    assert unavailable["condition"] == "IRRELEVANT_CORRECT_MEMORY"
+    assert unavailable["status"] == "NOT_AVAILABLE"
+    assert unavailable["endpoint_executed"] is False
+    assert unavailable["pass"] is False
+    for condition in audit["conditions"][2:]:
         assert condition["source_replay"]["source_build"]["classification"] == "PASS"
         assert condition["source_replay"]["source_task_test"]["classification"] == "PASS"
         assert condition["source_replay"]["correspondence"][
@@ -72,7 +80,7 @@ def test_memory_fidelity_and_packet_leakage_guards_cover_both_memories() -> None
     assert fidelity["status"] == "PASS"
     assert fidelity["all_exact"] is True
     assert fidelity["all_source_tests_replayed_pass"] is True
-    assert len(fidelity["sources"]) == 2
+    assert len(fidelity["sources"]) == 1
     entries = {entry["source_id"]: entry for entry in manifest["entries"]}
     target = next(
         row["representation"]
@@ -95,34 +103,30 @@ def test_memory_fidelity_and_packet_leakage_guards_cover_both_memories() -> None
         assert b"<SECURITY_TEST>" not in packet
 
 
-def test_irrelevant_control_is_objective_correct_safe_and_length_matched() -> None:
+def test_irrelevant_control_fails_closed_on_timestamp_and_frozen_matching() -> None:
     result = load("irrelevant-memory-matching.json")
-    selected = result["selected"]
-    thresholds = result["thresholds"]
-    assert result["development_status"] == "PASS"
+    assert result["development_status"] == "FAIL"
+    assert result["status"] == "NOT_AVAILABLE"
+    assert result["selected"] is None
+    assert result["selected_source_id"] is None
+    assert result["selected_packet_sha256"] is None
+    assert result["selection_lock"] is None
+    assert result["accepted_count"] == 0
     assert result["selection_uses_target_oracle"] is False
     assert result["selection_uses_model_outcome"] is False
-    assert result["source_correct"] is True
-    assert result["focal_safe_in_source"] is True
     assert result["same_template"] is True
-    assert selected["hard_gate_pass"] is True
-    assert selected["primary_operation_different"] is True
-    assert selected["different_pstar_class"] is True
-    assert selected["scores"]
-    assert selected["deltas"]["packet_token_relative_difference"] <= thresholds[
-        "packet_token_relative_difference_max"
-    ]
-    assert selected["deltas"][
-        "implementation_token_relative_difference"
-    ] <= thresholds["implementation_token_relative_difference_max"]
-    assert selected["deltas"][
-        "source_task_complexity_log_relative_difference"
-    ] <= thresholds["source_task_complexity_log_relative_difference_max"]
-    assert selected["semantic_similarity"] <= thresholds["semantic_similarity_max"]
-    assert result["candidate_rankings"][0]["source_id"] == result[
-        "selected_source_id"
-    ]
-    assert result["secondary_operation_overlap_disclosed"] is True
+    assert result["timestamp_rule_enforced"] is True
+    assert result["frozen_packet_tolerance_enforced"] is True
+    assert result["no_invalid_source_substitution"] is True
+    assert result["superseded_invalid_source_id"] == "src-django-signed-session-decode"
+    assert "later" in result["superseded_result_invalid_reason"]
+    postdated = next(
+        row
+        for row in result["candidate_rankings"]
+        if row["source_id"] == result["superseded_invalid_source_id"]
+    )
+    assert postdated["available_before_target_B"] is False
+    assert postdated["hard_gate_pass"] is False
     assert result["future_evaluated_tokenizer_recheck_required"] is True
 
 
@@ -139,6 +143,10 @@ def test_context_balance_revalidation_and_condition_choice_are_consistent() -> N
         for row in audit["context_budgets"]
     )
     assert audit["context_budgets"][0]["no_memory_semantic_padding"] is False
+    assert audit["unconstructed_condition_budget_policy"]["condition"] == (
+        "IRRELEVANT_CORRECT_MEMORY"
+    )
+    assert audit["unconstructed_condition_budget_policy"]["condition_constructed"] is False
     expected_hash = hashlib.sha256(REVALIDATION_INSTRUCTION.encode()).hexdigest()
     assert revalidation["instruction"] == REVALIDATION_INSTRUCTION
     assert revalidation["instruction_sha256"] == expected_hash
@@ -148,6 +156,7 @@ def test_context_balance_revalidation_and_condition_choice_are_consistent() -> N
     assert revalidation["revalidation_intervention_ready"] is True
     assert recommendation["recommended_condition_design"] == "DESIGN_C"
     assert recommendation["conditions"] == list(CONDITIONS)
+    assert recommendation["status"].startswith("BLOCKED")
     applicable = load("applicable-control-feasibility.json")
     assert applicable["overall"] == "NOT_AVAILABLE"
     assert applicable["target_implementation_edited"] is False
