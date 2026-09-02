@@ -255,13 +255,29 @@ def parse_count_logs(
         return ParsedRun("infrastructure_error", None, command_exit, False, "logs parser missing")
     try:
         counts: dict[str, int] = {}
+        parser_matched = False
         for item_status, pattern in parser.items():
             if not pattern:
                 continue
             matches = list(re.finditer(str(pattern), logs, re.MULTILINE))
+            parser_matched = parser_matched or bool(matches)
             counts[str(item_status)] = int(matches[-1].group(1)) if matches else 0
     except (IndexError, TypeError, ValueError, re.error) as error:
         return ParsedRun("infrastructure_error", None, command_exit, False, f"log parse failed: {error}")
+    infrastructure_exception = re.search(
+        r"Traceback \(most recent call last\):[\s\S]*"
+        r"(?:FileNotFoundError|ModuleNotFoundError|ImportError|PermissionError|OSError):",
+        logs,
+    )
+    if command_exit not in (None, 0) and not parser_matched and infrastructure_exception:
+        exception_name = infrastructure_exception.group(0).rsplit("\n", 1)[-1].split(":", 1)[0]
+        return ParsedRun(
+            "infrastructure_error",
+            None,
+            command_exit,
+            False,
+            f"unparsed infrastructure exception: {exception_name}",
+        )
     return ParsedRun(
         "completed",
         counts.get("FAILED", 0) + counts.get("ERROR", 0),

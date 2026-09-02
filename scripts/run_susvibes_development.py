@@ -615,7 +615,18 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     runtime.mkdir(parents=True, exist_ok=True)
     artifacts = args.artifact_root.resolve()
     artifacts.mkdir(parents=True, exist_ok=True)
-    log_root = artifacts / "development-logs"
+    selected_ids = tuple(args.instance_id) if args.instance_id else DEVELOPMENT_IDS
+    if len(selected_ids) != len(set(selected_ids)):
+        raise ValueError("duplicate --instance-id")
+    unknown_ids = set(selected_ids) - set(DEVELOPMENT_IDS)
+    if unknown_ids:
+        raise ValueError(f"undeclared development IDs: {sorted(unknown_ids)}")
+    suffix = f".{args.run_label}" if args.run_label else ""
+    log_root = artifacts / f"development-logs{suffix}"
+    partial_path = artifacts / f"development-execution{suffix}.partial.json"
+    result_path = artifacts / f"development-execution{suffix}.json"
+    if log_root.exists() or partial_path.exists() or result_path.exists():
+        raise FileExistsError(f"refusing to overwrite existing evidence namespace: {suffix or 'default'}")
     singularity = shutil.which("singularity")
     if not singularity:
         raise RuntimeError("Singularity unavailable")
@@ -628,8 +639,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     Path(environment["SINGULARITY_TMPDIR"]).mkdir()
     peak_disk = du_bytes(runtime)
     cases = []
-    for index, instance_id in enumerate(DEVELOPMENT_IDS, start=1):
-        print(f"[{index}/{len(DEVELOPMENT_IDS)}] {instance_id}: pull", flush=True)
+    for index, instance_id in enumerate(selected_ids, start=1):
+        print(f"[{index}/{len(selected_ids)}] {instance_id}: pull", flush=True)
         row = rows[instance_id]
         image_info = images[instance_id]
         case_root = runtime / "cases" / instance_id
@@ -658,7 +669,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             environment,
             case_root / "image-metrics",
         )
-        print(f"[{index}/{len(DEVELOPMENT_IDS)}] {instance_id}: extract B", flush=True)
+        print(f"[{index}/{len(selected_ids)}] {instance_id}: extract B", flush=True)
         baseline = case_root / "B"
         b_copy_seconds = copy_tree(rootfs / "project", baseline)
         b_materialization = {
@@ -688,7 +699,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         test_command = dockerfile_cmd(dockerfiles[instance_id])
         state_results: dict[str, Any] = {}
         for state in TASK_STATES:
-            print(f"[{index}/{len(DEVELOPMENT_IDS)}] {instance_id}: {state} func", flush=True)
+            print(f"[{index}/{len(selected_ids)}] {instance_id}: {state} func", flush=True)
             state_root = case_root / "states" / state
             func_repo = state_root / "func"
             func_materialization = materialize_state(baseline, func_repo, row, state)
@@ -703,7 +714,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                 logs_handler=log_handlers[instance_id],
                 environment=environment,
             )
-            print(f"[{index}/{len(DEVELOPMENT_IDS)}] {instance_id}: {state} sec", flush=True)
+            print(f"[{index}/{len(selected_ids)}] {instance_id}: {state} sec", flush=True)
             sec_repo = state_root / "sec"
             sec_materialization = materialize_state(
                 baseline, sec_repo, row, state, security_first=True
@@ -765,12 +776,13 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                 "oracle_firewall": firewall,
             }
         )
-        write_json(artifacts / "development-execution.partial.json", {"cases": cases})
+        write_json(partial_path, {"cases": cases})
     result = {
         "schema": "cmpilot-susvibes-development-execution-v1",
         "benchmark_revision": SUSVIBES_REVISION,
         "benchmark_tag": SUSVIBES_TAG,
-        "development_ids": list(DEVELOPMENT_IDS),
+        "development_ids": list(selected_ids),
+        "run_label": args.run_label,
         "model_inference_executed": False,
         "runtime": {
             "adapter": "Singularity-expanded rootfs with unprivileged namespace/chroot execution",
@@ -782,7 +794,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         },
         "cases": cases,
     }
-    write_json(artifacts / "development-execution.json", result)
+    write_json(result_path, result)
     return result
 
 
@@ -791,6 +803,18 @@ def main() -> int:
     parser.add_argument("--susvibes-root", type=Path, required=True)
     parser.add_argument("--runtime-root", type=Path, required=True)
     parser.add_argument("--artifact-root", type=Path, required=True)
+    parser.add_argument(
+        "--instance-id",
+        action="append",
+        choices=DEVELOPMENT_IDS,
+        help="rerun only a prospectively declared development instance",
+    )
+    parser.add_argument(
+        "--run-label",
+        default="",
+        choices=("", "infra-retry-1"),
+        help="write a new immutable evidence namespace for an infrastructure retry",
+    )
     parser.add_argument(
         "--image-manifest",
         type=Path,

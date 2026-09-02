@@ -21,6 +21,8 @@ if [[ "${1:-}" == "--inside" ]]; then
   mount -t tmpfs -o mode=1777,nodev,nosuid tmpfs "$rootfs/tmp"
   mount -t tmpfs -o mode=0700,nodev,nosuid tmpfs "$rootfs/root"
   mount -t tmpfs -o mode=0755,nodev,nosuid tmpfs "$rootfs/dev"
+  mkdir -p "$rootfs/dev/shm"
+  mount -t tmpfs -o mode=1777,nodev,nosuid tmpfs "$rootfs/dev/shm"
   for device in null zero random urandom; do
     touch "$rootfs/dev/$device"
     mount --bind "/dev/$device" "$rootfs/dev/$device"

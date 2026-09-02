@@ -155,6 +155,18 @@ def test_official_count_parser_and_infrastructure_classification() -> None:
         "FATAL runtime", logs_handler=handler, timed_out=False, command_exit=255, runtime_started=False
     )
     assert missing_start.status == "infrastructure_error"
+    missing_dev_shm = parse_count_logs(
+        """Traceback (most recent call last):
+  File \"runner.py\", line 1, in <module>
+FileNotFoundError: [Errno 2] No such file or directory: '/dev/shm'
+""",
+        logs_handler=handler,
+        timed_out=False,
+        command_exit=1,
+        runtime_started=True,
+    )
+    assert missing_dev_shm.status == "infrastructure_error"
+    assert missing_dev_shm.failures is None
 
 
 def test_security_matrix_classification() -> None:
