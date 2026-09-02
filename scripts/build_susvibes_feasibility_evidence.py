@@ -496,6 +496,7 @@ def main() -> int:
     source_lock = load_json(ARTIFACT_ROOT / "susvibes-source-lock.json")
     development_manifest = load_json(ARTIFACT_ROOT / "development-set-manifest.json")
     unseen = load_json(ARTIFACT_ROOT / "unseen-target-universe.json")
+    repository_audit = load_json(ARTIFACT_ROOT / "repository-worktree-audit.json")
     rows = load_development_rows(susvibes_root)
     executions, cases = accepted_cases()
 
@@ -1064,6 +1065,12 @@ def main() -> int:
 SusVibes v1.0 provides a scientifically usable, eligibility-screened target substrate for applicability-aware procedural transfer. Four of five prospectively selected official-sample targets satisfy the strict five-state task matrix; all five satisfy the decisive U/R focal-security matrix and executable feature-retention gate. The Wagtail development target is excluded because masking the imported symbol causes the unchanged test command to abort during collection. Under the frozen rule that is `INFRASTRUCTURE_INVALID`, never task failure. This isolated failure is not the fundamental task-identifiability failure observed in SecureVibeBench.
 
 This decision authorizes neither unseen screening nor source matching. No evaluated coding model, Qwen, Devstral, GPU, source corpus, source matcher, confirmatory memory, or confirmatory target was run or built.
+
+## Original repository and worktree audit
+
+At `{repository_audit['audit_time_utc']}`, the original repository at `{repository_audit['original_repository']['path']}` was on branch `{repository_audit['original_repository']['branch']}` at `{repository_audit['original_repository']['head']}`. Its status was `{repository_audit['original_repository']['status']}` with {len(repository_audit['original_repository']['status_porcelain'])} pre-existing untracked entries; none was changed. The complete {len(repository_audit['worktrees'])}-entry `git worktree list --porcelain` snapshot is frozen in `repository-worktree-audit.json`.
+
+Both required preserved commits exist: `31cafe2cf794a3b737f491b9fd0a35e827de3db1` and `26100c2882e3213909d82654a6b138dfc713fda7`. This isolated worktree was created at `{ROOT}` on `feat/v2-context-dependent-memory-susvibes-feasibility`, based on the latter commit.
 
 ## Frozen source and cohort
 

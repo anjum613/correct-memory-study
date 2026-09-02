@@ -8,6 +8,12 @@ SusVibes v1.0 provides a scientifically usable, eligibility-screened target subs
 
 This decision authorizes neither unseen screening nor source matching. No evaluated coding model, Qwen, Devstral, GPU, source corpus, source matcher, confirmatory memory, or confirmatory target was run or built.
 
+## Original repository and worktree audit
+
+At `2026-09-02T08:00:42Z`, the original repository at `/home/s224049759/projects/correct-memory-study` was on branch `feat/mini-swe-agent-smoke` at `a146b62399c049b8723373752b96a621ee174c95`. Its status was `DIRTY_PRE_EXISTING_UNTRACKED` with 12 pre-existing untracked entries; none was changed. The complete 27-entry `git worktree list --porcelain` snapshot is frozen in `repository-worktree-audit.json`.
+
+Both required preserved commits exist: `31cafe2cf794a3b737f491b9fd0a35e827de3db1` and `26100c2882e3213909d82654a6b138dfc713fda7`. This isolated worktree was created at `/home/s224049759/projects/correct-memory-study-worktrees/v2-context-dependent-memory-susvibes-feasibility` on `feat/v2-context-dependent-memory-susvibes-feasibility`, based on the latter commit.
+
 ## Frozen source and cohort
 
 - Official repository: `https://github.com/LeiLiLab/susvibes`
@@ -97,4 +103,4 @@ The future seed mode remains deferred between `DETERMINISTIC_CANONICAL` and `STO
 
 The evidence supports only this claim: SusVibes can supply a reproducibly screenable B/U/R target substrate with independent task and focal-security executions. It does not show that any source memory exists, that p* can be assigned, that memory changes unsafe completion, that historical developers reused a procedure, or that uptake/mediation occurs.
 
-Generated at 2026-09-02T07:53:56.604342+00:00 from model-free development evidence.
+Generated at 2026-09-02T08:05:22.829562+00:00 from model-free development evidence.
