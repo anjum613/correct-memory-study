@@ -2,9 +2,10 @@
 """Execute the declared SusVibes development matrix without model inference.
 
 Docker is not available on the target HPC.  This adapter pulls only the five
-prospectively pinned Docker manifests through Singularity, binds a clean copy of
-the image's /project, and executes the exact image CMD.  Test patches, parsers,
-and expected thresholds remain byte-identical to SusVibes v1.0.
+prospectively pinned Docker manifests through Singularity, expands each SIF,
+and executes the read-only rootfs through unprivileged namespaces with a clean
+/project bind.  Test patches, commands, parsers, and expected thresholds remain
+byte-identical to SusVibes v1.0.
 """
 
 from __future__ import annotations
@@ -276,8 +277,8 @@ def dockerfile_cmd(dockerfile: str) -> str:
 
 def run_test(
     *,
-    singularity: str,
-    image_path: Path,
+    rootfs_launcher: Path,
+    rootfs: Path,
     repository: Path,
     test_command: str,
     log_path: Path,
@@ -292,15 +293,9 @@ def run_test(
         + test_command
     )
     command = [
-        singularity,
-        "exec",
-        "--containall",
-        "--cleanenv",
-        "--bind",
-        f"{repository.resolve()}:/project",
-        "--pwd",
-        "/project",
-        str(image_path.resolve()),
+        str(rootfs_launcher.resolve()),
+        str(rootfs.resolve()),
+        str(repository.resolve()),
         "/bin/sh",
         "-lc",
         shell,
@@ -421,6 +416,8 @@ def pull_image(
     destination.parent.mkdir(parents=True, exist_ok=True)
     uri = f"docker://{image['image']}@{image['manifest_digest']}"
     metrics_path = destination.with_suffix(".pull.time.txt")
+    tmp_root = Path(environment["SINGULARITY_TMPDIR"])
+    before = set(tmp_root.glob("sbuild-tmp-cache-*"))
     result = run_timed(
         [singularity, "pull", "--disable-cache", str(destination), uri],
         metrics_path=metrics_path,
@@ -428,6 +425,22 @@ def pull_image(
         environment=environment,
     )
     output = result.pop("output")
+    recovered_from = None
+    if result["exit_code"] == 0 and not destination.is_file():
+        created = [path for path in tmp_root.glob("sbuild-tmp-cache-*") if path not in before]
+        valid = []
+        for path in created:
+            probe = subprocess.run(
+                [singularity, "sif", "list", str(path)], capture_output=True, text=True, check=False
+            )
+            if probe.returncode == 0 and "FS (Squashfs" in probe.stdout:
+                valid.append(path)
+        if len(valid) == 1:
+            try:
+                os.link(valid[0], destination)
+            except OSError:
+                shutil.copy2(valid[0], destination)
+            recovered_from = str(valid[0])
     if result["exit_code"] != 0 or not destination.is_file():
         raise RuntimeError(f"Singularity pull failed for {uri}: {output}")
     result.update(
@@ -438,36 +451,55 @@ def pull_image(
             "sif_bytes": destination.stat().st_size,
             "sif_sha256": sha256_file(destination),
             "pull_log_sha256": sha256_bytes(output.encode()),
+            "recovered_from_singularity_tmp": recovered_from,
         }
     )
     return result
 
 
-def image_runtime_probe(
+def build_rootfs(
     singularity: str,
     image_path: Path,
+    rootfs: Path,
     environment: Mapping[str, str],
     metrics_root: Path,
 ) -> dict[str, Any]:
-    startup = run_timed(
-        [singularity, "exec", "--containall", "--cleanenv", str(image_path), "/bin/true"],
-        metrics_path=metrics_root / "startup.time.txt",
+    result = run_timed(
+        [singularity, "build", "--sandbox", str(rootfs), str(image_path)],
+        metrics_path=metrics_root / "rootfs-build.time.txt",
+        timeout=TIMEOUT_SECONDS,
+        environment=environment,
+    )
+    output = result.pop("output")
+    if result["exit_code"] != 0 or not rootfs.is_dir():
+        raise RuntimeError(f"Singularity sandbox expansion failed: {output}")
+    return {
+        **result,
+        "expanded_bytes": du_bytes(rootfs),
+        "expanded_file_count": directory_file_count(rootfs),
+        "build_log_sha256": sha256_bytes(output.encode()),
+    }
+
+
+def rootfs_startup_probe(
+    *,
+    rootfs_launcher: Path,
+    rootfs: Path,
+    repository: Path,
+    environment: Mapping[str, str],
+    metrics_path: Path,
+) -> dict[str, Any]:
+    result = run_timed(
+        [str(rootfs_launcher), str(rootfs), str(repository), "/bin/true"],
+        metrics_path=metrics_path,
         timeout=120,
         environment=environment,
     )
-    startup.pop("output")
-    expanded = run_timed(
-        [singularity, "exec", "--containall", "--cleanenv", str(image_path), "du", "-sx", "-B1", "/"],
-        metrics_path=metrics_root / "expanded-size.time.txt",
-        timeout=300,
-        environment=environment,
-    )
-    expanded_output = expanded.pop("output")
-    match = re.search(r"^(\d+)\s+/\s*$", expanded_output, re.MULTILINE)
-    return {
-        "startup": startup,
-        "expanded_size_probe": {**expanded, "expanded_bytes": int(match.group(1)) if match else None},
-    }
+    output = result.pop("output")
+    result["output_sha256"] = sha256_bytes(output.encode())
+    if result["exit_code"] != 0:
+        result["infrastructure_error"] = output
+    return result
 
 
 def verify_u_to_r(row: Mapping[str, Any], baseline: Path, r_hash: str, scratch: Path) -> dict[str, Any]:
@@ -609,12 +641,48 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             environment=environment,
         )
         peak_disk = max(peak_disk, du_bytes(runtime))
-        runtime_probe = image_runtime_probe(
-            singularity, image_path, environment, case_root / "image-metrics"
+        direct_singularity = run_timed(
+            [singularity, "exec", "--containall", "--cleanenv", str(image_path), "/bin/true"],
+            metrics_path=case_root / "image-metrics/direct-singularity.time.txt",
+            timeout=120,
+            environment=environment,
+        )
+        direct_output = direct_singularity.pop("output")
+        direct_singularity["output_sha256"] = sha256_bytes(direct_output.encode())
+        direct_singularity["failure"] = direct_output if direct_singularity["exit_code"] != 0 else None
+        rootfs = case_root / "rootfs"
+        rootfs_build = build_rootfs(
+            singularity,
+            image_path,
+            rootfs,
+            environment,
+            case_root / "image-metrics",
         )
         print(f"[{index}/{len(DEVELOPMENT_IDS)}] {instance_id}: extract B", flush=True)
         baseline = case_root / "B"
-        b_materialization = extract_project(singularity, image_path, baseline)
+        b_copy_seconds = copy_tree(rootfs / "project", baseline)
+        b_materialization = {
+            "seconds": round(rootfs_build["metrics"]["measured_wall_seconds"] + b_copy_seconds, 6),
+            "rootfs_build": rootfs_build,
+            "project_copy_seconds": round(b_copy_seconds, 6),
+            "bytes": du_bytes(baseline),
+            "file_count": directory_file_count(baseline),
+            "tree_sha256": tree_sha256(baseline),
+        }
+        startup = rootfs_startup_probe(
+            rootfs_launcher=args.rootfs_launcher.resolve(),
+            rootfs=rootfs,
+            repository=baseline,
+            environment=environment,
+            metrics_path=case_root / "image-metrics/rootfs-startup.time.txt",
+        )
+        if startup["exit_code"] != 0:
+            raise RuntimeError(f"rootfs startup failed: {startup['infrastructure_error']}")
+        runtime_probe = {
+            "direct_singularity": direct_singularity,
+            "rootfs_build": rootfs_build,
+            "rootfs_startup": startup,
+        }
         peak_disk = max(peak_disk, du_bytes(runtime))
         masking = masking_probe(row, baseline)
         test_command = dockerfile_cmd(dockerfiles[instance_id])
@@ -626,8 +694,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             func_materialization = materialize_state(baseline, func_repo, row, state)
             before_hash = tree_sha256(func_repo)
             func, func_run = run_test(
-                singularity=singularity,
-                image_path=image_path,
+                rootfs_launcher=args.rootfs_launcher.resolve(),
+                rootfs=rootfs,
                 repository=func_repo,
                 test_command=test_command,
                 log_path=log_root / instance_id / state / "func.txt",
@@ -641,8 +709,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                 baseline, sec_repo, row, state, security_first=True
             )
             sec, sec_run = run_test(
-                singularity=singularity,
-                image_path=image_path,
+                rootfs_launcher=args.rootfs_launcher.resolve(),
+                rootfs=rootfs,
                 repository=sec_repo,
                 test_command=test_command,
                 log_path=log_root / instance_id / state / "sec.txt",
@@ -705,7 +773,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "development_ids": list(DEVELOPMENT_IDS),
         "model_inference_executed": False,
         "runtime": {
-            "adapter": "Singularity bind-mounted state adapter",
+            "adapter": "Singularity-expanded rootfs with unprivileged namespace/chroot execution",
+            "rootfs_launcher": str(args.rootfs_launcher.resolve()),
             "singularity_path": singularity,
             "singularity_version": subprocess.check_output([singularity, "--version"], text=True).strip(),
             "timeout_seconds": TIMEOUT_SECONDS,
@@ -729,6 +798,9 @@ def main() -> int:
     )
     parser.add_argument(
         "--sandbox-launcher", type=Path, default=Path("scripts/v2_agent_sandbox.sh")
+    )
+    parser.add_argument(
+        "--rootfs-launcher", type=Path, default=Path("scripts/susvibes_rootfs_exec.sh")
     )
     args = parser.parse_args()
     run(args)

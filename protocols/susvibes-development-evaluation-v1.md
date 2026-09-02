@@ -62,5 +62,4 @@ Feature retention passes only when U and R both pass the functionality evaluator
 
 ## Container adapter
 
-The official release requires Docker, but Docker is unavailable on this HPC. Only the five pinned development images may be pulled. Each is addressed by its frozen Docker manifest digest, converted by Singularity 3.6, and run with a clean, bind-mounted `/project`. The exact image `CMD` is executed. No model process is invoked.
-
+The official release requires Docker, but Docker is unavailable on this HPC. Only the five pinned development images may be pulled. Each is addressed by its frozen Docker manifest digest and converted by Singularity 3.6. Direct Singularity execution is unavailable because the system installation lacks its compiled session directory, so the SIF is expanded with `singularity build --sandbox` and executed by the already-qualified unprivileged user/mount/PID/network namespace mechanism. The rootfs is read-only, a clean `/project` state is bind-mounted read-write, the image environment scripts are sourced, and the exact image `CMD` is executed. No model process is invoked.
