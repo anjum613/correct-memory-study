@@ -222,3 +222,74 @@ def test_time_metrics_parser() -> None:
         "User time (seconds): 1.25\nMaximum resident set size (kbytes): 4096\n"
     )
     assert metrics == {"maximum_rss_kb": 4096, "user_seconds": 1.25}
+
+
+def test_required_development_artifacts_and_readiness() -> None:
+    root = ROOT / "artifacts" / "v2-securevibebench-development"
+    required = {
+        "development-report.md",
+        "readiness.json",
+        "source-lock.json",
+        "seen-set-manifest.json",
+        "unseen-universe.json",
+        "schema-map.json",
+        "container-feasibility.json",
+        "bur-security-matrices.json",
+        "task-completion-matrices.json",
+        "source-retrieval-results.json",
+        "source-threshold-calibration.json",
+        "review-form.json",
+        "deduplication-test.json",
+        "runtime-costs.json",
+        "prospective-protocol-recommendation.md",
+    }
+    assert required <= {path.name for path in root.iterdir()}
+    readiness = json.loads((root / "readiness.json").read_text())
+    assert readiness["seen_ids"] == list(SEEN_IDS)
+    assert readiness["raw_task_count"] == 105
+    assert readiness["unseen_task_count"] == 97
+    assert readiness["deduplicated_unseen_count"] == 78
+    assert readiness["prospective_protocol_ready"] is False
+    assert readiness["gpu_needed_for_discovery"] is False
+
+
+def test_real_bur_artifact_matches_seen_config() -> None:
+    root = ROOT / "artifacts" / "v2-securevibebench-development"
+    bur = json.loads((root / "bur-security-matrices.json").read_text())
+    config = json.loads((ROOT / "protocols" / "securevibebench-seen-cases.json").read_text())["cases"]
+    assert [case["instance_id"] for case in bur["cases"]] == list(SEEN_IDS)
+    for case in bur["cases"]:
+        expected = config[case["instance_id"]]
+        assert case["ancestry"]["B"] == expected["B"]
+        assert case["ancestry"]["U"] == expected["U"]
+        assert case["ancestry"]["R"] == expected["R"]
+        assert case["ancestry"]["u_parent_count"] == 1
+        assert case["ancestry"]["u_is_ancestor_of_r"] is True
+
+
+def test_artifacts_never_contain_unseen_implementation_evidence() -> None:
+    root = ROOT / "artifacts" / "v2-securevibebench-development"
+    universe = json.loads((root / "unseen-universe.json").read_text())
+    assert set(universe) >= {"unseen_ids", "schema"}
+    assert not ({"description", "diff", "patch", "source"} & set(universe))
+    allowed_case_ids = set(SEEN_IDS)
+    for filename, key in (
+        ("bur-security-matrices.json", "cases"),
+        ("task-completion-matrices.json", "cases"),
+        ("source-retrieval-results.json", "cases"),
+    ):
+        data = json.loads((root / filename).read_text())
+        assert {case["instance_id"] for case in data[key]} <= allowed_case_ids
+
+
+def test_review_form_and_source_threshold_are_not_outcome_frozen() -> None:
+    root = ROOT / "artifacts" / "v2-securevibebench-development"
+    review = json.loads((root / "review-form.json").read_text())
+    assert [item["id"] for item in review["questions"]] == [f"Q{i}" for i in range(1, 13)]
+    assert review["model_output_allowed"] is False
+    calibration = json.loads((root / "source-threshold-calibration.json").read_text())
+    assert calibration["threshold_frozen"] is False
+    assert calibration["recommended_threshold"] is None
+    retrieval = json.loads((root / "source-retrieval-results.json").read_text())
+    assert sum(case["eligible_source_count"] for case in retrieval["cases"]) == 0
+    assert all(case["selected_source"] is None for case in retrieval["cases"])

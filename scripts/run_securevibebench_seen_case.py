@@ -13,6 +13,7 @@ import importlib.util
 import json
 import os
 import re
+import shlex
 import subprocess
 import time
 from pathlib import Path
@@ -38,7 +39,7 @@ mount --bind /etc/resolv.conf "$rootfs/etc/resolv.conf"
 chroot "$rootfs" /bin/bash -lc "$command"
 """.strip()
 
-CONTAINER_ENV = 'for f in /.singularity.d/env/*.sh; do source "$f"; done'
+CONTAINER_ENV = 'for f in /.singularity.d/env/*.sh; do source "$f"; done; export TAR_OPTIONS=--no-same-owner'
 
 
 def sha256(value: bytes) -> str:
@@ -165,16 +166,32 @@ def benchmark_compare(candidate: dict[str, Any], baseline: dict[str, Any]) -> di
 
 def security_matrix(args: argparse.Namespace, case: dict[str, str], output: Path) -> dict[str, Any]:
     matrix = {}
+    security_cwd = case.get("security_cwd", case["repo_cwd"])
     for label in ("B", "U", "R"):
         prepare_result = prepare(args.rootfs, case["repo_cwd"], case[label], output / "security" / label, label)
+        cleanup_paths = case.get("security_cleanup_paths", [])
+        for path in cleanup_paths:
+            if not path.startswith("/src/") or ".." in Path(path).parts:
+                raise ValueError(f"unsafe security cleanup path: {path}")
+        cleanup = None
+        if cleanup_paths:
+            cleanup_command = "rm -rf -- " + " ".join(shlex.quote(path) for path in cleanup_paths)
+            cleanup = run_chroot(
+                args.rootfs,
+                cleanup_command,
+                output / "security" / label / "cleanup.log",
+                timeout=300,
+            )
+            if cleanup["exit_code"] != 0:
+                raise RuntimeError(f"failed to clean derived security build paths for {label}")
         build = run_chroot(
             args.rootfs,
-            f"{CONTAINER_ENV}; cd {case['repo_cwd']}; arvo compile",
+            f"{CONTAINER_ENV}; cd {security_cwd}; arvo compile",
             output / "security" / label / "build.log",
             timeout=args.build_timeout,
         )
         if build["exit_code"] == 0:
-            pov = run_chroot(args.rootfs, f"{CONTAINER_ENV}; arvo", output / "security" / label / "pov.log", timeout=args.pov_timeout)
+            pov = run_chroot(args.rootfs, f"{CONTAINER_ENV}; cd {security_cwd}; arvo", output / "security" / label / "pov.log", timeout=args.pov_timeout)
             log = (output / "security" / label / "pov.log").read_text(errors="replace")
         else:
             pov = {"exit_code": None, "timeout": False, "log_path": None}
@@ -185,7 +202,15 @@ def security_matrix(args: argparse.Namespace, case: dict[str, str], output: Path
             log=log,
             timeout=bool(build["timeout"] or pov["timeout"]),
         )
-        matrix[label] = {"commit": case[label], "prepare": prepare_result, "build": build, "pov": pov, **classification}
+        matrix[label] = {
+            "commit": case[label],
+            "prepare": prepare_result,
+            "derived_build_cleanup": cleanup,
+            "rootless_tar_no_same_owner": True,
+            "build": build,
+            "pov": pov,
+            **classification,
+        }
         write_json(output / "security" / label / "result.json", matrix[label])
     return matrix
 
