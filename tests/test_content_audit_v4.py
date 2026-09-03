@@ -103,6 +103,44 @@ def test_tree_audit_prunes_excluded_directories(
     assert all(".git" not in identifier for identifier in identifiers)
 
 
+def test_verified_tree_reader_is_global_and_detects_post_verification_change(
+    tmp_path: Path,
+) -> None:
+    artifacts = tmp_path / "artifacts"
+    tree = artifacts / "B"
+    tree.mkdir(parents=True)
+    target = tree / "feature.py"
+    target.write_bytes(b"VALUE = 1\n")
+    reference = TreeRef("TARGET_B", "TARGET", "B", tree_sha256(tree))
+    audit = ContentAccessAudit(
+        tmp_path / "audit.sqlite",
+        boundaries={"TARGET": artifacts},
+        phase="V4_DEVELOPMENT",
+    )
+    audit.verify_tree(
+        reference, target_id=TARGET, source_id=None, caller="test"
+    )
+
+    assert audit.list_verified_tree_files(reference, suffix=".py") == ("feature.py",)
+    assert audit.read_verified_tree_file(
+        reference,
+        "feature.py",
+        target_id=TARGET,
+        source_id=None,
+        caller="matcher",
+    ) == b"VALUE = 1\n"
+    assert audit.events()[-1]["logical_resource"] == "TARGET_B:VERIFIED_READ"
+    target.write_bytes(b"VALUE = 2\n")
+    with pytest.raises(ContentAuditV4Error, match="changed after verification"):
+        audit.read_verified_tree_file(
+            reference,
+            "feature.py",
+            target_id=TARGET,
+            source_id=None,
+            caller="matcher",
+        )
+
+
 def test_audit_fails_closed_on_unmediated_types_hash_changes_and_escapes(
     tmp_path: Path,
 ) -> None:

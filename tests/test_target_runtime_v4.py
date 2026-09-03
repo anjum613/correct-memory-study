@@ -16,6 +16,8 @@ from cmpilot.target_runtime_v4 import (
     _apply_patch,
     _copy_clean,
     execute_target_gates,
+    load_bound_benchmark_row,
+    load_feature_command,
 )
 
 
@@ -218,3 +220,24 @@ def test_feature_definition_bytes_are_hash_bound(tmp_path: Path) -> None:
             environment=ExecutionEnvironment(),
             scratch_parent=tmp_path,
         )
+
+
+def test_sealed_row_and_feature_artifacts_must_be_target_scoped(tmp_path: Path) -> None:
+    audit, binding, _, _, _ = _fixture(tmp_path)
+    dataset_path = tmp_path / "frozen" / "dataset.jsonl"
+    dataset_path.write_bytes(dataset_path.read_bytes() + b'{"instance_id":"other"}\n')
+    dataset = ArtifactRef(
+        "DATASET", "FROZEN", "dataset.jsonl", _sha(dataset_path.read_bytes())
+    )
+    with pytest.raises(TargetRuntimeV4Error, match="exactly one row"):
+        load_bound_benchmark_row(audit, dataset, binding)
+
+    feature_path = tmp_path / "frozen" / "dockerfile.json"
+    value = json.loads(feature_path.read_text(encoding="utf-8"))
+    value["other"] = 'FROM frozen\nCMD ["false"]\n'
+    feature_path.write_text(json.dumps(value, sort_keys=True), encoding="utf-8")
+    feature = ArtifactRef(
+        "FEATURE", "FROZEN", "dockerfile.json", _sha(feature_path.read_bytes())
+    )
+    with pytest.raises(TargetRuntimeV4Error, match="only the target"):
+        load_feature_command(audit, feature, target_id=TARGET)

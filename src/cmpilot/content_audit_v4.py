@@ -101,6 +101,9 @@ class ContentAccessAudit:
             self._boundaries[name] = resolved
         if not self._boundaries:
             raise ContentAuditV4Error("at least one audit boundary is required")
+        self._verified_tree_files: dict[
+            tuple[str, str, str], dict[str, str]
+        ] = {}
         self._initialize()
 
     def _connect(self) -> sqlite3.Connection:
@@ -333,6 +336,7 @@ class ContentAccessAudit:
         digest = hashlib.sha256()
         byte_count = 0
         file_events: list[dict[str, Any]] = []
+        verified_files: dict[str, str] = {}
         paths: list[Path] = []
         for directory, directory_names, file_names in os.walk(
             root, topdown=True, followlinks=False
@@ -365,6 +369,8 @@ class ContentAccessAudit:
                 data = path.read_bytes()
                 kind = b"file\0"
             file_digest = sha256_bytes(data)
+            if not path.is_symlink():
+                verified_files[relative.as_posix()] = file_digest
             byte_count += len(data)
             encoded = relative.as_posix().encode("utf-8")
             digest.update(encoded)
@@ -388,6 +394,9 @@ class ContentAccessAudit:
         self._append_batch(file_events)
         if observed != tree.sha256:
             raise ContentAuditV4Error("critical tree SHA-256 mismatch")
+        self._verified_tree_files[
+            (tree.boundary, tree.relative_path, tree.sha256)
+        ] = verified_files
         self._append(
             target_id=target_id,
             source_id=source_id,
@@ -399,6 +408,61 @@ class ContentAccessAudit:
             byte_count=byte_count,
         )
         return root
+
+    def list_verified_tree_files(
+        self, tree: TreeRef, *, suffix: str | None = None
+    ) -> tuple[str, ...]:
+        """List only regular files from a tree verified by this audit session."""
+
+        key = (tree.boundary, tree.relative_path, tree.sha256)
+        files = self._verified_tree_files.get(key)
+        if files is None:
+            raise ContentAuditV4Error("tree was not verified by this audit session")
+        return tuple(
+            path for path in sorted(files) if suffix is None or path.endswith(suffix)
+        )
+
+    def read_verified_tree_file(
+        self,
+        tree: TreeRef,
+        relative_path: str,
+        *,
+        target_id: str,
+        source_id: str | None,
+        caller: str,
+    ) -> bytes:
+        """Read and log one file whose digest was established by ``verify_tree``."""
+
+        key = (tree.boundary, tree.relative_path, tree.sha256)
+        files = self._verified_tree_files.get(key)
+        relative = PurePosixPath(relative_path)
+        if (
+            files is None
+            or relative.is_absolute()
+            or not relative.parts
+            or ".." in relative.parts
+            or relative.as_posix() not in files
+        ):
+            raise ContentAuditV4Error("file is outside the verified tree manifest")
+        combined = PurePosixPath(tree.relative_path, *relative.parts).as_posix()
+        path = self._path(tree.boundary, combined, directory=False)
+        descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        with os.fdopen(descriptor, "rb", closefd=True) as handle:
+            data = handle.read()
+        digest = sha256_bytes(data)
+        if digest != files[relative.as_posix()]:
+            raise ContentAuditV4Error("verified tree file changed after verification")
+        self._append(
+            target_id=target_id,
+            source_id=source_id,
+            logical_resource=f"{tree.logical_resource}:VERIFIED_READ",
+            content_identifier=combined,
+            digest=digest,
+            boundary=tree.boundary,
+            caller=caller,
+            byte_count=len(data),
+        )
+        return data
 
     def events(self) -> tuple[dict[str, Any], ...]:
         with self._connect() as connection:

@@ -23,7 +23,6 @@ from cmpilot.content_audit_v4 import (
 )
 from cmpilot.pair_review import PAIR_REVIEW_QUESTIONS
 from cmpilot.source_pairing import classify_task_statement, stable_record_hash
-from cmpilot.source_pairing import AuditedWorkspaceReader
 from cmpilot.source_pairing_confirmatory_v2 import prepare_frozen_corpus_for_target
 from cmpilot.source_pairing_v3 import select_top_source_v3
 from cmpilot.source_validation import validate_source_correct_entry
@@ -76,6 +75,49 @@ class PublicTargetBundle:
     baseline_b: TreeRef
 
 
+class _GloballyAuditedBReader:
+    """B-only extractor view backed exclusively by the global audit authority."""
+
+    def __init__(
+        self,
+        *,
+        audit: ContentAccessAudit,
+        tree: TreeRef,
+        target_id: str,
+        task: bytes,
+        metadata: bytes,
+    ) -> None:
+        self._audit = audit
+        self._tree = tree
+        self._target_id = target_id
+        self._fixed = {"task.md": task, "public-metadata.json": metadata}
+
+    def read_text(self, relative: str) -> str:
+        if relative in self._fixed:
+            data = self._fixed[relative]
+        elif relative.startswith("repository/"):
+            data = self._audit.read_verified_tree_file(
+                self._tree,
+                relative.removeprefix("repository/"),
+                target_id=self._target_id,
+                source_id=None,
+                caller="production_v4._GloballyAuditedBReader.read_text",
+            )
+        else:
+            raise ContentAuditV4Error("matcher requested content outside public B")
+        return data.decode("utf-8")
+
+    def iter_files(self, relative: str, *, suffix: str | None = None) -> tuple[str, ...]:
+        if relative != "repository":
+            raise ContentAuditV4Error("matcher listed content outside public B")
+        return tuple(
+            f"repository/{path}"
+            for path in self._audit.list_verified_tree_files(
+                self._tree, suffix=suffix
+            )
+        )
+
+
 def lock_top_source_v4(
     *,
     audit: ContentAccessAudit,
@@ -95,7 +137,7 @@ def lock_top_source_v4(
         caller="production_v4.lock_top_source_v4.task",
     )
     cue = classify_task_statement(task.decode("utf-8"))
-    audit.read_bytes(
+    metadata = audit.read_bytes(
         public.public_metadata,
         target_id=target_id,
         source_id=None,
@@ -108,8 +150,17 @@ def lock_top_source_v4(
         caller="production_v4.lock_top_source_v4.B",
     )
     workspace = Path(public.workspace_root).resolve(strict=True)
+    if not workspace.is_dir() or workspace.is_symlink():
+        raise ProductionV4Error("public workspace is not a real directory")
     representation = build_b_only_representation_v3(
-        AuditedWorkspaceReader(workspace), scope=scope
+        _GloballyAuditedBReader(
+            audit=audit,
+            tree=public.baseline_b,
+            target_id=target_id,
+            task=task,
+            metadata=metadata,
+        ),
+        scope=scope,
     )
     if representation["benchmark_instance_id"] != target_id:
         raise ProductionV4Error("B-only representation names another target")

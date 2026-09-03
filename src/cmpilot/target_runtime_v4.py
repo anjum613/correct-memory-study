@@ -142,16 +142,12 @@ def load_bound_benchmark_row(
         source_id=None,
         caller="target_runtime_v4.load_bound_benchmark_row",
     )
-    selected: list[tuple[bytes, dict[str, Any]]] = []
-    for raw_line in payload.splitlines():
-        if not raw_line.strip():
-            continue
-        value = json.loads(raw_line)
-        if value.get("instance_id") == binding.target_id:
-            selected.append((raw_line, value))
-    if len(selected) != 1:
-        raise TargetRuntimeV4Error("frozen dataset does not contain exactly one target row")
-    _, row = selected[0]
+    raw_rows = [raw_line for raw_line in payload.splitlines() if raw_line.strip()]
+    if len(raw_rows) != 1:
+        raise TargetRuntimeV4Error("sealed row artifact must contain exactly one row")
+    row = json.loads(raw_rows[0])
+    if row.get("instance_id") != binding.target_id:
+        raise TargetRuntimeV4Error("sealed row artifact names another target")
     canonical_row = json.dumps(
         row, sort_keys=True, separators=(",", ":"), ensure_ascii=False
     ).encode("utf-8")
@@ -181,8 +177,8 @@ def load_feature_command(
         caller="target_runtime_v4.load_feature_command",
     )
     value = json.loads(payload)
-    if not isinstance(value, Mapping) or target_id not in value:
-        raise TargetRuntimeV4Error("feature definition omits target")
+    if not isinstance(value, Mapping) or set(value) != {target_id}:
+        raise TargetRuntimeV4Error("sealed feature definition must name only the target")
     dockerfile = value[target_id]
     if not isinstance(dockerfile, str):
         raise TargetRuntimeV4Error("target feature definition is not Dockerfile text")
