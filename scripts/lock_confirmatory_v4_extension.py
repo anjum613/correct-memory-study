@@ -34,9 +34,20 @@ TARGETS = {
     EXTENSION_IDS[0]: {
         "image": "songwen6968/susvibes.x86_64.eval_vyperlang_vyper_851f7a1b3aa2a36fd041e3d0ed38f9355a58c8ae",
         "manifest_digest": "sha256:f9e7219d2912d2835ba3fc7ea69b3ece4182438941b0c662a0d856e6a7ec6f71",
-        "sif_sha256": "94580d56bbe3ae13d05ef30413bac66b5c60af195d5c9b13d2c91979cc551f67",
+        "environment_artifact_relative": f"images/{EXTENSION_IDS[0]}.sif",
+        "environment_artifact_sha256": "94580d56bbe3ae13d05ef30413bac66b5c60af195d5c9b13d2c91979cc551f67",
+        "project": "vyperlang/vyper",
         "target_b_date_utc": "2023-04-24",
         "timestamp_source": "https://api.github.com/repos/vyperlang/vyper/commits/851f7a1b3aa2a36fd041e3d0ed38f9355a58c8ae",
+    },
+    EXTENSION_IDS[1]: {
+        "image": "songwen6968/susvibes.x86_64.eval_openstack_aodh_149d3ad2193b4d17df801f82a0a6be62dba564db",
+        "manifest_digest": "sha256:e1054afad43031257d341bf1b1a6a1c5720d255deb00a79ac8925e4ca8bb10fd",
+        "environment_artifact_relative": f"cases/{EXTENSION_IDS[1]}/environment.provenance",
+        "environment_artifact_sha256": "901ea915cf2cf29ba3d5a9f6c2bf437bfe41ab520279c757a4003a21d0bf0caf",
+        "project": "openstack/aodh",
+        "target_b_date_utc": "2018-04-24",
+        "timestamp_source": "FROZEN_SUSVIBES_ROW:cve_fix_date",
     },
 }
 EXCLUSION_PROTOCOL_SHA256 = (
@@ -163,13 +174,13 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         ),
         target_id,
     )
-    if row.get("language") != "python" or row.get("project") != "vyperlang/vyper":
+    if row.get("language") != "python" or row.get("project") != config["project"]:
         raise RuntimeError("selected row public identity changed")
 
     b_relative = f"cases/{target_id}/B"
     b_path = runtime / b_relative
     b_hash = tree_sha256(b_path)
-    image_relative = f"images/{target_id}.sif"
+    image_relative = str(config["environment_artifact_relative"])
     image_ref = audit.bind_development_file(
         logical_resource="DIGEST_PINNED_BASELINE_IMAGE",
         boundary="RUNTIME",
@@ -178,8 +189,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         source_id=None,
         caller="lock_confirmatory_v4_extension.bind_image",
     )
-    if image_ref.sha256 != config["sif_sha256"]:
-        raise RuntimeError("digest-pinned SIF byte hash changed")
+    if image_ref.sha256 != config["environment_artifact_sha256"]:
+        raise RuntimeError("digest-pinned environment artifact hash changed")
     metadata = {
         "b_image_manifest_digest": config["manifest_digest"],
         "b_tree_sha256": b_hash,
@@ -283,7 +294,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "exclusion_protocol_sha256": EXCLUSION_PROTOCOL_SHA256,
         "benchmark_revision": SUSVIBES_REVISION,
         "image_manifest_digest": config["manifest_digest"],
-        "sif_sha256": config["sif_sha256"],
+        "environment_artifact_sha256": config["environment_artifact_sha256"],
         "b_tree_sha256": b_hash,
         "target_b_date_utc": config["target_b_date_utc"],
         "target_b_timestamp_source": config["timestamp_source"],
