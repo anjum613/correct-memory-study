@@ -66,3 +66,24 @@ def test_target_scoped_feature_extraction_returns_only_selected_bytes() -> None:
     selected = MODULE._one_feature(payload, target)
     assert json.loads(selected) == {target: "FROM selected"}
     assert other.encode() not in selected
+
+
+def test_v4_screening_path_contains_no_evaluated_model_invocation() -> None:
+    paths = (
+        ROOT / "src/cmpilot/artifact_evidence_v4.py",
+        ROOT / "src/cmpilot/content_audit_v4.py",
+        ROOT / "src/cmpilot/production_v4.py",
+        ROOT / "src/cmpilot/target_runtime_v4.py",
+        SCRIPT,
+        SCREEN_SCRIPT,
+    )
+    combined = "\n".join(path.read_text(encoding="utf-8") for path in paths)
+    for forbidden in (
+        "final_model_runtime",
+        "vllm_client",
+        "qwen",
+        "devstral",
+        "model.generate",
+        "model.invoke",
+    ):
+        assert forbidden not in combined.casefold()
