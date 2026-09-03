@@ -13,6 +13,13 @@ SPEC = importlib.util.spec_from_file_location("lock_confirmatory_v4_extension", 
 assert SPEC is not None and SPEC.loader is not None
 MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
+SCREEN_SCRIPT = ROOT / "scripts/screen_confirmatory_v4_extension.py"
+SCREEN_SPEC = importlib.util.spec_from_file_location(
+    "screen_confirmatory_v4_extension", SCREEN_SCRIPT
+)
+assert SCREEN_SPEC is not None and SCREEN_SPEC.loader is not None
+SCREEN_MODULE = importlib.util.module_from_spec(SCREEN_SPEC)
+SCREEN_SPEC.loader.exec_module(SCREEN_MODULE)
 
 
 def test_extension_selection_is_exactly_the_prospectively_frozen_five() -> None:
@@ -24,6 +31,9 @@ def test_extension_selection_is_exactly_the_prospectively_frozen_five() -> None:
         "django__django_1f2dd37f6fcefdd10ed44cb233b2e62b520afb38",
     )
     assert set(MODULE.TARGETS).issubset(MODULE.EXTENSION_IDS)
+    assert SCREEN_MODULE.EXTENSION_IDS == MODULE.EXTENSION_IDS
+    assert tuple(SCREEN_MODULE.TARGETS) == (MODULE.EXTENSION_IDS[0],)
+    assert SCREEN_MODULE.TARGETS[MODULE.EXTENSION_IDS[0]]["pstar"] is None
 
 
 def test_target_scoped_dataset_extraction_requires_one_exact_identity() -> None:
