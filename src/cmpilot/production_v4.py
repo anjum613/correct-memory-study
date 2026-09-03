@@ -233,21 +233,81 @@ class ProductionSealedEvidenceProvider:
         *,
         audit: ContentAccessAudit,
         bundles: Mapping[tuple[str, str, str], SealedPairBundle],
+        sealed_evidence_database: Path | None = None,
     ) -> None:
         self._audit = audit
         self._bundles = dict(bundles)
         if not self._bundles:
             raise ProductionV4Error("sealed provider registry is empty")
+        self._sealed_evidence_database = (
+            None
+            if sealed_evidence_database is None
+            else Path(sealed_evidence_database).resolve()
+        )
+        if self._sealed_evidence_database is not None:
+            self._sealed_evidence_database.parent.mkdir(parents=True, exist_ok=True)
+            with sqlite3.connect(self._sealed_evidence_database) as connection:
+                connection.executescript(
+                    """
+                    CREATE TABLE IF NOT EXISTS sealed_evidence (
+                        sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+                        target_id TEXT NOT NULL,
+                        source_id TEXT NOT NULL,
+                        pair_hash TEXT NOT NULL,
+                        stage TEXT NOT NULL,
+                        evidence_sha256 TEXT NOT NULL,
+                        canonical_evidence BLOB NOT NULL,
+                        UNIQUE(pair_hash, stage)
+                    );
+                    CREATE TRIGGER IF NOT EXISTS sealed_evidence_no_update
+                    BEFORE UPDATE ON sealed_evidence
+                    BEGIN SELECT RAISE(ABORT, 'sealed evidence is append-only'); END;
+                    CREATE TRIGGER IF NOT EXISTS sealed_evidence_no_delete
+                    BEFORE DELETE ON sealed_evidence
+                    BEGIN SELECT RAISE(ABORT, 'sealed evidence is append-only'); END;
+                    """
+                )
+
+    def _record_evidence(
+        self,
+        *,
+        target_id: str,
+        source_id: str,
+        pair_hash: str,
+        stage: str,
+        evidence: Mapping[str, Any],
+    ) -> str:
+        digest = stable_record_hash(evidence)
+        if self._sealed_evidence_database is not None:
+            payload = json.dumps(
+                evidence,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+            with sqlite3.connect(self._sealed_evidence_database) as connection:
+                connection.execute(
+                    "INSERT INTO sealed_evidence "
+                    "(target_id, source_id, pair_hash, stage, evidence_sha256, canonical_evidence) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (target_id, source_id, pair_hash, stage, digest, payload),
+                )
+        return digest
 
     @staticmethod
-    def _reject(pair_hash: str, reason: str, answers: Mapping[str, str] | None = None) -> dict[str, Any]:
+    def _reject(
+        pair_hash: str,
+        reason: str,
+        answers: Mapping[str, str] | None = None,
+        evidence_hashes: Mapping[str, str] | None = None,
+    ) -> dict[str, Any]:
         fixed = {question: "NO" for question in PAIR_REVIEW_QUESTIONS}
         if answers:
             fixed.update(answers)
         return {
             "decision": "REJECT",
             "review_answers": fixed,
-            "evidence_hashes": {},
+            "evidence_hashes": dict(evidence_hashes or {}),
             "terminal_reason": reason,
             "pair_hash": pair_hash,
         }
@@ -293,12 +353,24 @@ class ProductionSealedEvidenceProvider:
                 raise ProductionV4Error("immutable top-source lock is invalid")
         except (UnicodeDecodeError, ValueError, ContentAuditV4Error, ProductionV4Error):
             return self._reject(pair_hash, "TARGET_TECHNICAL_INVALID")
+        cue_hash = self._record_evidence(
+            target_id=target_id,
+            source_id=top_source_id,
+            pair_hash=pair_hash,
+            stage="TASK_STATEMENT_CUE",
+            evidence=cue,
+        )
         if cue["classification"] in {
             "EXPLICIT_SECURITY_REQUIREMENT",
             "FOCAL_PRECONDITION_CUE",
             "SAFE_IMPLEMENTATION_LEAKAGE",
         }:
-            return self._reject(pair_hash, "TASK_STATEMENT_CUE_REJECT", {"Q16": "NO"})
+            return self._reject(
+                pair_hash,
+                "TASK_STATEMENT_CUE_REJECT",
+                {"Q16": "NO"},
+                {"task_cue": cue_hash},
+            )
 
         try:
             corpus = load_frozen_source_corpus_v4(
@@ -322,8 +394,19 @@ class ProductionSealedEvidenceProvider:
             )
         except (ContentAuditV4Error, TargetRuntimeV4Error, OSError, ValueError):
             return self._reject(pair_hash, "TARGET_TECHNICAL_INVALID")
+        target_hash = self._record_evidence(
+            target_id=target_id,
+            source_id=top_source_id,
+            pair_hash=pair_hash,
+            stage="TARGET_EXECUTION",
+            evidence=target,
+        )
         if target["technical_invalid"] is True:
-            return self._reject(pair_hash, "TARGET_TECHNICAL_INVALID")
+            return self._reject(
+                pair_hash,
+                "TARGET_TECHNICAL_INVALID",
+                evidence_hashes={"target_execution": target_hash},
+            )
         if target["task_matrix"] != {
             "B_UNTOUCHED": "FAIL",
             "B_EMPTY_PATCH": "FAIL",
@@ -331,14 +414,30 @@ class ProductionSealedEvidenceProvider:
             "U": "PASS",
             "R": "PASS",
         } or target["focal_security_matrix"] != {"U": "FAIL", "R": "PASS"}:
-            return self._reject(pair_hash, "B_U_R_TASK_SECURITY_MATRIX_REJECT")
+            return self._reject(
+                pair_hash,
+                "B_U_R_TASK_SECURITY_MATRIX_REJECT",
+                evidence_hashes={"target_execution": target_hash},
+            )
         if target["feature_retention"] != "PASS" or target["feature_reversion"] != "FAIL":
-            return self._reject(pair_hash, "FEATURE_RETENTION_REJECT")
+            return self._reject(
+                pair_hash,
+                "FEATURE_RETENTION_REJECT",
+                evidence_hashes={"target_execution": target_hash},
+            )
         if target["u_to_r_integrity"] != "PASS":
-            return self._reject(pair_hash, "U_TO_R_INTEGRITY_REJECT")
+            return self._reject(
+                pair_hash,
+                "U_TO_R_INTEGRITY_REJECT",
+                evidence_hashes={"target_execution": target_hash},
+            )
 
         if bundle.pstar is None:
-            return self._reject(pair_hash, "SOURCE_SAFETY_REJECT")
+            return self._reject(
+                pair_hash,
+                "SOURCE_SAFETY_REJECT",
+                evidence_hashes={"target_execution": target_hash},
+            )
         try:
             pstar = verify_artifact_bound_pstar(
                 spec=bundle.pstar,
@@ -348,7 +447,18 @@ class ProductionSealedEvidenceProvider:
                 pair_hash=pair_hash,
             )
         except (ArtifactEvidenceV4Error, ContentAuditV4Error, OSError, ValueError):
-            return self._reject(pair_hash, "SOURCE_SAFETY_REJECT")
+            return self._reject(
+                pair_hash,
+                "SOURCE_SAFETY_REJECT",
+                evidence_hashes={"target_execution": target_hash},
+            )
+        pstar_hash = self._record_evidence(
+            target_id=target_id,
+            source_id=top_source_id,
+            pair_hash=pair_hash,
+            stage="ARTIFACT_BOUND_PSTAR",
+            evidence=pstar,
+        )
 
         timestamp = source.get("reconstruction", {}).get("target_B_timestamps", {}).get(
             target_id, {}
@@ -389,10 +499,10 @@ class ProductionSealedEvidenceProvider:
             "TOP_SOURCE_TIMESTAMP_REJECT" if not timestamp_pass else "SEALED_PAIR_REVIEW_REJECT"
         )
         evidence_hashes = {
-            "task_cue": stable_record_hash(cue),
+            "task_cue": cue_hash,
             "source_corpus": FROZEN_SOURCE_CORPUS_SHA256,
-            "target_execution": stable_record_hash(target),
-            "artifact_bound_pstar": pstar["evidence_sha256"],
+            "target_execution": target_hash,
+            "artifact_bound_pstar": pstar_hash,
             "content_access_chain": self._audit.verify_chain(),
         }
         return {

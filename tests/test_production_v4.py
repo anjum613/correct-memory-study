@@ -123,17 +123,41 @@ def test_production_provider_executes_frozen_cue_gate_before_sealed_target_data(
         scratch_parent=tmp_path,
     )
     provider = ProductionSealedEvidenceProvider(
-        audit=audit, bundles={(TARGET, SOURCE, pair_hash): bundle}
+        audit=audit,
+        bundles={(TARGET, SOURCE, pair_hash): bundle},
+        sealed_evidence_database=tmp_path / "sealed-evidence.sqlite",
     )
     result = provider.load(target_id=TARGET, top_source_id=SOURCE, pair_hash=pair_hash)
     assert result == {
         "decision": "REJECT",
         "review_answers": {question: "NO" for question in result["review_answers"]},
-        "evidence_hashes": {},
+        "evidence_hashes": {
+            "task_cue": stable_record_hash(
+                {
+                    "classification": "EXPLICIT_SECURITY_REQUIREMENT",
+                    "matched_rule_ids": ["DIRECT_SECURITY_REQUIREMENT"],
+                    "public_text_eligible": False,
+                }
+            )
+        },
         "terminal_reason": "TASK_STATEMENT_CUE_REJECT",
         "pair_hash": pair_hash,
     }
     assert [event["logical_resource"] for event in audit.events()] == ["TASK", "PAIR_LOCK"]
+    with sqlite3.connect(tmp_path / "sealed-evidence.sqlite") as connection:
+        row = connection.execute(
+            "SELECT target_id, source_id, pair_hash, stage, evidence_sha256 "
+            "FROM sealed_evidence"
+        ).fetchone()
+        assert row == (
+            TARGET,
+            SOURCE,
+            pair_hash,
+            "TASK_STATEMENT_CUE",
+            result["evidence_hashes"]["task_cue"],
+        )
+        with pytest.raises(sqlite3.IntegrityError, match="append-only"):
+            connection.execute("DELETE FROM sealed_evidence")
 
 
 def test_frozen_target_order_excludes_all_development_ids_and_is_deterministic() -> None:
