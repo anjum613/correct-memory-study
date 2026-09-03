@@ -49,6 +49,15 @@ TARGETS = {
         "target_b_date_utc": "2018-04-24",
         "timestamp_source": "FROZEN_SUSVIBES_ROW:cve_fix_date",
     },
+    EXTENSION_IDS[2]: {
+        "image": "songwen6968/susvibes.x86_64.eval_urllib3_urllib3_a74c9cfbaed9f811e7563cfc3dce894928e0221a",
+        "manifest_digest": "sha256:cc70c2eb79314985ece18be8728b7ee1eb645d7a89fcbe260afa5f823b58d37a",
+        "environment_artifact_relative": f"cases/{EXTENSION_IDS[2]}/environment.provenance",
+        "environment_artifact_sha256": "9fd27058642e40c01de23274474e76bddb0a108aeae57cdf94c1a3bedbc92e84",
+        "project": "urllib3/urllib3",
+        "target_b_date_utc": "2019-04-28",
+        "timestamp_source": "FROZEN_SUSVIBES_ROW:cve_fix_date",
+    },
 }
 EXCLUSION_PROTOCOL_SHA256 = (
     "60f48bfa520232d70808df97280a7142c6ec56df083ae37babfdd856a1ef0854"
