@@ -333,7 +333,27 @@ class ContentAccessAudit:
         digest = hashlib.sha256()
         byte_count = 0
         file_events: list[dict[str, Any]] = []
-        paths = sorted(path for path in root.rglob("*") if path.is_file() or path.is_symlink())
+        paths: list[Path] = []
+        for directory, directory_names, file_names in os.walk(
+            root, topdown=True, followlinks=False
+        ):
+            directory_path = Path(directory)
+            retained_directories = []
+            for name in sorted(directory_names):
+                if name in excluded:
+                    continue
+                candidate = directory_path / name
+                if candidate.is_symlink():
+                    paths.append(candidate)
+                else:
+                    retained_directories.append(name)
+            directory_names[:] = retained_directories
+            paths.extend(
+                directory_path / name
+                for name in sorted(file_names)
+                if name not in excluded
+            )
+        paths.sort()
         for path in paths:
             relative = path.relative_to(root)
             if any(part in excluded for part in relative.parts):

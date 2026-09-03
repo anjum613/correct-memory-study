@@ -68,6 +68,41 @@ def test_global_audit_records_exact_reads_and_enforces_append_only_chain(
         connection.execute("DELETE FROM content_access")
 
 
+def test_tree_audit_prunes_excluded_directories(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    artifacts = tmp_path / "artifacts"
+    tree = artifacts / "B"
+    hidden = tree / ".git" / "objects"
+    hidden.mkdir(parents=True)
+    (tree / "feature.py").write_bytes(b"VALUE = 1\n")
+    forbidden = hidden / "large-object"
+    forbidden.write_bytes(b"must not be read")
+    original_read_bytes = Path.read_bytes
+
+    def guarded_read_bytes(path: Path) -> bytes:
+        if path == forbidden:
+            raise AssertionError("excluded directory was traversed")
+        return original_read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", guarded_read_bytes)
+    audit = ContentAccessAudit(
+        tmp_path / "audit.sqlite",
+        boundaries={"TARGET": artifacts},
+        phase="V4_DEVELOPMENT",
+    )
+
+    audit.verify_tree(
+        TreeRef("TARGET_B", "TARGET", "B", tree_sha256(tree)),
+        target_id=TARGET,
+        source_id=None,
+        caller="test",
+    )
+
+    identifiers = [event["content_identifier"] for event in audit.events()]
+    assert all(".git" not in identifier for identifier in identifiers)
+
+
 def test_audit_fails_closed_on_unmediated_types_hash_changes_and_escapes(
     tmp_path: Path,
 ) -> None:

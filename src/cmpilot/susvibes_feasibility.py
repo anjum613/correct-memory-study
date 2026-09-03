@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 import hashlib
 import json
+import os
 import re
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
@@ -463,10 +464,28 @@ def tree_sha256(root: Path, *, exclude: Sequence[str] = (".git",)) -> str:
     base = Path(root)
     excluded = set(exclude)
     digest = hashlib.sha256()
-    for path in sorted(p for p in base.rglob("*") if p.is_file() or p.is_symlink()):
+    paths: list[Path] = []
+    for directory, directory_names, file_names in os.walk(
+        base, topdown=True, followlinks=False
+    ):
+        directory_path = Path(directory)
+        retained_directories = []
+        for name in sorted(directory_names):
+            if name in excluded:
+                continue
+            candidate = directory_path / name
+            if candidate.is_symlink():
+                paths.append(candidate)
+            else:
+                retained_directories.append(name)
+        directory_names[:] = retained_directories
+        paths.extend(
+            directory_path / name
+            for name in sorted(file_names)
+            if name not in excluded
+        )
+    for path in sorted(paths):
         relative = path.relative_to(base)
-        if any(part in excluded for part in relative.parts):
-            continue
         rel = relative.as_posix().encode()
         digest.update(rel)
         digest.update(b"\0")

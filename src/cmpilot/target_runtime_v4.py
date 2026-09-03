@@ -240,7 +240,12 @@ def _run(
 def _copy_clean(source: Path, destination: Path) -> None:
     if destination.exists():
         raise TargetRuntimeV4Error("refusing to overwrite a target materialization")
-    shutil.copytree(source, destination, symlinks=False)
+    shutil.copytree(
+        source,
+        destination,
+        symlinks=True,
+        ignore=shutil.ignore_patterns(".git"),
+    )
 
 
 def _irrelevant_patch(target_id: str) -> str:

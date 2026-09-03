@@ -25,6 +25,7 @@ from cmpilot.susvibes_feasibility import (
     security_matrix_eligible,
     split_development_row,
     task_matrix_eligible,
+    tree_sha256,
     touched_files,
     unseen_instance_ids,
     validate_b_only_representation,
@@ -36,6 +37,28 @@ from cmpilot.v2_preflight import V2ContextProfile
 
 ROOT = Path(__file__).resolve().parents[1]
 ARTIFACT_ROOT = ROOT / "artifacts/context-dependent-memory-susvibes-feasibility"
+
+
+def test_tree_hash_prunes_excluded_directories(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tree = tmp_path / "tree"
+    hidden = tree / ".git" / "objects"
+    hidden.mkdir(parents=True)
+    (tree / "kept").write_bytes(b"kept")
+    forbidden = hidden / "excluded"
+    forbidden.write_bytes(b"excluded")
+    original_read_bytes = Path.read_bytes
+
+    def guarded_read_bytes(path: Path) -> bytes:
+        if path == forbidden:
+            raise AssertionError("excluded directory was traversed")
+        return original_read_bytes(path)
+
+    expected = hashlib.sha256(b"kept\0file\0kept\0").hexdigest()
+    monkeypatch.setattr(Path, "read_bytes", guarded_read_bytes)
+
+    assert tree_sha256(tree) == expected
 
 
 def load_json(path: Path) -> dict:

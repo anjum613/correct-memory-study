@@ -13,6 +13,7 @@ from cmpilot.target_runtime_v4 import (
     BenchmarkRowBinding,
     ExecutionEnvironment,
     TargetRuntimeV4Error,
+    _copy_clean,
     execute_target_gates,
 )
 
@@ -36,6 +37,23 @@ def _patch(before: str, after: str) -> str:
         f"@@ -1,{len(before_lines)} +1,{len(after_lines)} @@\n"
         f"{body}\n"
     )
+
+
+def test_clean_materialization_excludes_only_git_metadata(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    (source / ".git" / "objects").mkdir(parents=True)
+    (source / ".git" / "objects" / "large-object").write_bytes(b"excluded")
+    (source / "tracked").write_bytes(b"included")
+    (source / "tracked-link").symlink_to("tracked")
+    destination = tmp_path / "destination"
+
+    _copy_clean(source, destination)
+
+    assert (destination / "tracked").read_bytes() == b"included"
+    assert (destination / "tracked-link").is_symlink()
+    assert (destination / "tracked-link").readlink() == Path("tracked")
+    assert not (destination / ".git").exists()
+    assert tree_sha256(source) == tree_sha256(destination)
 
 
 def _fixture(tmp_path: Path) -> tuple[ContentAccessAudit, BenchmarkRowBinding, ArtifactRef, TreeRef, ArtifactRef]:
@@ -173,7 +191,6 @@ def test_wrong_patch_u_or_r_hash_is_rejected(
             scratch_parent=tmp_path,
         )
 
-
 def test_feature_definition_bytes_are_hash_bound(tmp_path: Path) -> None:
     audit, binding, dataset, baseline, feature = _fixture(tmp_path)
     wrong = replace(feature, sha256="0" * 64)
@@ -187,4 +204,3 @@ def test_feature_definition_bytes_are_hash_bound(tmp_path: Path) -> None:
             environment=ExecutionEnvironment(),
             scratch_parent=tmp_path,
         )
-

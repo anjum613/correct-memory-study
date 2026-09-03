@@ -206,4 +206,3 @@ def test_durable_stopping_terminal_reason_and_ordered_publication_barrier(
         sqlite3.IntegrityError, match="append-only"
     ):
         connection.execute("UPDATE screening_decision SET terminal_reason = 'SOURCE_SAFETY_REJECT'")
-
