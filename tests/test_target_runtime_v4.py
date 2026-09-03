@@ -13,6 +13,7 @@ from cmpilot.target_runtime_v4 import (
     BenchmarkRowBinding,
     ExecutionEnvironment,
     TargetRuntimeV4Error,
+    _apply_patch,
     _copy_clean,
     execute_target_gates,
 )
@@ -54,6 +55,19 @@ def test_clean_materialization_excludes_only_git_metadata(tmp_path: Path) -> Non
     assert (destination / "tracked-link").readlink() == Path("tracked")
     assert not (destination / ".git").exists()
     assert tree_sha256(source) == tree_sha256(destination)
+
+
+def test_patch_execution_is_confined_to_nested_scratch_tree(tmp_path: Path) -> None:
+    import subprocess
+
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    scratch = tmp_path / "scratch" / "U"
+    scratch.mkdir(parents=True)
+    (scratch / "feature.py").write_text("VALUE = 0\n", encoding="utf-8")
+
+    _apply_patch(scratch, _patch("VALUE = 0", "VALUE = 1"))
+
+    assert (scratch / "feature.py").read_text(encoding="utf-8") == "VALUE = 1\n"
 
 
 def _fixture(tmp_path: Path) -> tuple[ContentAccessAudit, BenchmarkRowBinding, ArtifactRef, TreeRef, ArtifactRef]:

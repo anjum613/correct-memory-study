@@ -39,12 +39,17 @@ def _apply_patch(root: Path, patch: str, *, reverse: bool = False) -> None:
     if reverse:
         command.append("--reverse")
     command.append("-")
+    environment = {
+        **os.environ,
+        "GIT_CEILING_DIRECTORIES": str(root.parent.resolve(strict=True)),
+    }
     checked = subprocess.run(
         [*command[:-1], "--check", "-"],
         cwd=root,
         input=patch,
         text=True,
         capture_output=True,
+        env=environment,
         check=False,
     )
     if checked.returncode:
@@ -57,6 +62,7 @@ def _apply_patch(root: Path, patch: str, *, reverse: bool = False) -> None:
         input=patch,
         text=True,
         capture_output=True,
+        env=environment,
         check=False,
     )
     if applied.returncode:
