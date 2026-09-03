@@ -1,0 +1,40 @@
+# Missing Summary Operations in TensorFlow v2 Summary API
+
+## Summary
+
+The TensorFlow v2 summary operations module (`tensorflow/python/ops/summary_ops_v2.py`) is missing several critical functions that are essential for summary writing functionality. These missing functions break the summary API's ability to import events, flush summary writers, manage evaluation directories, and handle internal graph serialization and step management operations.
+
+## Missing Functionality
+
+The following functions are currently missing from the summary operations module:
+
+1. **`import_event(tensor, name=None)`** - A function to write `tf.compat.v1.Event` binary protos, used for importing existing event logs into new summary writer sinks
+2. **`flush(writer=None, name=None)`** - The main API function exported as `tf.summary.flush` for forcing summary writers to send buffered data to storage
+3. **`eval_dir(model_dir, name=None)`** - A utility function to construct evaluation log directories
+4. **`create_summary_file_writer(*args, **kwargs)`** - A deprecated wrapper function that provides backward compatibility
+5. **`_serialize_graph(arbitrary_graph)`** - An internal helper function for serializing graph objects to string format
+6. **`_choose_step(step)`** - An internal helper function for step parameter handling and conversion
+
+## Impact
+
+Without these functions:
+
+- The `tf.summary.flush` API is completely non-functional, preventing users from manually flushing summary data to disk
+- Event import functionality is unavailable, breaking workflows that need to import existing event logs
+- Internal graph serialization operations fail, affecting graph summary writing
+- Step parameter handling is broken across multiple summary operations
+- The EventFileWriterV2 class cannot function properly as it depends on `import_event` and `flush` operations
+- Backward compatibility is broken for users relying on the deprecated `create_summary_file_writer` function
+
+## Expected Implementation
+
+The implementation should restore all missing functions with their complete functionality:
+
+- `import_event` should accept a tensor containing serialized Event proto and write it using the current summary writer
+- `flush` should be properly exported with `@tf_export("summary.flush", v1=[])` and handle both SummaryWriter objects and raw resource tensors
+- `eval_dir` should construct appropriate evaluation directory paths
+- `create_summary_file_writer` should maintain the deprecation warning while delegating to `create_file_writer`
+- `_serialize_graph` should handle both `ops.Graph` objects and pre-serialized graph data
+- `_choose_step` should handle step parameter conversion and default to global step when None
+
+The functions must integrate properly with the existing summary state management system and maintain compatibility with both eager execution and graph mode operations.
