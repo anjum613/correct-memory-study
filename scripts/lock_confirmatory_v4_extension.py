@@ -58,6 +58,15 @@ TARGETS = {
         "target_b_date_utc": "2019-04-28",
         "timestamp_source": "FROZEN_SUSVIBES_ROW:cve_fix_date",
     },
+    EXTENSION_IDS[4]: {
+        "image": "songwen6968/susvibes.x86_64.eval_django_django_1f2dd37f6fcefdd10ed44cb233b2e62b520afb38",
+        "manifest_digest": "sha256:164aaf7a30640daaddd4f320a315c3231c11288baffa271a0fa295f4cc7a9c2b",
+        "environment_artifact_relative": f"cases/{EXTENSION_IDS[4]}/environment.provenance",
+        "environment_artifact_sha256": "54c0dcd0fecedc966981904d58dd42d30907248ef584221e6ac76a4182a11e19",
+        "project": "django/django",
+        "target_b_date_utc": "2020-06-03",
+        "timestamp_source": "FROZEN_SUSVIBES_ROW:cve_fix_date",
+    },
 }
 EXCLUSION_PROTOCOL_SHA256 = (
     "60f48bfa520232d70808df97280a7142c6ec56df083ae37babfdd856a1ef0854"
