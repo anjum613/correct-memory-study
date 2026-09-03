@@ -263,6 +263,16 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         )
     if lock is not None:
         (sealed / "pair.lock").write_bytes(_canonical(lock))
+    if representation is not None:
+        (public / "target.representation").write_bytes(_canonical(representation))
+        audit.bind_development_file(
+            logical_resource="B_ONLY_TARGET_REPRESENTATION",
+            boundary="OUTPUT",
+            relative_path="public/target.representation",
+            target_id=target_id,
+            source_id=None if lock is None else str(lock["top_source_id"]),
+            caller="lock_confirmatory_v4_extension.persist_representation",
+        )
     record = {
         "schema": "cmpilot-v4-extension-pair-lock-v1",
         "development_only": True,
