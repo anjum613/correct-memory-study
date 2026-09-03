@@ -14,6 +14,7 @@ from cmpilot.production_v4 import (
     ProductionV4Error,
     ScreeningLedgerV4,
     SealedPairBundle,
+    _target_timestamp_is_valid,
     frozen_target_order,
     load_frozen_source_corpus_v4,
 )
@@ -185,6 +186,40 @@ def test_frozen_target_order_excludes_all_development_ids_and_is_deterministic()
     )
     assert observed == expected
     assert frozen_target_order(candidates, additional_development_exclusions=(additional,)) == expected
+
+
+def test_target_timestamp_precedence_is_derived_from_bound_artifact(tmp_path: Path) -> None:
+    root = tmp_path / "frozen"
+    root.mkdir()
+    payload = json.dumps(
+        {
+            "date_utc": "2023-04-24",
+            "source": "immutable-commit-metadata",
+            "target_id": TARGET,
+        },
+        sort_keys=True,
+    ).encode()
+    (root / "timestamp").write_bytes(payload)
+    audit = ContentAccessAudit(
+        tmp_path / "timestamp-audit.sqlite",
+        boundaries={"FROZEN": root},
+        phase="V4_DEVELOPMENT",
+    )
+    ref = ArtifactRef("TARGET_TIMESTAMP", "FROZEN", "timestamp", _sha(payload))
+    assert _target_timestamp_is_valid(
+        audit,
+        ref,
+        target_id=TARGET,
+        source_id=SOURCE,
+        source_epoch=1_539_349_202,
+    )
+    assert not _target_timestamp_is_valid(
+        audit,
+        ref,
+        target_id="another-target",
+        source_id=SOURCE,
+        source_epoch=1_539_349_202,
+    )
 
 
 def test_durable_stopping_terminal_reason_and_ordered_publication_barrier(

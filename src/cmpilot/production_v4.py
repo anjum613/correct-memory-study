@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date, datetime, timezone
 import hashlib
 import json
 from pathlib import Path
@@ -223,6 +224,7 @@ class SealedPairBundle:
     target_environment: ExecutionEnvironment
     pstar: PstarEvidenceSpec | None
     scratch_parent: Path
+    target_timestamp: ArtifactRef | None = None
 
 
 class ProductionSealedEvidenceProvider:
@@ -460,14 +462,24 @@ class ProductionSealedEvidenceProvider:
             evidence=pstar,
         )
 
-        timestamp = source.get("reconstruction", {}).get("target_B_timestamps", {}).get(
-            target_id, {}
-        )
-        timestamp_pass = (
-            isinstance(source.get("commit_timestamp_epoch"), int)
-            and isinstance(timestamp.get("epoch"), int)
-            and source["commit_timestamp_epoch"] <= timestamp["epoch"]
-        )
+        timestamp_pass = False
+        if bundle.target_timestamp is not None:
+            timestamp_pass = _target_timestamp_is_valid(
+                self._audit,
+                bundle.target_timestamp,
+                target_id=target_id,
+                source_id=top_source_id,
+                source_epoch=source.get("commit_timestamp_epoch"),
+            )
+        else:
+            timestamp = source.get("reconstruction", {}).get(
+                "target_B_timestamps", {}
+            ).get(target_id, {})
+            timestamp_pass = (
+                isinstance(source.get("commit_timestamp_epoch"), int)
+                and isinstance(timestamp.get("epoch"), int)
+                and source["commit_timestamp_epoch"] <= timestamp["epoch"]
+            )
         task_matrix = target["task_matrix"]
         security = target["focal_security_matrix"]
         findings = {
@@ -515,6 +527,45 @@ class ProductionSealedEvidenceProvider:
 
 
 TARGET_STATUS_VALUES = frozenset({"FALSE", "UNJUSTIFIED"})
+
+
+def _target_timestamp_is_valid(
+    audit: ContentAccessAudit,
+    artifact: ArtifactRef,
+    *,
+    target_id: str,
+    source_id: str,
+    source_epoch: Any,
+) -> bool:
+    """Bind source precedence to an immutable target timestamp artifact."""
+
+    try:
+        timestamp_record = json.loads(
+            audit.read_bytes(
+                artifact,
+                target_id=target_id,
+                source_id=source_id,
+                caller="production_v4._target_timestamp_is_valid",
+            )
+        )
+        target_day = date.fromisoformat(str(timestamp_record["date_utc"]))
+        source_day = datetime.fromtimestamp(source_epoch, timezone.utc).date()
+        return (
+            timestamp_record.get("target_id") == target_id
+            and isinstance(timestamp_record.get("source"), str)
+            and bool(timestamp_record["source"])
+            and isinstance(source_epoch, int)
+            and source_day <= target_day
+        )
+    except (
+        ContentAuditV4Error,
+        KeyError,
+        OSError,
+        OverflowError,
+        TypeError,
+        ValueError,
+    ):
+        return False
 
 
 def frozen_target_order(
