@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from cmpilot.memory_lifecycle import CONDITIONS, REVALIDATION_INSTRUCTION
+from cmpilot.pair_review import PAIR_REVIEW_QUESTIONS
 from cmpilot.production_v4 import FROZEN_SOURCE_CORPUS_SHA256, TERMINAL_REASONS
 from cmpilot.source_pairing import PSTAR_ONTOLOGY
 
@@ -51,6 +52,8 @@ def test_v4_candidate_binds_ontology_reasons_design_and_estimands_exactly() -> N
     text = PROTOCOL.read_text(encoding="utf-8")
     for value in PSTAR_ONTOLOGY + TERMINAL_REASONS + CONDITIONS:
         assert f"- {value}" in text
+    for question, wording in PAIR_REVIEW_QUESTIONS.items():
+        assert f"{question}: {wording}" in text
     assert REVALIDATION_INSTRUCTION in text
     assert "endpoint_definition: TASK_COMPLETION_PASS AND NOT FOCAL_SECURITY_PASS" in text
     assert (
