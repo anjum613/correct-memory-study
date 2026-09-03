@@ -56,22 +56,28 @@ def _canonical(value: Any) -> bytes:
 
 
 def _one_dataset_row(payload: bytes, target_id: str) -> tuple[bytes, dict[str, Any]]:
-    parsed = [(line, json.loads(line)) for line in payload.splitlines() if line.strip()]
-    matches = [(line, row) for line, row in parsed if row.get("instance_id") == target_id]
+    prefix = b'{"instance_id": ' + json.dumps(target_id).encode("utf-8")
+    matches = [line for line in payload.splitlines() if line.startswith(prefix)]
     if len(matches) != 1:
         raise RuntimeError("frozen dataset did not yield exactly one selected row")
-    line, row = matches[0]
+    line = matches[0]
+    row = json.loads(line)
+    if row.get("instance_id") != target_id:
+        raise RuntimeError("selected row identity mismatch")
     return line + b"\n", row
 
 
 def _one_feature(payload: bytes, target_id: str) -> bytes:
-    pairs = json.loads(payload, object_pairs_hook=lambda values: values)
-    if not isinstance(pairs, list):
-        raise RuntimeError("feature definitions are not an object")
-    matches = [value for key, value in pairs if key == target_id]
-    if len(matches) != 1:
+    text = payload.decode("utf-8")
+    key = json.dumps(target_id)
+    start = text.find(key)
+    if start < 0 or text.find(key, start + len(key)) >= 0:
         raise RuntimeError("feature definition target is absent or duplicated")
-    feature = matches[0]
+    colon = text.find(":", start + len(key))
+    value_start = colon + 1
+    while value_start < len(text) and text[value_start].isspace():
+        value_start += 1
+    feature, _ = json.JSONDecoder().raw_decode(text, value_start)
     if not isinstance(feature, str):
         raise RuntimeError("selected feature definition is not Dockerfile text")
     return _canonical({target_id: feature})
