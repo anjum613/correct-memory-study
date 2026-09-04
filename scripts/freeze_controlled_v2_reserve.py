@@ -16,7 +16,7 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parents[1]
 RESERVE_ROOT = REPO_ROOT / "synthetic_triplets/controlled_v2_reserve"
 RELEASE_PATH = RESERVE_ROOT / "reserve_release.json"
-RELEASE_TAG = "controlled-synthetic-v2-reserve-v1"
+RELEASE_TAG = "controlled-synthetic-v2-reserve-v2"
 BASE_FILTER_RELEASE = REPO_ROOT / "synthetic_triplets/controlled_v2/filter_release.json"
 CONTINUATION_RELEASE = (
     REPO_ROOT / "synthetic_triplets/controlled_v2_continuation/continuation_release.json"

@@ -28,7 +28,7 @@ RESERVE_ROOT = Path("synthetic_triplets/controlled_v2_reserve")
 RAW_ROOT = RESERVE_ROOT / "acquisitions/raw"
 PLAN_PATH = RESERVE_ROOT / "reserve_plan.json"
 PROMPT_PATH = RESERVE_ROOT / "generator_prompt.md"
-RELEASE_TAG = "controlled-synthetic-v2-reserve-v1"
+RELEASE_TAG = "controlled-synthetic-v2-reserve-v2"
 MAX_ATTEMPTS = 5
 
 
