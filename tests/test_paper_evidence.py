@@ -71,21 +71,29 @@ def test_no_scientific_artifact_was_changed() -> None:
     validate_no_scientific_mutation()
 
 
-def test_human_protocol_was_frozen_before_blank_responses() -> None:
+def test_human_protocol_was_frozen_before_completed_responses() -> None:
     state = human_verification.validate_human_verification(REPOSITORY_ROOT)
 
     assert state["PROTOCOL_FREEZE_COMMIT"] == (
         human_verification.PROTOCOL_FREEZE_COMMIT
     )
     assert state["PROTOCOL_COMMITTED_BEFORE_HUMAN_RESPONSES"] is True
+    assert state["VERIFICATION_METHOD"] == "HUMAN_ONLY_NOT_AI_VERIFICATION"
     assert state["PACKETS"] == 6
     assert state["TOTAL_PRIORITY_CELLS"] == 23
     assert state["AI_DISAGREEMENT_CELLS"] == 17
     assert state["SAMPLED_AI_AGREEMENT_CELLS"] == 6
     assert state["SAMPLE_RULE_VERIFIED"] is True
-    assert state["HUMAN_CELLS_COMPLETED"] == 0
-    assert state["HUMAN_RESPONSES_CURRENTLY_BLANK"] is True
-    assert state["HUMAN_VERIFICATION_COMPLETED"] is False
+    assert state["HUMAN_CELLS_COMPLETED"] == 23
+    assert state["CONFIRMED"] == 23
+    assert state["DISPUTED"] == 0
+    assert state["UNRESOLVED"] == 0
+    assert state["AGREEMENT_RATE_AMONG_DETERMINATE_HUMAN_JUDGMENTS"] == 1.0
+    assert state["AI_DISAGREEMENT_CELLS_HUMAN_CONFIRMED"] == 17
+    assert state["SAMPLED_AI_AGREEMENT_CELLS_HUMAN_CONFIRMED"] == 6
+    assert state["HUMAN_RESPONSES_CURRENTLY_BLANK"] is False
+    assert state["HUMAN_VERIFICATION_COMPLETED"] is True
+    assert state["HUMAN_REVIEWER_COUNT"] == 1
     assert state["ORIGINAL_AI_AUDIT_PRESERVED"] is True
     assert state["ORIGINAL_CLAIM_LEDGER_PRESERVED"] is True
     assert state["ORIGINAL_POSITIVE_CONTROL_PRESERVED"] is True
@@ -183,17 +191,20 @@ def test_human_validation_rejects_changed_criterion_definition(
 def test_human_validation_rejects_completion_with_blank_priority_cells(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def mark_complete(document: dict[str, Any]) -> None:
-        document["HUMAN_VERIFICATION_COMPLETED"] = True
+    def blank_priority_response(document: dict[str, Any]) -> None:
+        cell = next(
+            cell for cell in document["CRITERIA"] if cell["PRIORITY_HUMAN_VERIFICATION"]
+        )
+        cell["HUMAN_RESPONSES"] = []
 
     _mutate_loaded_yaml(
         monkeypatch,
-        "paper/human-review/reconciliation.yaml",
-        mark_complete,
+        "paper/human-review/01-basm-when-not-to-imitate.yaml",
+        blank_priority_response,
     )
     with pytest.raises(
         human_verification.HumanVerificationError,
-        match="while priority cells remain blank",
+        match="packet marked complete while priority cells remain blank",
     ):
         human_verification.validate_human_verification(REPOSITORY_ROOT)
 
@@ -239,9 +250,60 @@ def test_overlay_writer_cannot_target_original_ai_audit() -> None:
     assert audit_path.read_bytes() == before
 
 
-def test_overlay_cannot_be_built_from_blank_packets() -> None:
+def test_completed_overlay_preserves_ai_layer_and_records_human_confirmation() -> None:
+    overlay = human_verification.build_human_verified_overlay(REPOSITORY_ROOT)
+
+    assert overlay["ANALYSIS_LAYER"] == "HUMAN_VERIFIED_ANALYSIS"
+    assert overlay["SOURCE_LAYER"] == "AI_ADJUDICATED"
+    assert overlay["VERIFICATION_METHOD"] == "HUMAN_ONLY_NOT_AI_VERIFICATION"
+    assert overlay["HUMAN_VERIFICATION_COMPLETED"] is True
+    assert overlay["SCOPE_DESCRIPTION"].startswith("Human-only verification")
+    assert overlay["INDEPENDENT_WORDING_ALLOWED"] is False
+    assert overlay["INDEPENDENT_WORDING_USED"] is False
+    assert overlay["HUMAN_REVIEWER_COUNT"] == 1
+    assert overlay["HUMAN_REVIEW_DATES"] == ["2026-09-04"]
+    assert overlay["HUMAN_REVIEWER_RELATIONSHIPS"] == ["PROJECT_COLLABORATOR"]
+    assert overlay["TOTAL_PRIORITY_CELLS"] == 23
+    assert overlay["CONFIRMED"] == 23
+    assert overlay["DISPUTED"] == 0
+    assert overlay["UNRESOLVED"] == 0
+    assert overlay["CORRECTED_CELL_COUNT"] == 0
+    assert overlay["MATRIX_RECOMPUTED"] is False
+    assert overlay["HUMAN_VERIFIED_MATRIX"] is None
+    assert overlay["AI_ADJUDICATED_RESULT"] == "FRAMEWORK_PARTIALLY_DISTINCTIVE"
+    assert (
+        overlay["AI_ADJUDICATED_FRAMEWORK_RESULT"]
+        == "FRAMEWORK_PARTIALLY_DISTINCTIVE"
+    )
+    assert overlay["HUMAN_VERIFIED_RESULT"] == "FRAMEWORK_PARTIALLY_DISTINCTIVE"
+    assert (
+        overlay["HUMAN_VERIFIED_FRAMEWORK_RESULT"]
+        == "FRAMEWORK_PARTIALLY_DISTINCTIVE"
+    )
+    assert overlay["AGGREGATE_CONCLUSION_CHANGED"] is False
+    assert overlay["QUALITATIVE_CONCLUSION_CHANGED"] is False
+
+    persisted = human_verification._load_yaml(
+        REPOSITORY_ROOT / human_verification.OVERLAY_RELATIVE
+    )
+    assert persisted == overlay
+
+
+def test_human_validation_rejects_inconsistent_final_count(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def change_final_count(document: dict[str, Any]) -> None:
+        document["FINAL_RECONCILIATION_METADATA"][
+            "AGREEMENT_WITH_FROZEN_ADJUDICATION_COUNT"
+        ] = 22
+
+    _mutate_loaded_yaml(
+        monkeypatch,
+        "paper/human-review/reconciliation.yaml",
+        change_final_count,
+    )
     with pytest.raises(
         human_verification.HumanVerificationError,
-        match="before all 23 cells are complete",
+        match="final reconciliation count does not match responses",
     ):
-        human_verification.build_human_verified_overlay(REPOSITORY_ROOT)
+        human_verification.validate_human_verification(REPOSITORY_ROOT)

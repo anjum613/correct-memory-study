@@ -43,6 +43,16 @@ HUMAN_RESPONSE_RECORD_FIELDS = (
     "HUMAN_ORIGINAL_SOURCE_EVIDENCE_LOCATION",
     "CORRECTION_BASIS",
 )
+FINAL_RECONCILIATION_FIELDS = (
+    "HUMAN_REVIEWER_IDS",
+    "RECONCILIATION_DATE",
+    "ALL_PRIORITY_CELLS_REVIEWED",
+    "AGREEMENT_WITH_FROZEN_ADJUDICATION_COUNT",
+    "DISAGREEMENT_WITH_FROZEN_ADJUDICATION_COUNT",
+    "UNRESOLVED_COUNT",
+    "ADJUDICATION_METHOD",
+    "FINAL_COMMENT",
+)
 ALLOWED_HUMAN_VERIFIED_RESULTS = (
     "FRAMEWORK_DISTINCTIVE",
     "FRAMEWORK_PARTIALLY_DISTINCTIVE",
@@ -885,8 +895,49 @@ def validate_human_verification(
     agreement_rate = (
         status_counts["CONFIRMED"] / determinate if determinate else None
     )
+    final_metadata = reconciliation["FINAL_RECONCILIATION_METADATA"]
+    _require(
+        isinstance(final_metadata, dict)
+        and tuple(final_metadata) == FINAL_RECONCILIATION_FIELDS,
+        "final reconciliation metadata fields changed",
+    )
+    if global_complete:
+        reviewer_ids = final_metadata["HUMAN_REVIEWER_IDS"]
+        _require(
+            isinstance(reviewer_ids, list)
+            and len(reviewer_ids) == len(set(reviewer_ids))
+            and set(reviewer_ids) == set(reviewers),
+            "final reconciliation reviewer identifiers do not match metadata",
+        )
+        _require(
+            _nonblank(final_metadata["RECONCILIATION_DATE"]),
+            "final reconciliation date missing",
+        )
+        _require(
+            final_metadata["ALL_PRIORITY_CELLS_REVIEWED"] is True,
+            "final reconciliation does not confirm complete priority review",
+        )
+        expected_final_counts = {
+            "AGREEMENT_WITH_FROZEN_ADJUDICATION_COUNT": status_counts["CONFIRMED"],
+            "DISAGREEMENT_WITH_FROZEN_ADJUDICATION_COUNT": status_counts["DISPUTED"],
+            "UNRESOLVED_COUNT": status_counts["UNRESOLVED"],
+        }
+        for field, expected in expected_final_counts.items():
+            _require(
+                final_metadata[field] == expected,
+                f"final reconciliation count does not match responses: {field}",
+            )
+        _require(
+            _nonblank(final_metadata["ADJUDICATION_METHOD"]),
+            "final reconciliation method missing",
+        )
+        _require(
+            _nonblank(final_metadata["FINAL_COMMENT"]),
+            "final reconciliation comment missing",
+        )
     summary = {
         "VALID": True,
+        "VERIFICATION_METHOD": "HUMAN_ONLY_NOT_AI_VERIFICATION",
         "PROTOCOL_FREEZE_COMMIT": PROTOCOL_FREEZE_COMMIT,
         "PROTOCOL_COMMITTED_BEFORE_HUMAN_RESPONSES": True,
         "PACKETS": 6,
@@ -925,6 +976,7 @@ def validate_human_verification(
         "SAMPLE_RULE_VERIFIED": True,
         "HUMAN_RESPONSES_CURRENTLY_BLANK": len(completed_cells) == 0,
         "HUMAN_VERIFICATION_COMPLETED": global_complete,
+        "HUMAN_REVIEWER_COUNT": len(reviewers),
         "ORIGINAL_AI_AUDIT_PRESERVED": True,
         "ORIGINAL_CLAIM_LEDGER_PRESERVED": True,
         "ORIGINAL_POSITIVE_CONTROL_PRESERVED": True,
@@ -960,11 +1012,16 @@ def build_human_verified_overlay(
     records = state["RECORDS"]
     requirements = state["REQUIREMENTS"]
     reconciliation = state["RECONCILIATION"]
+    reviewer_records = reconciliation["HUMAN_REVIEWER_RECORDS"]
+    reviewer_relationships = sorted(
+        {record["RELATIONSHIP_TO_PROJECT"] for record in reviewer_records}
+    )
     independent_wording_allowed = all(
-        not record[
+        record["RELATIONSHIP_TO_PROJECT"] == "EXTERNAL_TO_PROJECT"
+        and not record[
             "SUBSTANTIALLY_PARTICIPATED_IN_ORIGINAL_EXTERNAL_AUDIT_RATINGS"
         ]
-        for record in reconciliation["HUMAN_REVIEWER_RECORDS"]
+        for record in reviewer_records
     )
     corrections = {
         (cell["PAPER_ID"], cell["CRITERION_ID"]): cell
@@ -1044,21 +1101,30 @@ def build_human_verified_overlay(
             }
         )
     scope_description = (
-        "Independent human verification of all AI-review disagreements plus a "
-        "mechanically sampled set of agreements; not a full 108-cell human review."
-        if independent_wording_allowed
-        else "Human verification of all AI-review disagreements plus a mechanically "
+        "Human-only verification of all AI-review disagreements plus a mechanically "
         "sampled set of agreements, with reviewer relationships disclosed; not a "
         "full 108-cell human review."
     )
     return {
         "ANALYSIS_LAYER": "HUMAN_VERIFIED_ANALYSIS",
         "SOURCE_LAYER": "AI_ADJUDICATED",
+        "VERIFICATION_METHOD": "HUMAN_ONLY_NOT_AI_VERIFICATION",
         "PROTOCOL": PROTOCOL_RELATIVE.as_posix(),
         "PROTOCOL_FREEZE_COMMIT": PROTOCOL_FREEZE_COMMIT,
+        "RECONCILIATION": RECONCILIATION_RELATIVE.as_posix(),
         "HUMAN_VERIFICATION_COMPLETED": True,
+        "HUMAN_REVIEWER_COUNT": len(reviewer_records),
+        "HUMAN_REVIEWER_IDS": [
+            record["REVIEWER_ID_OR_PSEUDONYM"]
+            for record in reviewer_records
+        ],
+        "HUMAN_REVIEW_DATES": sorted(
+            {record["REVIEW_DATE"] for record in reviewer_records}
+        ),
+        "HUMAN_REVIEWER_RELATIONSHIPS": reviewer_relationships,
         "SCOPE_DESCRIPTION": scope_description,
         "INDEPENDENT_WORDING_ALLOWED": independent_wording_allowed,
+        "INDEPENDENT_WORDING_USED": False,
         "TOTAL_PRIORITY_CELLS": state["TOTAL_PRIORITY_CELLS"],
         "HUMAN_CELLS_COMPLETED": state["HUMAN_CELLS_COMPLETED"],
         "CONFIRMED": state["CONFIRMED"],
@@ -1096,9 +1162,12 @@ def build_human_verified_overlay(
         "COUNTS_BY_PAPER": counts_by_paper if corrections else None,
         "TOTAL_STATUS_COUNTS": total_counts if corrections else None,
         "AI_ADJUDICATED_RESULT": ai_result,
+        "AI_ADJUDICATED_FRAMEWORK_RESULT": ai_result,
         "HUMAN_VERIFIED_RESULT": human_result,
+        "HUMAN_VERIFIED_FRAMEWORK_RESULT": human_result,
         "HUMAN_VERIFIED_RESULT_RATIONALE": result_rationale,
         "AGGREGATE_CONCLUSION_CHANGED": result_changed,
+        "QUALITATIVE_CONCLUSION_CHANGED": result_changed,
         "CONCLUSION_COMPARISON_STATEMENT": comparison_statement,
     }
 

@@ -527,21 +527,40 @@ def _sample_digest(paper_id: str, criterion: str) -> str:
 
 
 def validate_human_review_packets() -> None:
-    from paper.human_verification import validate_human_verification
+    from paper.human_verification import (
+        build_human_verified_overlay,
+        validate_human_verification,
+    )
 
     human_state = validate_human_verification(REPO_ROOT)
+    _require(
+        human_state["VERIFICATION_METHOD"] == "HUMAN_ONLY_NOT_AI_VERIFICATION",
+        "human verification was mislabeled as AI verification",
+    )
     _require(human_state["PACKETS"] == 6, "human packet count is not six")
     _require(
         human_state["TOTAL_PRIORITY_CELLS"] == 23,
         "total priority count changed",
     )
     _require(
-        human_state["HUMAN_RESPONSES_CURRENTLY_BLANK"] is True,
-        "human response prefilled",
+        human_state["HUMAN_RESPONSES_CURRENTLY_BLANK"] is False,
+        "completed human responses are missing",
     )
     _require(
-        human_state["HUMAN_VERIFICATION_COMPLETED"] is False,
-        "human review falsely complete",
+        human_state["HUMAN_VERIFICATION_COMPLETED"] is True,
+        "human review is not complete",
+    )
+    _require(human_state["HUMAN_CELLS_COMPLETED"] == 23, "human completion count changed")
+    _require(human_state["CONFIRMED"] == 23, "human confirmation count changed")
+    _require(human_state["DISPUTED"] == 0, "unexpected human dispute")
+    _require(human_state["UNRESOLVED"] == 0, "unexpected unresolved human response")
+    _require(
+        human_state["AI_DISAGREEMENT_CELLS_HUMAN_CONFIRMED"] == 17,
+        "AI-disagreement verification count changed",
+    )
+    _require(
+        human_state["SAMPLED_AI_AGREEMENT_CELLS_HUMAN_CONFIRMED"] == 6,
+        "sampled-agreement verification count changed",
     )
     protocol = _yaml(REPO_ROOT / "protocols/external-identification-audit-v1.yaml")
     requirements = _flatten_requirements(protocol)
@@ -578,7 +597,7 @@ def validate_human_review_packets() -> None:
         packet = _yaml(path)
         paper_id = packet["PAPER_ID"]
         record = records[paper_id]
-        _require(packet["HUMAN_VERIFICATION_COMPLETED"] is False, "human review falsely complete")
+        _require(packet["HUMAN_VERIFICATION_COMPLETED"] is True, "human packet is not complete")
         _require(len(packet["CRITERIA"]) == 18, f"packet criterion count changed: {paper_id}")
         for item in packet["CRITERIA"]:
             criterion = item["CRITERION_ID"]
@@ -605,7 +624,15 @@ def validate_human_review_packets() -> None:
                 "packet evidence summary changed",
             )
             _require(item["OFFICIAL_SOURCE_URL"].startswith("https://"), "packet URL missing")
-            _require(item["HUMAN_RESPONSES"] == [], "human answer prefilled")
+            responses = item["HUMAN_RESPONSES"]
+            if disagreed or sampled:
+                _require(len(responses) == 1, "priority cell lacks one human response")
+                _require(
+                    responses[0]["HUMAN_RESPONSE"] == "AGREE",
+                    "human response does not match supplied verification",
+                )
+            else:
+                _require(responses == [], "nonpriority human answer recorded")
             disagreement_count += int(disagreed)
             sampled_priority_count += int(sampled)
             priority_count += int(disagreed or sampled)
@@ -614,18 +641,82 @@ def validate_human_review_packets() -> None:
     _require(priority_count == 23, "total priority count changed")
 
     reconciliation = _yaml(PAPER_ROOT / "human-review/reconciliation.yaml")
-    _require(reconciliation["HUMAN_VERIFICATION_COMPLETED"] is False, "reconciliation falsely complete")
+    _require(reconciliation["HUMAN_VERIFICATION_COMPLETED"] is True, "reconciliation is not complete")
     _require(reconciliation["PRIORITY_DISAGREEMENTS"] == 17, "reconciliation disagreement count changed")
     _require(
         reconciliation["DETERMINISTIC_AGREEMENT_SAMPLE"] == 6,
         "reconciliation agreement sample changed",
     )
     _require(len(reconciliation["PRIORITY_CELLS"]) == 23, "reconciliation priority cells changed")
-    _require(reconciliation["HUMAN_REVIEWER_RECORDS"] == [], "reviewer metadata prefilled")
-    _require(reconciliation["HUMAN_VERIFIED_RESULT"] == "", "human result prefilled")
+    _require(len(reconciliation["HUMAN_REVIEWER_RECORDS"]) == 1, "reviewer metadata count changed")
     _require(
-        reconciliation["HUMAN_VERIFIED_RESULT_RATIONALE"] == "",
-        "human result rationale prefilled",
+        reconciliation["HUMAN_VERIFIED_RESULT"] == "FRAMEWORK_PARTIALLY_DISTINCTIVE",
+        "human-verified result changed",
+    )
+    _require(
+        bool(reconciliation["HUMAN_VERIFIED_RESULT_RATIONALE"]),
+        "human result rationale missing",
+    )
+    overlay_path = PAPER_ROOT / "human-review/human-verified-analysis.yaml"
+    _require(overlay_path.is_file(), "human-verified analysis overlay missing")
+    overlay = _yaml(overlay_path)
+    _require(
+        overlay == build_human_verified_overlay(REPO_ROOT),
+        "human-verified analysis overlay is stale",
+    )
+    _require(
+        overlay["HUMAN_REVIEWER_RELATIONSHIPS"] == ["PROJECT_COLLABORATOR"],
+        "human reviewer relationship changed",
+    )
+    _require(
+        overlay["INDEPENDENT_WORDING_ALLOWED"] is False
+        and overlay["INDEPENDENT_WORDING_USED"] is False,
+        "project collaborator was described as independent",
+    )
+    _require(
+        overlay["AI_ADJUDICATED_FRAMEWORK_RESULT"]
+        == "FRAMEWORK_PARTIALLY_DISTINCTIVE"
+        and overlay["HUMAN_VERIFIED_FRAMEWORK_RESULT"]
+        == "FRAMEWORK_PARTIALLY_DISTINCTIVE"
+        and overlay["QUALITATIVE_CONCLUSION_CHANGED"] is False,
+        "human-verified framework comparison changed",
+    )
+    provenance = _yaml(PAPER_ROOT / "publication-provenance.yaml")
+    review_provenance = provenance["EXTERNAL_AUDIT_REVIEW"]
+    reviewer = reconciliation["HUMAN_REVIEWER_RECORDS"][0]
+    expected_provenance = {
+        "HUMAN_VERIFICATION_COMPLETED": True,
+        "HUMAN_VERIFICATION_DATE": reconciliation["FINAL_RECONCILIATION_METADATA"][
+            "RECONCILIATION_DATE"
+        ],
+        "HUMAN_VERIFICATION_METHOD": "HUMAN_ONLY_NOT_AI_VERIFICATION",
+        "RECORDING_NOTE": (
+            "The human judgments were supplied by the human reviewer. Codex transcribed "
+            "those judgments and updated derived artifacts and validators; no AI model "
+            "independently checked the cited evidence as part of this verification."
+        ),
+        "HUMAN_VERIFICATION_PROTOCOL": "paper/human-review/human-verification-protocol.yaml",
+        "HUMAN_REVIEWER_ID_OR_PSEUDONYM": reviewer["REVIEWER_ID_OR_PSEUDONYM"],
+        "HUMAN_REVIEWER_ROLE": reviewer["ROLE"],
+        "HUMAN_REVIEWER_RELATIONSHIP_TO_PROJECT": reviewer["RELATIONSHIP_TO_PROJECT"],
+        "HUMAN_REVIEWER_SUBSTANTIALLY_PARTICIPATED_IN_ORIGINAL_EXTERNAL_AUDIT_RATINGS": False,
+        "HUMAN_VERIFIED_ANALYSIS": "paper/human-review/human-verified-analysis.yaml",
+        "PRIORITY_CELLS_REVIEWED": 23,
+        "AI_DISAGREEMENT_CELLS_HUMAN_CONFIRMED": 17,
+        "SAMPLED_AI_AGREEMENT_CELLS_HUMAN_CONFIRMED": 6,
+        "ORIGINAL_AI_AUDIT_CHANGED": False,
+        "FULL_108_CELL_HUMAN_REVIEW": False,
+        "FULL_108_CELL_HUMAN_VALIDATION": False,
+    }
+    for field, expected in expected_provenance.items():
+        _require(
+            review_provenance[field] == expected,
+            f"human-verification provenance changed: {field}",
+        )
+    _require(
+        review_provenance["HUMAN_RESPONSES"]
+        == {"AGREE": 23, "DISAGREE": 0, "CANNOT_DETERMINE": 0},
+        "human-response provenance changed",
     )
     template = _yaml(PAPER_ROOT / "human-review/reviewer-template.yaml")
     _require(template["HUMAN_VERIFICATION_COMPLETED"] is False, "reviewer template falsely complete")
@@ -673,6 +764,7 @@ def validate_manuscript_claim_language() -> None:
     text = "\n".join(path.read_text(encoding="utf-8") for path in manuscript_paths)
     normalized = text.replace(r"\%", "%")
     lowered = normalized.lower()
+    compact = re.sub(r"\s+", " ", lowered)
     abstract_start = (PAPER_ROOT / "manuscript.tex").read_text(encoding="utf-8").split(
         r"\begin{abstract}", 1
     )[1].lstrip()
@@ -704,9 +796,29 @@ def validate_manuscript_claim_language() -> None:
         r"\b48 independent samples\b": "pseudoreplication",
         r"\bvalidated comprehensive framework\b": "framework overclaim",
         r"\buniversally validated\b": "framework overclaim",
+        r"\bindependent human\b": "inaccurate human-review independence",
+        r"\bindependently human\b": "inaccurate human-review independence",
+        r"\bexternal human\b": "inaccurate external-human description",
+        r"\bhuman validat(?:ion|ed)\b": "inaccurate human-validation description",
     }
     for pattern, label in prohibited.items():
         _require(re.search(pattern, lowered) is None, f"prohibited manuscript claim: {label}")
+    _require(
+        "human verification of that ai-assisted audit remains pending" not in compact
+        and "human verification remains pending" not in compact,
+        "stale pending human-verification claim found",
+    )
+    for phrase in (
+        "all 17 disagreements between the two ai review passes and one mechanically "
+        "sampled agreement cell per audited work were subsequently checked by a human "
+        "reviewer",
+        "the reviewer agreed with all 23 adjudicated ratings",
+        "human-only verification, not ai verification",
+        "the reviewer was a project collaborator",
+        "this targeted human verification does not constitute human re-annotation of "
+        "all 108 audit cells",
+    ):
+        _require(phrase in compact, f"completed human-verification claim missing: {phrase}")
     for line in lowered.splitlines():
         if "prevalence" in line:
             _require(
@@ -937,7 +1049,9 @@ def main() -> int:
     print("CLAIM_VALIDATOR: PASS")
     print("EXTERNAL_AUDIT_CELLS: 108/108 MATCH")
     print("PRIORITY_DISAGREEMENTS: 17")
-    print("HUMAN_VERIFICATION_COMPLETED: NO")
+    print("HUMAN_VERIFICATION_COMPLETED: YES")
+    print("HUMAN_VERIFICATION_METHOD: HUMAN_ONLY_NOT_AI_VERIFICATION")
+    print("HUMAN_RESPONSES: 23 AGREE, 0 DISAGREE, 0 CANNOT_DETERMINE")
     print("EVALUATED_MODEL_RUNS: 0")
     print("GPU_USE: 0")
     print("UNSEEN_CONFIRMATORY_TARGETS_SCREENED: 0")
