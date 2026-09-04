@@ -49,6 +49,18 @@ GROUP_LABELS = {
     "GROUP_D_PROCESS_ANALYSIS_VALIDITY": "D. Process / analysis validity",
 }
 AGREEMENT_SAMPLE_DOMAIN = "cmpilot-paper-human-review-agreement-v1"
+HUMAN_VERIFICATION_PROTOCOL = (
+    "paper/human-review/human-verification-protocol.yaml"
+)
+HUMAN_RESPONSE_OPTIONS = ("AGREE", "DISAGREE", "CANNOT_DETERMINE")
+HUMAN_RESPONSE_RECORD_FIELDS = (
+    "REVIEWER_ID_OR_PSEUDONYM",
+    "HUMAN_RESPONSE",
+    "HUMAN_PREFERRED_STATUS",
+    "HUMAN_RATIONALE",
+    "HUMAN_ORIGINAL_SOURCE_EVIDENCE_LOCATION",
+    "CORRECTION_BASIS",
+)
 
 
 CONTRACT_DETAILS: Mapping[str, tuple[str, str, str]] = {
@@ -718,7 +730,36 @@ def _sample_digest(paper_id: str, criterion: str) -> str:
     return sha256(payload).hexdigest()
 
 
+def _refuse_to_overwrite_human_review() -> None:
+    """Fail before regenerating packets once any human review data exist."""
+
+    for path in sorted(HUMAN_ROOT.glob("[0-9][0-9]-*.yaml")):
+        packet = _yaml_load(path)
+        if packet.get("HUMAN_VERIFICATION_COMPLETED") is True:
+            raise RuntimeError(f"refusing to overwrite completed human packet: {path}")
+        for cell in packet.get("CRITERIA", []):
+            if cell.get("HUMAN_RESPONSES"):
+                raise RuntimeError(f"refusing to overwrite human responses: {path}")
+            if cell.get("AGREE_WITH_ADJUDICATED_RATING") or cell.get("HUMAN_COMMENT"):
+                raise RuntimeError(f"refusing to overwrite legacy human answers: {path}")
+
+    reconciliation_path = HUMAN_ROOT / "reconciliation.yaml"
+    if reconciliation_path.is_file():
+        reconciliation = _yaml_load(reconciliation_path)
+        protected_values = (
+            reconciliation.get("HUMAN_VERIFICATION_COMPLETED"),
+            reconciliation.get("HUMAN_REVIEWER_RECORDS"),
+            reconciliation.get("HUMAN_VERIFIED_RESULT"),
+            reconciliation.get("HUMAN_VERIFIED_RESULT_RATIONALE"),
+        )
+        if any(value not in (None, False, "", []) for value in protected_values):
+            raise RuntimeError(
+                f"refusing to overwrite human reconciliation data: {reconciliation_path}"
+            )
+
+
 def build_human_review_packets() -> None:
+    _refuse_to_overwrite_human_review()
     protocol = _yaml_load(REPO_ROOT / "protocols/external-identification-audit-v1.yaml")
     requirements = {
         criterion: definition
@@ -789,8 +830,7 @@ def build_human_review_packets() -> None:
                 "EXACT_ORIGINAL_SOURCE_LOCATION": final["EVIDENCE_LOCATION"],
                 "CONCISE_EVIDENCE_SUMMARY": final["EVIDENCE_SUMMARY"],
                 "OFFICIAL_SOURCE_URL": _official_source_url(record),
-                "AGREE_WITH_ADJUDICATED_RATING": "",
-                "HUMAN_COMMENT": "",
+                "HUMAN_RESPONSES": [],
             }
             criteria.append(item)
             if item["PRIORITY_HUMAN_VERIFICATION"]:
@@ -798,13 +838,12 @@ def build_human_review_packets() -> None:
                     {
                         "PAPER_ID": paper_id,
                         **item,
-                        "FINAL_HUMAN_DISPOSITION": "",
-                        "FINAL_HUMAN_RATIONALE": "",
                     }
                 )
         packet = {
             "PACKET_ID": f"HUMAN_REVIEW_{paper_id}",
             "HUMAN_VERIFICATION_COMPLETED": False,
+            "HUMAN_VERIFICATION_PROTOCOL": HUMAN_VERIFICATION_PROTOCOL,
             "PAPER_ID": paper_id,
             "TITLE": record["TITLE"],
             "VERSION": record["VERSION"],
@@ -812,11 +851,16 @@ def build_human_review_packets() -> None:
             "OFFICIAL_SOURCE_URL": _official_source_url(record),
             "FROZEN_PAPER_RECORD": str(source_path.relative_to(REPO_ROOT)),
             "FROZEN_PAPER_RECORD_SHA256": _sha(source_path),
+            "HUMAN_RESPONSE_OPTIONS": list(HUMAN_RESPONSE_OPTIONS),
+            "HUMAN_RESPONSE_RECORD_FIELDS": list(HUMAN_RESPONSE_RECORD_FIELDS),
             "INSTRUCTIONS": (
+                "Review only criteria with PRIORITY_HUMAN_VERIFICATION true. "
                 "Check the cited original-source location against the frozen "
-                "criterion, then fill only the two blank human fields. "
-                "NOT_ESTABLISHED means sufficient evidence was not established "
-                "for an applicable claim; it does not mean the paper is wrong."
+                "criterion, then append one response record conforming to the "
+                "frozen human-verification protocol. Leave every nonpriority "
+                "HUMAN_RESPONSES list empty. NOT_ESTABLISHED means sufficient "
+                "evidence was not established for an applicable claim; it does "
+                "not mean the paper is wrong."
             ),
             "CRITERIA": criteria,
         }
@@ -832,13 +876,17 @@ def build_human_review_packets() -> None:
         "DETERMINISTIC_AGREEMENT_SAMPLE": 6,
         "TOTAL_PRIORITY_CELLS": 23,
         "SAMPLING_RULE": "paper/human-review/sampling-rule.yaml",
+        "HUMAN_VERIFICATION_PROTOCOL": HUMAN_VERIFICATION_PROTOCOL,
         "INSTRUCTIONS": (
-            "After independent packet review, reconcile every priority cell "
-            "against the frozen criterion and cited original source. Leave "
-            "frozen AI ratings unchanged; record any human conclusion only in "
-            "the blank final-human fields."
+            "Human responses are recorded only in each paper packet's "
+            "HUMAN_RESPONSES lists. This file indexes the immutable priority "
+            "cells and stores reviewer metadata and any required qualitative "
+            "result reassessment. Never change the frozen AI fields."
         ),
         "PRIORITY_CELLS": priority_cells,
+        "HUMAN_REVIEWER_RECORDS": [],
+        "HUMAN_VERIFIED_RESULT": "",
+        "HUMAN_VERIFIED_RESULT_RATIONALE": "",
         "FINAL_RECONCILIATION_METADATA": {
             "HUMAN_REVIEWER_IDS": "",
             "RECONCILIATION_DATE": "",
@@ -855,20 +903,16 @@ def build_human_review_packets() -> None:
     reviewer_template = {
         "TEMPLATE_ID": "EXTERNAL_AUDIT_HUMAN_REVIEWER_METADATA_V1",
         "HUMAN_VERIFICATION_COMPLETED": False,
-        "REVIEWER_ID": "",
-        "REVIEWER_NAME_OR_PSEUDONYM": "",
-        "ROLE_AND_RELEVANT_EXPERTISE": "",
-        "INSTITUTIONAL_AFFILIATION_OPTIONAL": "",
-        "CONFLICTS_OF_INTEREST": "",
+        "REVIEWER_ID_OR_PSEUDONYM": "",
+        "ROLE": "",
+        "RELATIONSHIP_TO_PROJECT": "",
         "REVIEW_DATE": "",
-        "PACKETS_REVIEWED": "",
-        "INDEPENDENT_REVIEW_BEFORE_RECONCILIATION": "",
-        "AGREEMENT_COUNT": "",
-        "DISAGREEMENT_COUNT": "",
-        "UNDETERMINED_COUNT": "",
-        "ADJUDICATION_PARTICIPATION": "",
-        "ADJUDICATION_DATE": "",
-        "SIGN_OFF_COMMENT": "",
+        "CONFLICTS_OR_PRIOR_INVOLVEMENT": "",
+        "PAPERS_REVIEWED": [],
+        "CELLS_REVIEWED": [],
+        "CONFIRMATION_THAT_REVIEWER_IS_HUMAN": "",
+        "SUBSTANTIALLY_PARTICIPATED_IN_ORIGINAL_EXTERNAL_AUDIT_RATINGS": "",
+        "REVIEWED_WITHOUT_ANOTHER_HUMAN_REVIEWERS_ANSWERS": "",
     }
     _yaml_dump(HUMAN_ROOT / "reviewer-template.yaml", reviewer_template)
 

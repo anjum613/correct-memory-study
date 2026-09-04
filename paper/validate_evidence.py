@@ -527,6 +527,22 @@ def _sample_digest(paper_id: str, criterion: str) -> str:
 
 
 def validate_human_review_packets() -> None:
+    from paper.human_verification import validate_human_verification
+
+    human_state = validate_human_verification(REPO_ROOT)
+    _require(human_state["PACKETS"] == 6, "human packet count is not six")
+    _require(
+        human_state["TOTAL_PRIORITY_CELLS"] == 23,
+        "total priority count changed",
+    )
+    _require(
+        human_state["HUMAN_RESPONSES_CURRENTLY_BLANK"] is True,
+        "human response prefilled",
+    )
+    _require(
+        human_state["HUMAN_VERIFICATION_COMPLETED"] is False,
+        "human review falsely complete",
+    )
     protocol = _yaml(REPO_ROOT / "protocols/external-identification-audit-v1.yaml")
     requirements = _flatten_requirements(protocol)
     records = _paper_records()
@@ -589,8 +605,7 @@ def validate_human_review_packets() -> None:
                 "packet evidence summary changed",
             )
             _require(item["OFFICIAL_SOURCE_URL"].startswith("https://"), "packet URL missing")
-            _require(item["AGREE_WITH_ADJUDICATED_RATING"] == "", "human answer prefilled")
-            _require(item["HUMAN_COMMENT"] == "", "human comment prefilled")
+            _require(item["HUMAN_RESPONSES"] == [], "human answer prefilled")
             disagreement_count += int(disagreed)
             sampled_priority_count += int(sampled)
             priority_count += int(disagreed or sampled)
@@ -606,11 +621,18 @@ def validate_human_review_packets() -> None:
         "reconciliation agreement sample changed",
     )
     _require(len(reconciliation["PRIORITY_CELLS"]) == 23, "reconciliation priority cells changed")
+    _require(reconciliation["HUMAN_REVIEWER_RECORDS"] == [], "reviewer metadata prefilled")
+    _require(reconciliation["HUMAN_VERIFIED_RESULT"] == "", "human result prefilled")
+    _require(
+        reconciliation["HUMAN_VERIFIED_RESULT_RATIONALE"] == "",
+        "human result rationale prefilled",
+    )
     template = _yaml(PAPER_ROOT / "human-review/reviewer-template.yaml")
     _require(template["HUMAN_VERIFICATION_COMPLETED"] is False, "reviewer template falsely complete")
     for key, value in template.items():
         if key not in {"TEMPLATE_ID", "HUMAN_VERIFICATION_COMPLETED"}:
-            _require(value == "", f"reviewer metadata prefilled: {key}")
+            expected_blank = [] if key in {"PAPERS_REVIEWED", "CELLS_REVIEWED"} else ""
+            _require(value == expected_blank, f"reviewer metadata prefilled: {key}")
 
 
 def validate_identification_contract() -> None:
