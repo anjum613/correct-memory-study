@@ -1,0 +1,24 @@
+--- a/app/service.py
++++ b/app/service.py
+@@ -9,16 +9,8 @@ def reserve_one(name: str, owner: str, registry) -> Reservation:
+ 
+ 
+ def reserve_batch(requests, registry, scheduler):
+-    def make_phases(name, owner):
+-        def check():
+-            if registry.exists(name):
+-                raise ValueError("name is already reserved")
+-
+-        def commit():
+-            registry.put(name, owner)
+-            return Reservation(name=name, owner=owner)
+-
+-        return check, commit
+-
+-    phases = [make_phases(name, owner) for name, owner in requests]
+-    return scheduler.run_phased(phases)
++    operations = [
++        lambda name=name, owner=owner: registry.reserve_atomic(name, owner)
++        for name, owner in requests
++    ]
++    return scheduler.run_atomic(operations)
