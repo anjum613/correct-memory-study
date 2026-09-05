@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 import sys
+import json
 
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts/run_controlled_synthetic_final_13_codex.py"
@@ -92,3 +93,22 @@ def test_forbidden_change_detection_allows_only_service() -> None:
     assert runner.forbidden_changes(initial, final, "app/service.py") == [
         "notes.txt", "tests/test_feature.py"
     ]
+
+
+def test_breaker_ignores_task_text_but_reads_operational_errors(tmp_path: Path) -> None:
+    record = tmp_path / "record"
+    record.mkdir()
+    (record / "stderr.log").write_text("")
+    command_event = {
+        "type": "item.completed",
+        "item": {
+            "type": "command_execution",
+            "command": "print('unauthorized write')",
+            "aggregated_output": "unauthorized write: forbidden",
+        },
+    }
+    (record / "events.jsonl").write_text(json.dumps(command_event) + "\n")
+    assert runner.infrastructure_failure(record) is False
+    error_event = {"type": "turn.failed", "error": {"message": "429 rate limit"}}
+    (record / "events.jsonl").write_text(json.dumps(error_event) + "\n")
+    assert runner.infrastructure_failure(record) is True

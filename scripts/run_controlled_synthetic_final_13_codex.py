@@ -1150,12 +1150,73 @@ def classify(
 
 
 def infrastructure_failure(record: Path) -> bool:
-    text = ""
-    for filename in ("stderr.log", "events.jsonl"):
-        path = record / filename
-        if path.exists():
-            text += path.read_text(encoding="utf-8", errors="replace").lower()
+    stderr = record / "stderr.log"
+    text = stderr.read_text(encoding="utf-8", errors="replace") if stderr.exists() else ""
+    events, _invalid = load_events(record / "events.jsonl")
+    text += "\n".join(
+        compact_json(event)
+        for event in events
+        if event.get("type") in {"error", "turn.failed"}
+    )
+    text = text.lower()
     return any(pattern in text for pattern in INFRASTRUCTURE_FAILURE_PATTERNS)
+
+
+def record_breaker_amendment(output_root: Path) -> Path:
+    """Preserve a controller-only fix after a false transcript-content trigger."""
+    progress = read_json(output_root / "progress.json")
+    if progress.get("status") != "STOPPED_INFRASTRUCTURE":
+        raise RuntimeError("breaker amendment requires a stopped infrastructure state")
+    results = read_json(output_root / "results.json")
+    destination = output_root / "runtime-amendments/001-breaker-event-scope"
+    if destination.exists():
+        raise RuntimeError(f"refusing to overwrite runtime amendment: {destination}")
+    destination.mkdir(parents=True)
+    revised_runner = destination / "run_controlled_synthetic_final_13_codex.py"
+    copy_file(Path(__file__).resolve(), revised_runner)
+    frozen_runner = output_root / "frozen/runner/run_controlled_synthetic_final_13_codex.py"
+    completed = {
+        result["run_id"]: sha256_file(
+            output_root / "runs" / result["run_id"]
+            / "attempts/attempt-001/record/result.json"
+        )
+        for result in results
+    }
+    write_new(destination / "amendment.json", {
+        "schema_version": "controlled-synthetic-codex-runtime-amendment/1",
+        "amendment_id": "001-breaker-event-scope",
+        "recorded_at_utc": now(),
+        "reason": (
+            "The frozen circuit breaker searched command transcript content and "
+            "mistook the X20 fixture label 'unauthorized write' for an API failure."
+        ),
+        "change": (
+            "Infrastructure patterns are now searched only in Codex stderr and "
+            "top-level error or turn.failed JSONL events."
+        ),
+        "scientific_scope": {
+            "treatments_changed": False,
+            "run_matrix_changed": False,
+            "models_changed": False,
+            "evaluators_changed": False,
+            "completed_attempts_changed": False,
+            "technical_retries_added": False,
+        },
+        "effective_after_completed_run_count": len(results),
+        "completed_result_sha256": completed,
+        "frozen_runner_sha256": sha256_file(frozen_runner),
+        "amended_runner_sha256": sha256_file(revised_runner),
+        "snapshot_inventory_sha256": sha256_file(
+            output_root / "frozen/snapshot-inventory.json"
+        ),
+        "resume_command_runner": str(revised_runner),
+    })
+    print(compact_json({
+        "amendment": "001-breaker-event-scope",
+        "completed_boundary": len(results),
+        "runner": str(revised_runner),
+    }))
+    return revised_runner
 
 
 def hash_manifest(root: Path, *, excluded: set[str] | None = None) -> str:
@@ -1590,7 +1651,8 @@ def run(output_root: Path) -> None:
     validate_runtime_integrity(output_root)
     matrix = read_json(output_root / "frozen/protocol/run_matrix.json")
     active: list[str] = []
-    started_at = now()
+    previous_progress = read_json(output_root / "progress.json")
+    started_at = previous_progress.get("started_at") or now()
     for row in matrix["cells"]:
         record = output_root / "runs" / row["run_id"] / "attempts/attempt-001/record"
         if (record / "started.json").exists() and not (record / "result.json").exists():
@@ -1693,7 +1755,10 @@ def status(output_root: Path) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("action", choices=("freeze", "prepare", "preflight", "run", "status"))
+    parser.add_argument(
+        "action",
+        choices=("freeze", "prepare", "preflight", "amend-breaker", "run", "status"),
+    )
     parser.add_argument("--repo", type=Path, default=Path(__file__).resolve().parents[1])
     parser.add_argument("--output-root", type=Path)
     parser.add_argument("--model-cache", type=Path, default=Path.home() / ".codex/models_cache.json")
@@ -1709,6 +1774,8 @@ def main() -> int:
         prepare(repo, output_root)
     elif arguments.action == "preflight":
         preflight(repo, output_root)
+    elif arguments.action == "amend-breaker":
+        record_breaker_amendment(output_root)
     elif arguments.action == "run":
         run(output_root)
     else:
