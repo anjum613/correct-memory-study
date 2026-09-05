@@ -557,10 +557,6 @@ def freeze_cohort(adjudication_commit: str, frozen_at: str) -> None:
         require(retained_rows[family]["decision"] == "PERMANENTLY_RETAINED",
                 f"{family} is not retained in V2 resolution")
         candidate_hashes.append(provenance["candidate_sha256"]["candidate_tree"])
-        baseline_name = next(
-            name for name in hashes
-            if name.startswith("B/app/service.")
-        )
         family_rows.append({
             "family_id": family,
             "family_kind": "RETAINED_V2",
@@ -607,6 +603,10 @@ def freeze_cohort(adjudication_commit: str, frozen_at: str) -> None:
             entry["path"]: entry["sha256"]
             for entry in snapshot["entries"] if entry["type"] == "file"
         }
+        baseline_name = next(
+            name for name in hashes
+            if name.startswith("B/app/service.")
+        )
         candidate_hashes.append(snapshot["tree_sha256"])
         endorsers = ["primary_1", "primary_2"]
         if family == "X06":
