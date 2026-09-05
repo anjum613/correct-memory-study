@@ -83,7 +83,12 @@ that conserves turns. The shell already starts in the repository root: never use
 `/testbed`, other absolute paths, parent paths, or `/tmp`. Inspect the relevant
 implementation and public tests together, edit the writable service promptly, run the
 public tests with `run_public_tests` only, and submit. Do not invoke pytest or public-test
-Python files directly. Do not merely describe the next action in prose.
+Python files directly. The `run_public_tests` output is the complete public diagnostic:
+never locate, read, or inspect that executable. Before the first edit, use at most six
+tool calls total to inventory files, read the service/interfaces/public tests, and run
+the public suite. Then make the best small implementation supported by those public
+artifacts, even if some behavior remains uncertain. Do not inspect Git history or merely
+describe the next action in prose.
 """
 
 NATIVE_TOOL_INSTANCE_TEMPLATE = """Please solve this issue: {{task}}
@@ -91,7 +96,9 @@ NATIVE_TOOL_INSTANCE_TEMPLATE = """Please solve this issue: {{task}}
 Use the provided bash tool to inspect, edit, and test the working repository. Work
 efficiently: read the relevant service and public tests together where practical, make
 the smallest correct edit, run `run_public_tests`, and fix any failure. Use relative
-paths from the current directory; `/testbed` does not exist.
+paths from the current directory; `/testbed` does not exist. Do not spend turns locating
+or reading the test-runner executable. Make your first edit no later than the sixth tool
+call.
 
 Finish only by calling the bash tool with
 `echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT` as its entire command.
