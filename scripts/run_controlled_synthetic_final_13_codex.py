@@ -1483,16 +1483,114 @@ def interrupted_result(output_root: Path, row: Mapping[str, Any]) -> dict[str, A
     result_path = record / "result.json"
     if result_path.exists():
         return read_json(result_path)
+    family = str(row["family_id"])
+    workspace = attempt / "workspace"
+    runtime = attempt / "runtime"
+    family_snapshot = output_root / "frozen/snapshot/families" / family
+    metadata = read_json(family_snapshot / "metadata.json")
+    allowed = str(metadata["allowed_edit_path"])
+    events, invalid_jsonl = load_events(record / "events.jsonl")
+    metrics = event_metrics(events)
+
+    codex_home = runtime / "codex-home"
+    if codex_home.exists():
+        remove_credentials(codex_home)
+    native_destination = record / "native-codex-home"
+    if codex_home.exists() and not native_destination.exists():
+        shutil.move(str(codex_home), native_destination)
+    native_sessions = (
+        sorted(
+            str(path.relative_to(native_destination))
+            for path in native_destination.rglob("*.jsonl")
+            if path.is_file() and (
+                "sessions" in path.relative_to(native_destination).parts
+                or path.name.startswith("rollout-")
+            )
+        )
+        if native_destination.exists() else []
+    )
+    final_message = runtime / "final-message.txt"
+    if final_message.exists() and not (record / "final-message.txt").exists():
+        shutil.move(str(final_message), record / "final-message.txt")
+    final = inventory(workspace)
+    initial = (
+        read_json(record / "initial-inventory.json")
+        if (record / "initial-inventory.json").exists()
+        else metadata["baseline_inventory"]
+    )
+    forbidden = forbidden_changes(initial, final, allowed)
+    patch = make_patch(family_snapshot / "baseline" / allowed, workspace / allowed, allowed)
+    for path, value in (
+        (record / "final.patch", patch),
+        (record / "final-inventory.json", final),
+        (record / "trajectory.json", events),
+        (record / "transcript.md", render_transcript(events, invalid_jsonl)),
+        (record / "native-session-inventory.json", {
+            "files": inventory(native_destination),
+            "jsonl_session_files": native_sessions,
+            "preserved": bool(native_sessions),
+        }),
+        (record / "interruption-evidence.json", {
+            "event_count": len(events),
+            "invalid_jsonl_lines": invalid_jsonl,
+            "last_event_type": events[-1].get("type") if events else None,
+            "native_session_files": native_sessions,
+            "recovered_at_utc": now(),
+            "retry_performed": False,
+        }),
+        (record / "agent-execution.json", {
+            "action_count": metrics["action_count"],
+            "codex_turn_count": metrics["codex_turn_count"],
+            "command_count": metrics["command_count"],
+            "elapsed_seconds": None,
+            "file_change_count": metrics["file_change_count"],
+            "invalid_jsonl_lines": invalid_jsonl,
+            "model_request_count": None,
+            "model_request_count_status": "UNAVAILABLE_FROM_CODEX_EXEC_JSONL",
+            "native_session_preserved": bool(native_sessions),
+            "returncode": None,
+            "technical_validity": False,
+            "termination_reason": "INTERRUPTED",
+            "token_usage": metrics["token_usage"],
+        }),
+        (record / "mini-swe-trajectory-metrics.json", {
+            "action_count": metrics["action_count"],
+            "codex_turn_count": metrics["codex_turn_count"],
+            "command_count": metrics["command_count"],
+            "file_change_count": metrics["file_change_count"],
+            "model_request_count": None,
+            "model_request_count_status": "UNAVAILABLE_FROM_CODEX_EXEC_JSONL",
+            "token_usage": metrics["token_usage"],
+            "trajectory_format": "codex-exec-jsonl-partial",
+        }),
+        (record / "performance-summary.json", {
+            "action_count": metrics["action_count"],
+            "complete": False,
+            "elapsed_seconds": None,
+            "model_request_count": None,
+            "token_usage": metrics["token_usage"],
+        }),
+        (record / "functionality-evaluation.json", {"complete": False, "pass": None}),
+        (record / "security-witness-evaluation.json", {"complete": False, "pass": None}),
+        (record / "behavioral-coding.json", {
+            "schema_version": "controlled-synthetic-codex-behavioral-coding/1",
+            "status": "NOT_CODED_TECHNICAL_INTERRUPTION",
+            "evidence_paths": ["record/events.jsonl", "record/transcript.md", "record/final.patch"],
+        }),
+    ):
+        if not path.exists():
+            write_new(path, value)
     result = {
-        "action_count": None,
+        "action_count": metrics["action_count"],
         "attempt_id": "attempt-001",
         "condition": row["condition"],
         "elapsed_seconds": None,
         "experiment_manifest_sha256": sha256_file(
             output_root / "frozen/experiment-manifest.json"
         ),
-        "family_id": row["family_id"],
+        "family_id": family,
         "final_classification": "TECHNICAL_INVALID",
+        "forbidden_changes": forbidden,
         "functionality_result": {"complete": False, "pass": None},
         "identity_sha256": row["identity_sha256"],
         "job_id": os.environ.get("SLURM_JOB_ID"),
@@ -1509,7 +1607,7 @@ def interrupted_result(output_root: Path, row: Mapping[str, Any]) -> dict[str, A
         "target_revision": row["target_revision"],
         "technical_validity": False,
         "termination_reason": "INTERRUPTED",
-        "token_usage": None,
+        "token_usage": metrics["token_usage"],
         "unsafe_completion": None,
     }
     if not (record / "classification.json").exists():
@@ -1521,7 +1619,75 @@ def interrupted_result(output_root: Path, row: Mapping[str, Any]) -> dict[str, A
         })
     write_new(result_path, result)
     write_new(record / "finished.json", {"at": now(), "classification": "TECHNICAL_INVALID"})
+    if not (record / "sha256-manifest.txt").exists():
+        write_new(record / "sha256-manifest.txt", hash_manifest(attempt))
     return result
+
+
+def record_interruption_amendment(output_root: Path) -> Path:
+    """Bind crash recovery to the existing completed and partial attempts."""
+    results = read_json(output_root / "results.json")
+    matrix = read_json(output_root / "frozen/protocol/run_matrix.json")
+    partial_ids = []
+    for row in matrix["cells"]:
+        record = (
+            output_root / "runs" / row["run_id"] / "attempts/attempt-001/record"
+        )
+        if (record / "started.json").exists() and not (record / "result.json").exists():
+            partial_ids.append(row["run_id"])
+            home = record.parent / "runtime/codex-home"
+            if home.exists():
+                remove_credentials(home)
+    if not partial_ids:
+        raise RuntimeError("no interrupted attempts are available for recovery")
+    destination = output_root / "runtime-amendments/002-interrupted-finalization"
+    if destination.exists():
+        raise RuntimeError(f"refusing to overwrite runtime amendment: {destination}")
+    destination.mkdir(parents=True)
+    revised_runner = destination / "run_controlled_synthetic_final_13_codex.py"
+    copy_file(Path(__file__).resolve(), revised_runner)
+    write_new(destination / "amendment.json", {
+        "schema_version": "controlled-synthetic-codex-runtime-amendment/1",
+        "amendment_id": "002-interrupted-finalization",
+        "recorded_at_utc": now(),
+        "observed_cause": "EXTERNAL_OR_UNOBSERVED_PROCESS_TERMINATION",
+        "evidence": {
+            "runner_traceback_logged": False,
+            "runner_lock_free": True,
+            "tmux_session_missing": True,
+            "host_rebooted_during_run": False,
+            "host_load_average_at_investigation": [207.04, 211.52, 211.23],
+            "exact_external_kill_source_visible_to_account": False,
+        },
+        "change": (
+            "Recover partial event and native-session artifacts, remove transient "
+            "credentials, classify each partial attempt once as interrupted, and "
+            "continue at the next unstarted matrix cell."
+        ),
+        "scientific_scope": {
+            "treatments_changed": False,
+            "run_matrix_changed": False,
+            "models_changed": False,
+            "evaluators_changed": False,
+            "completed_attempts_changed": False,
+            "interrupted_attempts_retried": False,
+        },
+        "completed_result_count_before_recovery": len(results),
+        "interrupted_run_ids": partial_ids,
+        "prior_controller_sha256": sha256_file(
+            output_root / "runtime-amendments/001-breaker-event-scope"
+            / "run_controlled_synthetic_final_13_codex.py"
+        ),
+        "amended_runner_sha256": sha256_file(revised_runner),
+        "resume_command_runner": str(revised_runner),
+    })
+    print(compact_json({
+        "amendment": "002-interrupted-finalization",
+        "completed_boundary": len(results),
+        "interrupted": partial_ids,
+        "runner": str(revised_runner),
+    }))
+    return revised_runner
 
 
 def csv_value(value: Any) -> Any:
@@ -1757,7 +1923,10 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "action",
-        choices=("freeze", "prepare", "preflight", "amend-breaker", "run", "status"),
+        choices=(
+            "freeze", "prepare", "preflight", "amend-breaker",
+            "amend-interruption", "run", "status",
+        ),
     )
     parser.add_argument("--repo", type=Path, default=Path(__file__).resolve().parents[1])
     parser.add_argument("--output-root", type=Path)
@@ -1776,6 +1945,8 @@ def main() -> int:
         preflight(repo, output_root)
     elif arguments.action == "amend-breaker":
         record_breaker_amendment(output_root)
+    elif arguments.action == "amend-interruption":
+        record_interruption_amendment(output_root)
     elif arguments.action == "run":
         run(output_root)
     else:
