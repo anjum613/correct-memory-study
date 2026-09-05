@@ -249,6 +249,28 @@ def test_direct_model_rejects_context_policy_changes() -> None:
     assert result.stdout.strip().endswith("frozen-context-rejected")
 
 
+def test_direct_model_accepts_pinned_qwen3_tokenizer_at_frozen_context() -> None:
+    result = _run_in_mini_environment(
+        """
+        from cmpilot.integrations.miniswe.vllm_text_model import VllmTextModelConfig
+
+        config = VllmTextModelConfig(
+            model_name='qwen3-coder-30b-a3b-instruct-fp8',
+            base_url='http://127.0.0.1:18000/v1',
+            tokenizer_path='/tmp/not-opened-during-config-validation',
+            tokenizer_json_sha256='aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4',
+            tokenizer_config_sha256='60f6e8cb15c98dd07300a3cc465ea662de245d2095e4245616af21b2324db3fc',
+            context_limit=4096,
+        )
+        assert config.context_limit == 4096
+        print('qwen3-profile-accepted')
+        """
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip().endswith("qwen3-profile-accepted")
+
+
 def test_secret_wrapper_is_rejected() -> None:
     class SecretWrapper:
         def get_secret_value(self) -> str:

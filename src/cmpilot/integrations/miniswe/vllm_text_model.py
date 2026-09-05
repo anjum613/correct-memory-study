@@ -121,6 +121,14 @@ class VllmTextModelConfig(BaseModel):
                 "5f9e4d4901a92b997e463c1f46055088b6cca5ca61a6522d1b9f64c4bb81cb42",
                 "5186f0defcd7f232382c7f0aebcd2252d073bb921ab240e407b7ae8745d2b29b",
             ): 32768,
+            # Qwen/Qwen3-Coder-30B-A3B-Instruct-FP8, revision
+            # e8ab3f2db9e388999a004eea5a31c16a8b517bc0.  The model supports a
+            # larger native context, but this experiment intentionally keeps
+            # the frozen 4,096-token physical budget.
+            (
+                "aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4",
+                "60f6e8cb15c98dd07300a3cc465ea662de245d2095e4245616af21b2324db3fc",
+            ): 4096,
         }
         identity = (
             self.tokenizer_json_sha256,
