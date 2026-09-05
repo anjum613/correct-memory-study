@@ -271,6 +271,35 @@ def test_direct_model_accepts_pinned_qwen3_tokenizer_at_frozen_context() -> None
     assert result.stdout.strip().endswith("qwen3-profile-accepted")
 
 
+def test_direct_model_accepts_qwen3_coder_native_tool_profile_at_32k() -> None:
+    result = _run_in_mini_environment(
+        """
+        from cmpilot.integrations.miniswe.vllm_text_model import VllmTextModelConfig
+
+        config = VllmTextModelConfig(
+            model_name='qwen3-coder-30b-a3b-instruct-fp8',
+            base_url='http://127.0.0.1:18000/v1',
+            tokenizer_path='/tmp/not-opened-during-config-validation',
+            tokenizer_json_sha256='aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4',
+            tokenizer_config_sha256='60f6e8cb15c98dd07300a3cc465ea662de245d2095e4245616af21b2324db3fc',
+            context_limit=32768,
+            temperature=0.7,
+            top_p=0.8,
+            top_k=20,
+            repetition_penalty=1.05,
+            native_tool_calls=True,
+        )
+        assert config.context_limit == 32768
+        assert config.native_tool_calls is True
+        assert config.repetition_penalty == 1.05
+        print('qwen3-coder-native-profile-accepted')
+        """
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip().endswith("qwen3-coder-native-profile-accepted")
+
+
 def test_direct_model_accepts_pinned_qwen3_coder_next_tokenizer() -> None:
     result = _run_in_mini_environment(
         """

@@ -169,6 +169,7 @@ class RunConfig:
     temperature: float = 0.0
     top_p: float | None = None
     top_k: int | None = None
+    repetition_penalty: float | None = None
     native_tool_calls: bool = False
 
 
@@ -829,6 +830,7 @@ def validate_model_profile(
     temperature: float = 0.0,
     top_p: float | None = None,
     top_k: int | None = None,
+    repetition_penalty: float | None = None,
     native_tool_calls: bool = False,
 ) -> dict[str, Any]:
     path = project_root / model_profile_path
@@ -845,6 +847,11 @@ def validate_model_profile(
             "temperature": temperature,
             **({"top_p": top_p} if top_p is not None else {}),
             **({"top_k": top_k} if top_k is not None else {}),
+            **(
+                {"repetition_penalty": repetition_penalty}
+                if repetition_penalty is not None
+                else {}
+            ),
         },
         "server": {
             "generation_config": "vllm",
@@ -997,6 +1004,7 @@ def preflight(config: RunConfig, *, check_endpoint: bool = True) -> dict[str, An
             temperature=config.temperature,
             top_p=config.top_p,
             top_k=config.top_k,
+            repetition_penalty=config.repetition_penalty,
             native_tool_calls=config.native_tool_calls,
         )
         checks["model_profile"] = True
@@ -1721,6 +1729,7 @@ def runtime_identity(config: RunConfig) -> dict[str, Any]:
             "temperature": config.temperature,
             "top_k": config.top_k,
             "top_p": config.top_p,
+            "repetition_penalty": config.repetition_penalty,
         },
         "context_limit": config.context_limit,
         "native_tool_calls": config.native_tool_calls,

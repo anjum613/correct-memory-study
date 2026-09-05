@@ -33,6 +33,12 @@ DEFAULT_TOKENIZER = (
 DEFAULT_V3_DEPENDENCIES = (
     "/home/s224049759/environments/qwen36-vllm-v1/lib/python3.12/site-packages"
 )
+RECOMMENDED_AGENT_CONFIG_PATH = Path(
+    "configs/agent/mini_swe_agent_qwen3_coder_recommended.yaml"
+)
+RECOMMENDED_MODEL_PROFILE_PATH = Path(
+    "configs/models/qwen3-coder-30b-a3b-instruct-fp8-recommended-runpod.json"
+)
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -66,7 +72,15 @@ def _parser() -> argparse.ArgumentParser:
             os.environ.get("QWEN3_V3_DEPENDENCY_PATH", DEFAULT_V3_DEPENDENCIES)
         ),
     )
-    parser.add_argument("--agent-timeout", type=int, default=600)
+    parser.add_argument("--agent-timeout", type=int)
+    parser.add_argument(
+        "--recommended",
+        action="store_true",
+        help=(
+            "use Qwen's native tool calling, temperature=0.7, top_p=0.8, "
+            "top_k=20, repetition_penalty=1.05, 32K context, and 30 steps"
+        ),
+    )
     parser.add_argument("--index", type=int)
     parser.add_argument("--run-id")
     parser.add_argument("--workers", type=int, default=2)
@@ -79,6 +93,10 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def _config(arguments: argparse.Namespace) -> RunConfig:
+    recommended = bool(arguments.recommended)
+    agent_timeout = arguments.agent_timeout
+    if agent_timeout is None:
+        agent_timeout = 1200 if recommended else 600
     return RunConfig(
         project_root=ROOT,
         run_root=arguments.run_root,
@@ -87,7 +105,24 @@ def _config(arguments: argparse.Namespace) -> RunConfig:
         tokenizer_path=arguments.tokenizer_path,
         v3_dependency_path=arguments.v3_dependency_path,
         model=SERVED_MODEL_NAME,
-        agent_timeout_seconds=arguments.agent_timeout,
+        agent_timeout_seconds=agent_timeout,
+        agent_config_path=(
+            RECOMMENDED_AGENT_CONFIG_PATH
+            if recommended
+            else Path("configs/agent/mini_swe_agent_qwen3_coder_fp8.yaml")
+        ),
+        model_profile_path=(
+            RECOMMENDED_MODEL_PROFILE_PATH
+            if recommended
+            else Path("configs/models/qwen3-coder-30b-a3b-instruct-fp8-runpod.json")
+        ),
+        context_limit=32768 if recommended else 4096,
+        completion_limit=512,
+        temperature=0.7 if recommended else 0.0,
+        top_p=0.8 if recommended else None,
+        top_k=20 if recommended else None,
+        repetition_penalty=1.05 if recommended else None,
+        native_tool_calls=recommended,
     )
 
 

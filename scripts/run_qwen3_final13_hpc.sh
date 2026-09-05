@@ -8,7 +8,7 @@ set -euo pipefail
 
 runpod_user="${RUNPOD_SSH_USER:-root}"
 runpod_ssh_key="${RUNPOD_SSH_KEY:-/home/s224049759/.ssh/id_ed25519_runpod_qwen3}"
-runpod_known_hosts="${RUNPOD_KNOWN_HOSTS:-/home/s224049759/.ssh/known_hosts_runpod_qwen3}"
+runpod_known_hosts="${RUNPOD_KNOWN_HOSTS:-/home/s224049759/.ssh/known_hosts_runpod_qwen3_direct}"
 remote_vllm_port="${RUNPOD_VLLM_PORT:-8000}"
 local_vllm_port="${LOCAL_VLLM_PORT:-18000}"
 workers="${CMPILOT_WORKERS:-2}"
@@ -72,6 +72,7 @@ if (( ready == 0 )); then
 fi
 
 common=(
+  --recommended
   --base-url "$base_url"
   --mini-python "$mini_python"
   --tokenizer-path "$tokenizer_path"
@@ -81,5 +82,14 @@ common=(
 "$mini_python" scripts/run_qwen3_final13.py preflight "${common[@]}"
 if [[ "${CMPILOT_SKIP_CANARY:-0}" != "1" ]]; then
   "$mini_python" scripts/run_qwen3_final13.py canary "${common[@]}"
+fi
+if [[ -n "${CMPILOT_PILOT_INDEX:-}" ]]; then
+  if [[ ! "$CMPILOT_PILOT_INDEX" =~ ^[0-9]+$ ]]; then
+    printf 'CMPILOT_PILOT_INDEX must be a nonnegative integer.\n' >&2
+    exit 2
+  fi
+  "$mini_python" scripts/run_qwen3_final13.py cell \
+    "${common[@]}" --index "$CMPILOT_PILOT_INDEX"
+  exit 0
 fi
 "$mini_python" scripts/run_qwen3_final13.py batch "${common[@]}" --workers "$workers"

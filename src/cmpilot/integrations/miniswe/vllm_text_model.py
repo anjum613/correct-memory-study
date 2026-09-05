@@ -127,12 +127,12 @@ class VllmTextModelConfig(BaseModel):
             ): frozenset({32768}),
             # Qwen/Qwen3-Coder-30B-A3B-Instruct-FP8, revision
             # e8ab3f2db9e388999a004eea5a31c16a8b517bc0.  The model supports a
-            # larger native context, but this experiment intentionally keeps
-            # the frozen 4,096-token physical budget.
+            # larger native context. The original diagnostic arm used 4,096
+            # tokens; its prospective native-tool amendment uses 32,768.
             (
                 "aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4",
                 "60f6e8cb15c98dd07300a3cc465ea662de245d2095e4245616af21b2324db3fc",
-            ): frozenset({4096}),
+            ): frozenset({4096, 32768}),
             # Qwen/Qwen3-Coder-Next-FP8, revision
             # da6e2ed27304dd39abadd9c82ef50e8de67bdd4c. The original diagnostic
             # arm used 4,096 tokens; the prospective native-tool amendment uses

@@ -200,6 +200,24 @@ def test_runpod_profile_binds_two_l40s_and_frozen_generation_budget() -> None:
     }
 
 
+def test_qwen3_coder_recommended_profile_binds_native_tools_and_sampling() -> None:
+    result = validate_model_profile(
+        ROOT,
+        model_profile_path=Path(
+            "configs/models/qwen3-coder-30b-a3b-instruct-fp8-recommended-runpod.json"
+        ),
+        context_limit=32768,
+        completion_limit=512,
+        temperature=0.7,
+        top_p=0.8,
+        top_k=20,
+        repetition_penalty=1.05,
+        native_tool_calls=True,
+    )
+
+    assert result["status"] == "PASS"
+
+
 @pytest.mark.parametrize("family_id", FAMILIES)
 def test_baseline_materialization_has_expected_matrix(
     tmp_path: Path,

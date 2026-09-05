@@ -68,9 +68,11 @@ exec vllm serve "$model" \
   --host "$host" \
   --port "$port" \
   --tensor-parallel-size 2 \
-  --max-model-len 4096 \
+  --max-model-len 32768 \
   --max-num-seqs 2 \
   --gpu-memory-utilization 0.90 \
   --generation-config vllm \
+  --enable-auto-tool-choice \
+  --tool-call-parser qwen3_coder \
   --disable-custom-all-reduce \
   --download-dir "$HUGGINGFACE_HUB_CACHE"
