@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import hashlib
+import importlib.metadata
 from pathlib import Path
 import re
 from typing import Any
@@ -78,6 +79,7 @@ class ExactMistralNativeChatTokenCounter:
             "chat_template_source": "mistral-common/tekken.json",
             "tools": "openai-function-tools",
             "response_conversion": "vllm-mistral-tool-parser",
+            "mistral_common_version": importlib.metadata.version("mistral-common"),
         }
 
     @staticmethod

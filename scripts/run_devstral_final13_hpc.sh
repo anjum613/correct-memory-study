@@ -12,9 +12,10 @@ runpod_known_hosts="${RUNPOD_KNOWN_HOSTS:-/home/s224049759/.ssh/known_hosts_runp
 remote_vllm_port="${RUNPOD_VLLM_PORT:-8000}"
 local_vllm_port="${LOCAL_VLLM_PORT:-18000}"
 workers="${CMPILOT_WORKERS:-2}"
-mini_python="${MINI_SWE_PYTHON:-/home/s224049759/environments/devstral-small-2507-agent-v1/bin/python}"
+mini_python="${MINI_SWE_PYTHON:-/home/s224049759/environments/mini-swe-agent-smoke/bin/python}"
 tokenizer_path="${DEVSTRAL_TOKENIZER_PATH:-/home/s224049759/model-cache/devstral-small-2507/bd165ab26cebbcc2eea2c4ecbfc07f3ac42b3c39}"
 v3_dependency_path="${DEVSTRAL_V3_DEPENDENCY_PATH:-/home/s224049759/environments/qwen36-vllm-v1/lib/python3.12/site-packages}"
+agent_dependency_path="${DEVSTRAL_AGENT_DEPENDENCY_PATH:-/home/s224049759/environments/devstral-small-2507-deps-v1}"
 base_url="http://127.0.0.1:${local_vllm_port}/v1"
 
 mkdir -p "$CMPILOT_RUNS_ROOT"
@@ -60,6 +61,7 @@ common=(
   --mini-python "$mini_python"
   --tokenizer-path "$tokenizer_path"
   --v3-dependency-path "$v3_dependency_path"
+  --agent-dependency-path "$agent_dependency_path"
   --run-root "$CMPILOT_RUNS_ROOT"
 )
 "$mini_python" scripts/run_devstral_final13.py preflight "${common[@]}"

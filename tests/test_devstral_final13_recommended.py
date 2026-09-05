@@ -7,6 +7,8 @@ from cmpilot.devstral_native_mini_swe_adapter import (
 )
 from cmpilot.qwen3_final13 import qwen3_cells, validate_model_profile
 from scripts.run_devstral_final13 import (
+    DEFAULT_AGENT_DEPENDENCIES,
+    DEFAULT_MINI_PYTHON,
     MODEL_ID,
     MODEL_REVISION,
     SERVED_MODEL_NAME,
@@ -87,3 +89,12 @@ def test_devstral_start_script_uses_documented_mistral_flags() -> None:
         "--max-model-len 32768",
     ):
         assert option in source
+
+
+def test_devstral_uses_proven_agent_and_isolated_native_dependencies() -> None:
+    assert DEFAULT_MINI_PYTHON.endswith("/mini-swe-agent-smoke/bin/python")
+    assert DEFAULT_AGENT_DEPENDENCIES.endswith("/devstral-small-2507-deps-v1")
+
+    wrapper = (ROOT / "scripts/run_devstral_final13_hpc.sh").read_text()
+    assert "devstral-small-2507-agent-v1" not in wrapper
+    assert "--agent-dependency-path" in wrapper

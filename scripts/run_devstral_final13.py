@@ -32,13 +32,16 @@ TEKKEN_SHA256 = "839c48629ff570bd664586800aa3ee17ee628f56efc7fd8e145cc01467a1c18
 AGENT_CONFIG_PATH = Path("configs/agent/mini_swe_agent_devstral_recommended.yaml")
 MODEL_PROFILE_PATH = Path("configs/models/devstral-small-2507-recommended-runpod.json")
 DEFAULT_MINI_PYTHON = (
-    "/home/s224049759/environments/devstral-small-2507-agent-v1/bin/python"
+    "/home/s224049759/environments/mini-swe-agent-smoke/bin/python"
 )
 DEFAULT_TOKENIZER = (
     "/home/s224049759/model-cache/devstral-small-2507/" + MODEL_REVISION
 )
 DEFAULT_V3_DEPENDENCIES = (
     "/home/s224049759/environments/qwen36-vllm-v1/lib/python3.12/site-packages"
+)
+DEFAULT_AGENT_DEPENDENCIES = (
+    "/home/s224049759/environments/devstral-small-2507-deps-v1"
 )
 
 
@@ -72,6 +75,15 @@ def _parser() -> argparse.ArgumentParser:
             os.environ.get("DEVSTRAL_V3_DEPENDENCY_PATH", DEFAULT_V3_DEPENDENCIES)
         ),
     )
+    parser.add_argument(
+        "--agent-dependency-path",
+        type=Path,
+        default=Path(
+            os.environ.get(
+                "DEVSTRAL_AGENT_DEPENDENCY_PATH", DEFAULT_AGENT_DEPENDENCIES
+            )
+        ),
+    )
     parser.add_argument("--agent-timeout", type=int, default=1200)
     parser.add_argument("--index", type=int)
     parser.add_argument("--run-id")
@@ -88,6 +100,7 @@ def _config(arguments: argparse.Namespace) -> RunConfig:
         mini_python=arguments.mini_python,
         tokenizer_path=arguments.tokenizer_path,
         v3_dependency_path=arguments.v3_dependency_path,
+        agent_dependency_path=arguments.agent_dependency_path,
         model=SERVED_MODEL_NAME,
         agent_timeout_seconds=arguments.agent_timeout,
         source_model_key=SOURCE_MODEL_KEY,
@@ -112,6 +125,9 @@ def _config(arguments: argparse.Namespace) -> RunConfig:
 
 def main(argv: Sequence[str] | None = None) -> int:
     arguments = _parser().parse_args(argv)
+    dependency_path = str(arguments.agent_dependency_path.resolve(strict=True))
+    if dependency_path not in sys.path:
+        sys.path.insert(0, dependency_path)
     config = _config(arguments)
     if arguments.command == "list":
         cells = qwen3_cells(

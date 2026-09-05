@@ -155,6 +155,7 @@ class RunConfig:
     mini_python: str
     tokenizer_path: Path
     v3_dependency_path: Path | None = None
+    agent_dependency_path: Path | None = None
     model: str = SERVED_MODEL_NAME
     agent_timeout_seconds: int = 600
     source_model_key: str = SOURCE_MODEL_KEY
@@ -1153,6 +1154,59 @@ def preflight(config: RunConfig, *, check_endpoint: bool = True) -> dict[str, An
         checks["v3_evaluator_dependency"] = False
         diagnostics["v3_evaluator_dependency"] = str(error)
 
+    if config.adapter_kind == "devstral_native":
+        try:
+            if config.agent_dependency_path is None:
+                raise Qwen3Final13Error(
+                    "Devstral native adapter requires an agent dependency path"
+                )
+            agent_dependency = config.agent_dependency_path.resolve(strict=True)
+            if not agent_dependency.is_dir():
+                raise Qwen3Final13Error(
+                    f"Devstral dependency path is not a directory: {agent_dependency}"
+                )
+            agent_dependency_environment = os.environ.copy()
+            agent_dependency_environment.update(
+                {
+                    "PYTHONNOUSERSITE": "1",
+                    "PYTHONPATH": str(agent_dependency),
+                }
+            )
+            agent_dependency_probe = subprocess.run(
+                [
+                    config.mini_python,
+                    "-c",
+                    (
+                        "import importlib.metadata as m; "
+                        "import mistral_common; "
+                        "print(m.version('mistral-common'))"
+                    ),
+                ],
+                text=True,
+                capture_output=True,
+                timeout=20,
+                env=agent_dependency_environment,
+            )
+            version = agent_dependency_probe.stdout.strip()
+            checks["devstral_native_dependency"] = (
+                agent_dependency_probe.returncode == 0 and version == "1.11.7"
+            )
+            diagnostics["devstral_native_dependency"] = {
+                "dependency_path": str(agent_dependency),
+                "diagnostic": (
+                    version
+                    if agent_dependency_probe.returncode == 0
+                    else agent_dependency_probe.stderr.strip()
+                ),
+                "expected_mistral_common_version": "1.11.7",
+            }
+        except (AttributeError, OSError, Qwen3Final13Error, subprocess.TimeoutExpired) as error:
+            checks["devstral_native_dependency"] = False
+            diagnostics["devstral_native_dependency"] = str(error)
+    else:
+        checks["devstral_native_dependency"] = True
+        diagnostics["devstral_native_dependency"] = {"status": "NOT_APPLICABLE"}
+
     if check_endpoint:
         probe = validate_model(probe_models(config.base_url, timeout=5), config.model)
         checks["vllm_endpoint"] = probe.ok
@@ -1471,6 +1525,10 @@ def run_cell(
             trajectory,
             attempt / "rendered-task.md",
         )
+        if config.agent_dependency_path is not None:
+            environment["PYTHONPATH"] = str(
+                config.agent_dependency_path.resolve(strict=True)
+            )
         environment["CMPILOT_AGENT_PATH"] = os.pathsep.join(
             (public_runner["directory"], environment["CMPILOT_AGENT_PATH"])
         )
@@ -1629,6 +1687,10 @@ def run_canary(config: RunConfig) -> dict[str, Any]:
             trajectory,
             task_instruction,
         )
+        if config.agent_dependency_path is not None:
+            environment["PYTHONPATH"] = str(
+                config.agent_dependency_path.resolve(strict=True)
+            )
         environment["CMPILOT_AGENT_PATH"] = os.pathsep.join(
             (public_runner["directory"], environment["CMPILOT_AGENT_PATH"])
         )
@@ -1829,6 +1891,11 @@ def runtime_identity(config: RunConfig) -> dict[str, Any]:
         "v3_dependency_path": (
             str(config.v3_dependency_path)
             if config.v3_dependency_path is not None
+            else None
+        ),
+        "agent_dependency_path": (
+            str(config.agent_dependency_path)
+            if config.agent_dependency_path is not None
             else None
         ),
     }
