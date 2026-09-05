@@ -72,6 +72,7 @@ if (( ready == 0 )); then
 fi
 
 common=(
+  --recommended
   --base-url "$base_url"
   --mini-python "$mini_python"
   --tokenizer-path "$tokenizer_path"

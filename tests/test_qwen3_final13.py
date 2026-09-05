@@ -155,6 +155,32 @@ def test_coder_next_runpod_profile_is_pinned_to_two_l40s() -> None:
     assert result["status"] == "PASS"
 
 
+def test_coder_next_recommended_profile_binds_native_tools_and_sampling() -> None:
+    result = validate_model_profile(
+        ROOT,
+        model_profile_path=Path(
+            "configs/models/qwen3-coder-next-fp8-recommended-runpod.json"
+        ),
+        model_id="Qwen/Qwen3-Coder-Next-FP8",
+        model_revision="da6e2ed27304dd39abadd9c82ef50e8de67bdd4c",
+        served_model_name="qwen3-coder-next-fp8",
+        tokenizer_json_sha256=(
+            "19564a48c4f71a2a1b937cce34c737a1e662b171c5f5d7edf641a15cd896f07d"
+        ),
+        tokenizer_config_sha256=(
+            "fc76878832c668e3f0f8be66e6239a475b9093d2fe5cef97c242369779e6c6e6"
+        ),
+        context_limit=32768,
+        completion_limit=512,
+        temperature=1.0,
+        top_p=0.95,
+        top_k=40,
+        native_tool_calls=True,
+    )
+
+    assert result["status"] == "PASS"
+
+
 def test_runpod_profile_binds_two_l40s_and_frozen_generation_budget() -> None:
     result = validate_model_profile(ROOT)
     profile = json.loads(

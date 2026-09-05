@@ -11,18 +11,21 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from minisweagent.exceptions import FormatError
 from minisweagent.models import GLOBAL_MODEL_STATS
+from minisweagent.models.utils.actions_toolcall import format_toolcall_observation_messages
 from minisweagent.models.utils.actions_text import format_observation_messages, parse_regex_actions
 from minisweagent.models.utils.openai_multimodal import expand_multimodal_content
 
 try:
     from .action_protocol import (
         ACTION_REGEX,
+        BASH_TOOL_SPEC,
         FORMAT_ERROR_TEMPLATE,
         escape_action_syntax_for_prompt,
     )
 except ImportError:
     from cmpilot_action_protocol import (  # type: ignore[no-redef]
         ACTION_REGEX,
+        BASH_TOOL_SPEC,
         FORMAT_ERROR_TEMPLATE,
         escape_action_syntax_for_prompt,
     )
@@ -109,6 +112,7 @@ class VllmTextModelConfig(BaseModel):
         "<returncode>{{output.returncode}}</returncode>\n<output>\n{{output.output}}</output>"
     )
     multimodal_regex: str = ""
+    native_tool_calls: bool = False
 
     @model_validator(mode="after")
     def validate_context_profile(self) -> "VllmTextModelConfig":
@@ -116,11 +120,11 @@ class VllmTextModelConfig(BaseModel):
             (
                 PINNED_TOKENIZER_JSON_SHA256,
                 PINNED_TOKENIZER_CONFIG_SHA256,
-            ): 4096,
+            ): frozenset({4096}),
             (
                 "5f9e4d4901a92b997e463c1f46055088b6cca5ca61a6522d1b9f64c4bb81cb42",
                 "5186f0defcd7f232382c7f0aebcd2252d073bb921ab240e407b7ae8745d2b29b",
-            ): 32768,
+            ): frozenset({32768}),
             # Qwen/Qwen3-Coder-30B-A3B-Instruct-FP8, revision
             # e8ab3f2db9e388999a004eea5a31c16a8b517bc0.  The model supports a
             # larger native context, but this experiment intentionally keeps
@@ -128,26 +132,27 @@ class VllmTextModelConfig(BaseModel):
             (
                 "aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4",
                 "60f6e8cb15c98dd07300a3cc465ea662de245d2095e4245616af21b2324db3fc",
-            ): 4096,
+            ): frozenset({4096}),
             # Qwen/Qwen3-Coder-Next-FP8, revision
-            # da6e2ed27304dd39abadd9c82ef50e8de67bdd4c.  Keep the same frozen
-            # 4,096-token physical budget used by both experimental arms.
+            # da6e2ed27304dd39abadd9c82ef50e8de67bdd4c. The original diagnostic
+            # arm used 4,096 tokens; the prospective native-tool amendment uses
+            # 32,768 tokens to avoid the observed history-budget floor.
             (
                 "19564a48c4f71a2a1b937cce34c737a1e662b171c5f5d7edf641a15cd896f07d",
                 "fc76878832c668e3f0f8be66e6239a475b9093d2fe5cef97c242369779e6c6e6",
-            ): 4096,
+            ): frozenset({4096, 32768}),
         }
         identity = (
             self.tokenizer_json_sha256,
             self.tokenizer_config_sha256,
         )
-        expected_context = profiles.get(identity)
-        if expected_context is None:
+        expected_contexts = profiles.get(identity)
+        if expected_contexts is None:
             raise ValueError("tokenizer identity is not an approved context profile")
-        if self.context_limit != expected_context:
+        if self.context_limit not in expected_contexts:
             raise ValueError(
                 f"context limit {self.context_limit} differs from approved profile "
-                f"{expected_context}"
+                f"{sorted(expected_contexts)}"
             )
         if self.context_safety_margin != 32 or self.minimum_useful_completion != 64:
             raise ValueError("frozen context reserve policy changed")
@@ -181,6 +186,8 @@ def _response_parts(response: dict[str, Any]) -> tuple[dict[str, Any], str, str]
             "$.response.choices[0].finish_reason: expected builtins.str, "
             f"found {_type_name(finish_reason)}"
         )
+    if message.get("content") is None and message.get("tool_calls"):
+        message = {**message, "content": ""}
     canonical = normalize_message(message, "$.response.choices[0].message").value
     if canonical["role"] != "assistant":
         raise MessageBoundaryError(
@@ -188,6 +195,70 @@ def _response_parts(response: dict[str, Any]) -> tuple[dict[str, Any], str, str]
             f"found {canonical['role']!r}"
         )
     return canonical, canonical["content"], finish_reason
+
+
+def _parse_native_tool_actions(message: dict[str, Any]) -> list[dict[str, str]]:
+    tool_calls = message.get("tool_calls")
+    if not isinstance(tool_calls, list) or len(tool_calls) != 1:
+        raise FormatError(
+            {
+                "role": "user",
+                "content": "Call the bash tool exactly once.",
+                "extra": {
+                    "interrupt_type": "FormatError",
+                    "model_response": json.dumps(message, sort_keys=True),
+                    "n_actions": len(tool_calls) if isinstance(tool_calls, list) else 0,
+                },
+            }
+        )
+    tool_call = tool_calls[0]
+    function = tool_call.get("function") if isinstance(tool_call, dict) else None
+    call_id = tool_call.get("id") if isinstance(tool_call, dict) else None
+    if (
+        not isinstance(function, dict)
+        or function.get("name") != "bash"
+        or not isinstance(call_id, str)
+        or not call_id
+    ):
+        raise FormatError(
+            {
+                "role": "user",
+                "content": "Use the provided bash tool exactly once.",
+                "extra": {
+                    "interrupt_type": "FormatError",
+                    "model_response": json.dumps(message, sort_keys=True),
+                    "n_actions": 1,
+                },
+            }
+        )
+    try:
+        arguments = json.loads(function.get("arguments", ""))
+    except (TypeError, json.JSONDecodeError) as error:
+        raise FormatError(
+            {
+                "role": "user",
+                "content": "The bash tool arguments must be valid JSON.",
+                "extra": {
+                    "interrupt_type": "FormatError",
+                    "model_response": json.dumps(message, sort_keys=True),
+                    "n_actions": 1,
+                },
+            }
+        ) from error
+    command = arguments.get("command") if isinstance(arguments, dict) else None
+    if not isinstance(command, str):
+        raise FormatError(
+            {
+                "role": "user",
+                "content": "The bash tool requires one string command argument.",
+                "extra": {
+                    "interrupt_type": "FormatError",
+                    "model_response": json.dumps(message, sort_keys=True),
+                    "n_actions": 1,
+                },
+            }
+        )
+    return [{"command": command, "tool_call_id": call_id}]
 
 
 class VllmTextModel:
@@ -289,7 +360,11 @@ class VllmTextModel:
         http_request_sent = False
         try:
             canonical_messages, _ = normalize_messages(messages)
-            prompt_tokens = self._exact_token_counter().count(canonical_messages)
+            native_tools = [BASH_TOOL_SPEC] if self.config.native_tool_calls else None
+            prompt_tokens = self._exact_token_counter().count(
+                canonical_messages,
+                tools=native_tools,
+            )
             budget = calculate_request_budget(
                 prompt_tokens=prompt_tokens,
                 configured_completion_limit=configured_max_tokens,
@@ -319,6 +394,8 @@ class VllmTextModel:
                 repetition_penalty=self.config.repetition_penalty,
                 seed=self.config.seed,
                 n=self.config.samples_per_call,
+                tools=native_tools,
+                tool_choice="auto" if self.config.native_tool_calls else None,
             )
         except BaseException as error:
             self._record_failure(
@@ -367,12 +444,15 @@ class VllmTextModel:
         }
         GLOBAL_MODEL_STATS.add(0.0)
         try:
-            actions = parse_regex_actions(
-                content,
-                action_regex=self.config.action_regex,
-                format_error_template=self.config.format_error_template,
-                template_kwargs={"finish_reason": finish_reason},
-            )
+            if self.config.native_tool_calls:
+                actions = _parse_native_tool_actions(canonical)
+            else:
+                actions = parse_regex_actions(
+                    content,
+                    action_regex=self.config.action_regex,
+                    format_error_template=self.config.format_error_template,
+                    template_kwargs={"finish_reason": finish_reason},
+                )
         except FormatError as error:
             error.messages[0]["extra"].update(
                 {
@@ -406,12 +486,21 @@ class VllmTextModel:
         outputs: list[dict[str, Any]],
         template_vars: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
-        messages = format_observation_messages(
-            outputs,
-            observation_template=self.config.observation_template,
-            template_vars=template_vars,
-            multimodal_regex=self.config.multimodal_regex,
-        )
+        if self.config.native_tool_calls:
+            messages = format_toolcall_observation_messages(
+                actions=message.get("extra", {}).get("actions", []),
+                outputs=outputs,
+                observation_template=self.config.observation_template,
+                template_vars=template_vars,
+                multimodal_regex=self.config.multimodal_regex,
+            )
+        else:
+            messages = format_observation_messages(
+                outputs,
+                observation_template=self.config.observation_template,
+                template_vars=template_vars,
+                multimodal_regex=self.config.multimodal_regex,
+            )
         for message in messages:
             content = message.get("content")
             if isinstance(content, str):

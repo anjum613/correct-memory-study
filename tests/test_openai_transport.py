@@ -154,6 +154,43 @@ def test_direct_transport_sends_no_authorization_header(tmp_path: Path) -> None:
     assert '"authorization"' not in persisted
 
 
+def test_direct_transport_preserves_native_tool_request_fields(tmp_path: Path) -> None:
+    tool = {
+        "type": "function",
+        "function": {
+            "name": "bash",
+            "parameters": {
+                "type": "object",
+                "properties": {"command": {"type": "string"}},
+                "required": ["command"],
+            },
+        },
+    }
+    with DeterministicOpenAIServer("model", tmp_path / "requests.jsonl") as server:
+        result = OpenAIChatTransport(
+            server.base_url,
+            connect_timeout_seconds=1,
+            read_timeout_seconds=1,
+        ).complete(
+            [{"role": "user", "content": "inspect"}],
+            model="model",
+            temperature=1.0,
+            max_tokens=512,
+            top_p=0.95,
+            top_k=40,
+            seed=123,
+            tools=[tool],
+            tool_choice="auto",
+        )
+
+    assert result.request["temperature"] == 1.0
+    assert result.request["top_p"] == 0.95
+    assert result.request["top_k"] == 40
+    assert result.request["seed"] == 123
+    assert result.request["tools"] == [tool]
+    assert result.request["tool_choice"] == "auto"
+
+
 class _FailureHandler(BaseHTTPRequestHandler):
     status = 422
     response_body = b'{"error":{"message":"schema rejected exactly"}}'

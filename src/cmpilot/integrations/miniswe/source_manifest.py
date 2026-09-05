@@ -19,6 +19,7 @@ EXPECTED_SOURCE_HASHES = {
     "models/__init__.py": "eb141eae346d51af407b4faf868ad7e869fa4fff275415381fa8ef845616f351",
     "models/litellm_model.py": "6df4483bcdc9620b2f9d7f8bb1027a7fb9729b739976cbcf1a9d18fb58c48227",
     "models/litellm_textbased_model.py": "395bc9bc4a06c18577e73b21c5465f9d22a6d0cc45b006f3d7c9fdaae399e732",
+    "models/utils/actions_toolcall.py": "47b666412e4f838508b50009cf34c7f63fe15e9e40affc257a17c0829896526f",
     "models/utils/actions_text.py": "e5997bba3ae3d541ff418317cc8dd9e9e17657de806679ef38ab1ad74e294047",
 }
 

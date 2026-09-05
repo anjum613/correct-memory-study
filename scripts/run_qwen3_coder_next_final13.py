@@ -32,6 +32,12 @@ AGENT_CONFIG_PATH = Path(
     "configs/agent/mini_swe_agent_qwen3_coder_next_fp8.yaml"
 )
 MODEL_PROFILE_PATH = Path("configs/models/qwen3-coder-next-fp8-runpod.json")
+RECOMMENDED_AGENT_CONFIG_PATH = Path(
+    "configs/agent/mini_swe_agent_qwen3_coder_next_recommended.yaml"
+)
+RECOMMENDED_MODEL_PROFILE_PATH = Path(
+    "configs/models/qwen3-coder-next-fp8-recommended-runpod.json"
+)
 TOKENIZER_JSON_SHA256 = (
     "19564a48c4f71a2a1b937cce34c737a1e662b171c5f5d7edf641a15cd896f07d"
 )
@@ -85,7 +91,15 @@ def _parser() -> argparse.ArgumentParser:
             )
         ),
     )
-    parser.add_argument("--agent-timeout", type=int, default=600)
+    parser.add_argument("--agent-timeout", type=int)
+    parser.add_argument(
+        "--recommended",
+        action="store_true",
+        help=(
+            "use Qwen's native tool calling, temperature=1.0, top_p=0.95, "
+            "top_k=40, 32K context, and the amended 30-step agent profile"
+        ),
+    )
     parser.add_argument("--index", type=int)
     parser.add_argument("--run-id")
     parser.add_argument("--workers", type=int, default=2)
@@ -98,6 +112,10 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def _config(arguments: argparse.Namespace) -> RunConfig:
+    recommended = bool(arguments.recommended)
+    agent_timeout = arguments.agent_timeout
+    if agent_timeout is None:
+        agent_timeout = 1200 if recommended else 600
     return RunConfig(
         project_root=ROOT,
         run_root=arguments.run_root,
@@ -106,14 +124,24 @@ def _config(arguments: argparse.Namespace) -> RunConfig:
         tokenizer_path=arguments.tokenizer_path,
         v3_dependency_path=arguments.v3_dependency_path,
         model=SERVED_MODEL_NAME,
-        agent_timeout_seconds=arguments.agent_timeout,
+        agent_timeout_seconds=agent_timeout,
         source_model_key=SOURCE_MODEL_KEY,
         model_id=MODEL_ID,
         model_revision=MODEL_REVISION,
-        agent_config_path=AGENT_CONFIG_PATH,
-        model_profile_path=MODEL_PROFILE_PATH,
+        agent_config_path=(
+            RECOMMENDED_AGENT_CONFIG_PATH if recommended else AGENT_CONFIG_PATH
+        ),
+        model_profile_path=(
+            RECOMMENDED_MODEL_PROFILE_PATH if recommended else MODEL_PROFILE_PATH
+        ),
         tokenizer_json_sha256=TOKENIZER_JSON_SHA256,
         tokenizer_config_sha256=TOKENIZER_CONFIG_SHA256,
+        context_limit=32768 if recommended else 4096,
+        completion_limit=512,
+        temperature=1.0 if recommended else 0.0,
+        top_p=0.95 if recommended else None,
+        top_k=40 if recommended else None,
+        native_tool_calls=recommended,
     )
 
 

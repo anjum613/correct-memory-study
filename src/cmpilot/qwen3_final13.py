@@ -23,8 +23,11 @@ from typing import Any, Mapping, Sequence
 from uuid import uuid4
 
 from .integrations.miniswe.action_protocol import (
+    BASH_TOOL_SPEC,
     INITIAL_SYSTEM_TEMPLATE,
     INSTANCE_TEMPLATE,
+    NATIVE_TOOL_INSTANCE_TEMPLATE,
+    NATIVE_TOOL_SYSTEM_TEMPLATE,
 )
 from .integrations.miniswe.context_budget import ExactQwenChatTokenCounter
 from .mini_swe_adapter import mini_swe_info
@@ -161,6 +164,12 @@ class RunConfig:
     model_profile_path: Path = MODEL_PROFILE_PATH
     tokenizer_json_sha256: str = TOKENIZER_JSON_SHA256
     tokenizer_config_sha256: str = TOKENIZER_CONFIG_SHA256
+    context_limit: int = 4096
+    completion_limit: int = 512
+    temperature: float = 0.0
+    top_p: float | None = None
+    top_k: int | None = None
+    native_tool_calls: bool = False
 
 
 def canonical(value: Any) -> bytes:
@@ -815,6 +824,12 @@ def validate_model_profile(
     served_model_name: str = SERVED_MODEL_NAME,
     tokenizer_json_sha256: str = TOKENIZER_JSON_SHA256,
     tokenizer_config_sha256: str = TOKENIZER_CONFIG_SHA256,
+    context_limit: int = 4096,
+    completion_limit: int = 512,
+    temperature: float = 0.0,
+    top_p: float | None = None,
+    top_k: int | None = None,
+    native_tool_calls: bool = False,
 ) -> dict[str, Any]:
     path = project_root / model_profile_path
     value = load_json(path)
@@ -825,18 +840,28 @@ def validate_model_profile(
             "served_model_name": served_model_name,
         },
         "generation": {
-            "max_tokens": 512,
+            "max_tokens": completion_limit,
             "samples_per_call": 1,
-            "temperature": 0.0,
+            "temperature": temperature,
+            **({"top_p": top_p} if top_p is not None else {}),
+            **({"top_k": top_k} if top_k is not None else {}),
         },
         "server": {
             "generation_config": "vllm",
             "gpu_memory_utilization": 0.9,
             "host": "127.0.0.1",
-            "max_model_length": 4096,
+            "max_model_length": context_limit,
             "max_num_sequences": 2,
             "quantization": "model-configured-fp8",
             "tensor_parallel_size": 2,
+            **(
+                {
+                    "enable_auto_tool_choice": True,
+                    "tool_call_parser": "qwen3_coder",
+                }
+                if native_tool_calls
+                else {}
+            ),
         },
     }
     if value.get("schema") != "cmpilot-runpod-model-profile-v1":
@@ -863,6 +888,9 @@ def validate_initial_context_budgets(
     model_revision: str = MODEL_REVISION,
     tokenizer_json_sha256: str = TOKENIZER_JSON_SHA256,
     tokenizer_config_sha256: str = TOKENIZER_CONFIG_SHA256,
+    context_limit: int = 4096,
+    completion_limit: int = 512,
+    native_tool_calls: bool = False,
 ) -> dict[str, Any]:
     """Count every initial runtime prompt with the pinned Qwen3 chat template."""
     counter = ExactQwenChatTokenCounter(
@@ -886,9 +914,15 @@ def validate_initial_context_budgets(
             )
         service = Path(baseline.split("/B/", 1)[1])
         policy = task_policy(service, ())
-        if INITIAL_SYSTEM_TEMPLATE.count(CALCULATOR_AGENT_POLICY_TEXT) != 1:
+        system_template = (
+            NATIVE_TOOL_SYSTEM_TEMPLATE if native_tool_calls else INITIAL_SYSTEM_TEMPLATE
+        )
+        instance_template = (
+            NATIVE_TOOL_INSTANCE_TEMPLATE if native_tool_calls else INSTANCE_TEMPLATE
+        )
+        if system_template.count(CALCULATOR_AGENT_POLICY_TEXT) != 1:
             raise Qwen3Final13Error("MiniSWE task-policy prompt anchor changed")
-        system = INITIAL_SYSTEM_TEMPLATE.replace(
+        system = system_template.replace(
             CALCULATOR_AGENT_POLICY_TEXT,
             policy.agent_visible_policy_text,
             1,
@@ -897,15 +931,16 @@ def validate_initial_context_budgets(
             {"role": "system", "content": system},
             {
                 "role": "user",
-                "content": INSTANCE_TEMPLATE.replace(
+                "content": instance_template.replace(
                     "{{task}}", frozen_messages[1]["content"]
                 ),
             },
         ]
-        observations.append((counter.count(runtime_messages), cell))
+        tools = [BASH_TOOL_SPEC] if native_tool_calls else None
+        observations.append((counter.count(runtime_messages, tools=tools), cell))
     minimum = min(observations, key=lambda item: item[0])
     maximum = max(observations, key=lambda item: item[0])
-    if maximum[0] + 512 + 32 > 4096:
+    if maximum[0] + completion_limit + 32 > context_limit:
         raise Qwen3Final13Error(
             "an initial runtime prompt exceeds the frozen context budget"
         )
@@ -957,6 +992,12 @@ def preflight(config: RunConfig, *, check_endpoint: bool = True) -> dict[str, An
             served_model_name=config.model,
             tokenizer_json_sha256=config.tokenizer_json_sha256,
             tokenizer_config_sha256=config.tokenizer_config_sha256,
+            context_limit=config.context_limit,
+            completion_limit=config.completion_limit,
+            temperature=config.temperature,
+            top_p=config.top_p,
+            top_k=config.top_k,
+            native_tool_calls=config.native_tool_calls,
         )
         checks["model_profile"] = True
     except (OSError, Qwen3Final13Error) as error:
@@ -971,6 +1012,9 @@ def preflight(config: RunConfig, *, check_endpoint: bool = True) -> dict[str, An
             model_revision=config.model_revision,
             tokenizer_json_sha256=config.tokenizer_json_sha256,
             tokenizer_config_sha256=config.tokenizer_config_sha256,
+            context_limit=config.context_limit,
+            completion_limit=config.completion_limit,
+            native_tool_calls=config.native_tool_calls,
         )
         checks["initial_context_budgets"] = True
     except (OSError, ValueError, RuntimeError) as error:
@@ -1280,10 +1324,14 @@ def run_cell(
                 "frozen_message_sha256": message_sha256,
                 "frozen_system_message_preserved_as_metadata": True,
                 "reason": (
-                    "MiniSWE requires its action-format system envelope; the byte-exact "
+                    "MiniSWE requires its action system envelope; the byte-exact "
                     "frozen user task/treatment content is passed unchanged."
                 ),
-                "runtime_system_envelope": "project-owned MiniSWE text-action protocol",
+                "runtime_system_envelope": (
+                    "project-owned MiniSWE native-tool protocol"
+                    if config.native_tool_calls
+                    else "project-owned MiniSWE text-action protocol"
+                ),
                 "user_message_preserved_byte_exact": True,
             },
         )
@@ -1318,6 +1366,7 @@ def run_cell(
             agent_config_source=(
                 config.project_root / config.agent_config_path
             ).resolve(strict=True),
+            seed=cell.seed,
         )
         trajectory = attempt / "trajectory.json"
         environment = _safe_agent_environment(
@@ -1475,6 +1524,7 @@ def run_canary(config: RunConfig) -> dict[str, Any]:
             agent_config_source=(config.project_root / config.agent_config_path).resolve(
                 strict=True
             ),
+            seed=0,
         )
         trajectory = attempt / "trajectory.json"
         environment = _safe_agent_environment(
@@ -1666,6 +1716,14 @@ def runtime_identity(config: RunConfig) -> dict[str, Any]:
         "model_revision": config.model_revision,
         "python_version": platform.python_version(),
         "served_model_name": config.model,
+        "sampling": {
+            "completion_limit": config.completion_limit,
+            "temperature": config.temperature,
+            "top_k": config.top_k,
+            "top_p": config.top_p,
+        },
+        "context_limit": config.context_limit,
+        "native_tool_calls": config.native_tool_calls,
         "tokenizer_path": str(config.tokenizer_path),
         "v3_dependency_path": (
             str(config.v3_dependency_path)

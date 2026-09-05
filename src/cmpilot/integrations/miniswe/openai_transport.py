@@ -313,6 +313,8 @@ class OpenAIChatTransport:
         repetition_penalty: float | None = None,
         seed: int | None = None,
         n: int | None = None,
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: str | dict[str, Any] | None = None,
     ) -> CompletionResult:
         normalized, excluded = normalize_messages(messages)
         request_body = {
@@ -333,6 +335,12 @@ class OpenAIChatTransport:
         request_body.update(
             {name: value for name, value in optional_sampling.items() if value is not None}
         )
+        if tools is not None:
+            validate_json_data(tools, "$.tools")
+            request_body["tools"] = tools
+        if tool_choice is not None:
+            validate_json_data(tool_choice, "$.tool_choice")
+            request_body["tool_choice"] = tool_choice
         request_bytes = canonical_json_bytes(request_body)
         request_hash = hashlib.sha256(request_bytes).hexdigest()
         path = self.parsed_endpoint.path or "/"

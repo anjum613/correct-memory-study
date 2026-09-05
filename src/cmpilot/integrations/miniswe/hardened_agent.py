@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from pathlib import Path
 from typing import Any, Callable
 
@@ -26,8 +27,10 @@ try:
         StagnationGuard,
         evaluate_action_response,
         protocol_result_dimensions,
+        render_native_tool_recovery_prompt,
         render_recovery_prompt,
         repository_hash,
+        validate_action_content,
     )
     from ...task_file_policy import (
         PROTECTED_PATH_INTEGRITY_VIOLATION,
@@ -55,8 +58,10 @@ except ImportError:
         StagnationGuard,
         evaluate_action_response,
         protocol_result_dimensions,
+        render_native_tool_recovery_prompt,
         render_recovery_prompt,
         repository_hash,
+        validate_action_content,
     )
     from cmpilot_task_file_policy import (  # type: ignore[no-redef]
         PROTECTED_PATH_INTEGRITY_VIOLATION,
@@ -172,7 +177,12 @@ class HardenedDefaultAgent(DefaultAgent):
         return hashlib.sha256(raw_response.encode("utf-8")).hexdigest()
 
     def _recovery_message(self, evaluation: ProtocolEvaluation) -> dict[str, Any]:
-        content = render_recovery_prompt(
+        renderer = (
+            render_native_tool_recovery_prompt
+            if bool(getattr(getattr(self.model, "config", None), "native_tool_calls", False))
+            else render_recovery_prompt
+        )
+        content = renderer(
             event=evaluation.event or "INVALID_ACTION",
             action_count=evaluation.action_count,
             validation_reason=evaluation.validation_reason,
@@ -230,7 +240,11 @@ class HardenedDefaultAgent(DefaultAgent):
             command=None,
             rejected_command=None,
             event="INVALID_ACTION_FORMAT",
-            validation_reason="expected exactly one action block",
+            validation_reason=(
+                "expected exactly one bash tool call"
+                if bool(getattr(getattr(self.model, "config", None), "native_tool_calls", False))
+                else "expected exactly one action block"
+            ),
             termination_reason=decision.termination_reason,
         )
         preserved = {
@@ -430,11 +444,66 @@ class HardenedDefaultAgent(DefaultAgent):
         raw_response = message.get("content", "")
         if not isinstance(raw_response, str):
             raise TypeError("assistant content must be text")
-        evaluation = evaluate_action_response(raw_response, self.protocol_state)
+        actions = message.get("extra", {}).get("actions", [])
+        native_tool_calls = bool(
+            getattr(getattr(self.model, "config", None), "native_tool_calls", False)
+        )
+        if native_tool_calls:
+            raw_response = json.dumps(
+                message.get("tool_calls", []),
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+            if (
+                not isinstance(actions, list)
+                or len(actions) != 1
+                or not isinstance(actions[0], dict)
+                or not isinstance(actions[0].get("command"), str)
+            ):
+                decision = self.protocol_state.record_invalid(raw_response)
+                evaluation = ProtocolEvaluation(
+                    accepted=False,
+                    raw_response=raw_response,
+                    action_count=len(actions) if isinstance(actions, list) else 0,
+                    command=None,
+                    rejected_command=None,
+                    event="INVALID_ACTION_FORMAT",
+                    validation_reason="expected exactly one bash tool call",
+                    termination_reason=decision.termination_reason,
+                )
+            else:
+                validation = validate_action_content(actions[0]["command"])
+                if validation.valid:
+                    evaluation = ProtocolEvaluation(
+                        accepted=True,
+                        raw_response=raw_response,
+                        action_count=1,
+                        command=validation.command,
+                        rejected_command=None,
+                        event=None,
+                        validation_reason=None,
+                        termination_reason=None,
+                    )
+                else:
+                    decision = self.protocol_state.record_invalid(
+                        raw_response,
+                        rejected_command=validation.command,
+                    )
+                    evaluation = ProtocolEvaluation(
+                        accepted=False,
+                        raw_response=raw_response,
+                        action_count=1,
+                        command=None,
+                        rejected_command=validation.command,
+                        event="INVALID_ACTION_CONTENT",
+                        validation_reason=validation.reason,
+                        termination_reason=decision.termination_reason,
+                    )
+        else:
+            evaluation = evaluate_action_response(raw_response, self.protocol_state)
         if not evaluation.accepted:
             raise ProtocolRejected(evaluation)
 
-        actions = message.get("extra", {}).get("actions", [])
         if (
             not isinstance(actions, list)
             or len(actions) != 1

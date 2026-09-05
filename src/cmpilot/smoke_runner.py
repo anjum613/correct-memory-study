@@ -368,7 +368,7 @@ def _safe_agent_environment(
     agent_tmp = artifacts / "agent-tmp"
     agent_home.mkdir(exist_ok=True)
     agent_tmp.mkdir(exist_ok=True)
-    return {
+    environment = {
         "PATH": os.environ.get("PATH", os.defpath),
         "HOME": str(agent_home),
         "XDG_CONFIG_HOME": str(agent_home / "config"),
@@ -400,6 +400,10 @@ def _safe_agent_environment(
         "CMPILOT_TOKENIZER_PATH": str(config.tokenizer_path),
         "CMPILOT_BASE_URL": config.base_url,
     }
+    seed = getattr(config, "seed", None)
+    if seed is not None:
+        environment["CMPILOT_MODEL_SEED"] = str(seed)
+    return environment
 
 
 def execute_agent(command_line: list[str], cwd: Path, environment: dict[str, str], timeout: float) -> AgentExecution:

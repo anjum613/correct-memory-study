@@ -21,6 +21,24 @@ ACTION_FENCE_OPEN = "```mswea_bash_command"
 COMPLETION_SENTINEL = "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"
 MAX_CONSECUTIVE_PROTOCOL_ERRORS = 3
 
+BASH_TOOL_SPEC: dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "bash",
+        "description": "Execute a bash command",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "command": {
+                    "type": "string",
+                    "description": "The bash command to execute",
+                }
+            },
+            "required": ["command"],
+        },
+    },
+}
+
 INITIAL_SYSTEM_TEMPLATE = """You are a coding agent that can interact with a repository through shell commands.
 
 """ + CALCULATOR_AGENT_POLICY_TEXT + """
@@ -46,6 +64,32 @@ changes are not persistent between commands.
 Finish only by running `echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT` as its own command.
 The action syntax is defined in the system message. Return one concrete command, then wait
 for its observation before choosing another command.
+"""
+
+NATIVE_TOOL_SYSTEM_TEMPLATE = """You are a coding agent that can interact with a repository through the provided bash tool.
+
+""" + CALCULATOR_AGENT_POLICY_TEXT + """
+
+Call the bash tool for every action; do not emit fenced command blocks. Use one tool call
+at a time, but combine closely related inspection operations in one shell command when
+that conserves turns. Inspect the relevant implementation and public tests, edit the
+writable service promptly, run the public tests, and submit. Do not merely describe the
+next action in prose.
+"""
+
+NATIVE_TOOL_INSTANCE_TEMPLATE = """Please solve this issue: {{task}}
+
+Use the provided bash tool to inspect, edit, and test the working repository. Work
+efficiently: read the relevant service and public tests together where practical, make
+the smallest correct edit, run `run_public_tests`, and fix any failure.
+
+Finish only by calling the bash tool with
+`echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT` as its entire command.
+"""
+
+NATIVE_TOOL_RECOVERY_PROMPT = """The previous response did not contain exactly one valid bash tool call.
+Call the bash tool exactly once with a concrete command. Do not return a fenced command
+or merely describe what you intend to do. Wait for the tool result before continuing.
 """
 
 RECOVERY_PROMPT = """The previous response did not contain exactly one safe action.
@@ -178,6 +222,19 @@ def render_recovery_prompt(
     if validation_reason:
         detail += " The parsed command content was unsafe."
     return RECOVERY_PROMPT + "\n" + detail
+
+
+def render_native_tool_recovery_prompt(
+    *,
+    event: str,
+    action_count: int,
+    validation_reason: str | None = None,
+) -> str:
+    safe_event = event if re.fullmatch(r"[A-Z_]+", event) else "INVALID_ACTION"
+    detail = f"Protocol event: {safe_event}. Parsed tool-call count: {int(action_count)}."
+    if validation_reason:
+        detail += " The parsed command content was unsafe."
+    return NATIVE_TOOL_RECOVERY_PROMPT + "\n" + detail
 
 
 def validate_action_content(command: str) -> ActionValidation:

@@ -22,6 +22,9 @@ from cmpilot_action_protocol import (
     INITIAL_SYSTEM_TEMPLATE,
     INSTANCE_TEMPLATE,
     INVALID_ACTION_TEMPLATE,
+    NATIVE_TOOL_INSTANCE_TEMPLATE,
+    NATIVE_TOOL_RECOVERY_PROMPT,
+    NATIVE_TOOL_SYSTEM_TEMPLATE,
     PROTOCOL_LIMIT_MESSAGE,
     prompt_match_report,
     render_recovery_prompt,
@@ -164,15 +167,26 @@ raw_mini_config = build_mini_swe_config(
     request_budget_artifact=request_budget_artifact,
     event_path=event_path,
 )
-raw_mini_config["agent"]["system_template"] = INITIAL_SYSTEM_TEMPLATE
-raw_mini_config["agent"]["instance_template"] = INSTANCE_TEMPLATE
+native_tool_calls = bool(raw_mini_config["model"].get("native_tool_calls", False))
+if "CMPILOT_MODEL_SEED" in os.environ:
+    raw_mini_config["model"]["seed"] = int(os.environ["CMPILOT_MODEL_SEED"])
+raw_mini_config["agent"]["system_template"] = (
+    NATIVE_TOOL_SYSTEM_TEMPLATE if native_tool_calls else INITIAL_SYSTEM_TEMPLATE
+)
+raw_mini_config["agent"]["instance_template"] = (
+    NATIVE_TOOL_INSTANCE_TEMPLATE if native_tool_calls else INSTANCE_TEMPLATE
+)
 raw_mini_config["model"]["action_regex"] = ACTION_REGEX
-raw_mini_config["model"]["format_error_template"] = FORMAT_ERROR_TEMPLATE
+raw_mini_config["model"]["format_error_template"] = (
+    NATIVE_TOOL_RECOVERY_PROMPT if native_tool_calls else FORMAT_ERROR_TEMPLATE
+)
+active_system_template = raw_mini_config["agent"]["system_template"]
+active_instance_template = raw_mini_config["agent"]["instance_template"]
 prompt_matches = prompt_match_report(
     {
-        "initial_system": INITIAL_SYSTEM_TEMPLATE,
-        "instance": INSTANCE_TEMPLATE.replace("{{task}}", task),
-        "format_error_recovery": FORMAT_ERROR_TEMPLATE,
+        "initial_system": active_system_template,
+        "instance": active_instance_template.replace("{{task}}", task),
+        "format_error_recovery": raw_mini_config["model"]["format_error_template"],
         "invalid_content_recovery": INVALID_ACTION_TEMPLATE,
         "protocol_limit": PROTOCOL_LIMIT_MESSAGE,
         "realistic_recovery": render_recovery_prompt(

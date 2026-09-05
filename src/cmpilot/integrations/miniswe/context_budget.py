@@ -215,17 +215,27 @@ class ExactQwenChatTokenCounter:
             "encoding_add_special_tokens": False,
         }
 
-    def render(self, messages: list[dict[str, Any]]) -> str:
+    def render(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        tools: list[dict[str, Any]] | None = None,
+    ) -> str:
         return self._template.render(
             messages=messages,
-            tools=None,
+            tools=tools,
             documents=None,
             add_generation_prompt=True,
             **self._template_values,
         )
 
-    def count(self, messages: list[dict[str, Any]]) -> int:
-        rendered = self.render(messages)
+    def count(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        tools: list[dict[str, Any]] | None = None,
+    ) -> int:
+        rendered = self.render(messages, tools=tools)
         return len(
             self._tokenizer.encode(rendered, add_special_tokens=False).ids
         )

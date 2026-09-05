@@ -51,13 +51,19 @@ def _qualification_policy():
 
 cmpilot_task_file_policy.calculator_task_policy = _qualification_policy
 anchor = cmpilot_task_file_policy.CALCULATOR_AGENT_POLICY_TEXT
-if cmpilot_action_protocol.INITIAL_SYSTEM_TEMPLATE.count(anchor) != 1:
-    raise RuntimeError("frozen system prompt task-policy anchor mismatch")
-cmpilot_action_protocol.INITIAL_SYSTEM_TEMPLATE = (
-    cmpilot_action_protocol.INITIAL_SYSTEM_TEMPLATE.replace(
-        anchor, policy.agent_visible_policy_text, 1
+for template_name in ("INITIAL_SYSTEM_TEMPLATE", "NATIVE_TOOL_SYSTEM_TEMPLATE"):
+    template = getattr(cmpilot_action_protocol, template_name)
+    if template.count(anchor) != 1:
+        raise RuntimeError(
+            f"system prompt task-policy anchor mismatch: {template_name}"
+        )
+    setattr(
+        cmpilot_action_protocol,
+        template_name,
+        template.replace(
+            anchor, policy.agent_visible_policy_text, 1
+        ),
     )
-)
 
 frozen_adapter = Path(__file__).with_name("cmpilot_frozen_adapter_runtime.py")
 expected_adapter_sha256 = os.environ["CMPILOT_FROZEN_ADAPTER_SHA256"]

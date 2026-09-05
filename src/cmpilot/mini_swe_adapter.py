@@ -36,11 +36,11 @@ class MiniSWEInfo:
     diagnostic: str
 
 
-# This follows mini-SWE-agent v2.4.6's documented Python API. The installed
-# default.yaml prompt uses fenced text actions, so the project-owned direct model
-# reuses mini-SWE's text parser instead of its native tool-call parser. DefaultAgent
-# avoids interactive confirmation and saves its native trajectory. Each run receives
-# an exact source snapshot rather than importing the cmpilot environment.
+# This follows mini-SWE-agent v2.4.6's documented Python API. The project-owned
+# direct model supports both the original fenced-text protocol and the native bash
+# tool-call protocol. DefaultAgent avoids interactive confirmation and saves its
+# native trajectory. Each run receives an exact source snapshot rather than
+# importing the cmpilot environment.
 ADAPTER_SOURCE = (_INTEGRATION_ROOT / "adapter_runtime.py").read_text(encoding="utf-8")
 
 

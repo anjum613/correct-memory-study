@@ -105,6 +105,7 @@ class AdapterConfig:
     tokenizer_path: str
     base_url: str
     agent_config_source: Path
+    seed: int | None = None
 
     def __post_init__(self) -> None:
         if not self.model.strip():

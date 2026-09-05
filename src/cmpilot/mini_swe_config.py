@@ -78,6 +78,7 @@ SUPPORTED_MODEL_FIELDS = frozenset(
         "context_safety_margin",
         "minimum_useful_completion",
         "request_budget_artifact_path",
+        "native_tool_calls",
     }
 )
 DIRECT_MODEL_CLASS = "cmpilot_vllm_text_model.VllmTextModel"

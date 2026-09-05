@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#SBATCH --job-name=qwen3-next-final13
+#SBATCH --job-name=qwen3-next-tools-final13
 #SBATCH --partition=Virtual
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
