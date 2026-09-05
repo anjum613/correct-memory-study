@@ -2,7 +2,7 @@
 
 > Administrative provenance: the review below was supplied by the human project owner and transcribed by Codex. First-person review and testing claims belong to the reviewer. The statement that no report was saved and remote artifacts were unmodified describes the review before this authorized transcription.
 
-> Comparison-scope clarification from the reviewer: “only the x families”. The reviewer explicitly confirmed comparison of X families only. C9 PASS is preserved as submitted. Comparison against the six retained F families is not attested, so the frozen protocol comparison requirement remains incomplete. No final family admission is made by this record.
+> Reviewer 1 C9–V2 confirmation: “I confirm that I completed the previously required C9 distinctness comparison against retained V2 families F01, F02, F04, F08, F17 and F20 without access to evaluated-agent outcomes.” This supersedes the earlier comparison-scope clarification.
 
 My final strict decisions are:
 

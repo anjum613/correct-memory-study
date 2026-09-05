@@ -397,4 +397,4 @@ No review-output file remains. The temporary local inspection helper was deleted
 
 Reviewer identity label: human-reviewer-2. Role: primary_2. Signature form: non-cryptographic human attestation relayed by the project owner in the current Codex session. Recorded at 2026-09-05T16:11:07Z.
 
-The submission describes review of the 16 accepted X-family attempts. It does not explicitly attest comparison with the six retained V2 families, and the saved structured records mark that broader protocol comparison as outstanding.
+Reviewer 2 C9–V2 confirmation: “I confirm that I completed the previously required C9 distinctness comparison against retained V2 families F01, F02, F04, F08, F17 and F20 without access to evaluated-agent outcomes.”
