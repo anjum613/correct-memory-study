@@ -4,10 +4,11 @@ set -euo pipefail
 
 : "${RUNPOD_SSH_HOST:?Set RUNPOD_SSH_HOST to the public pod IP or hostname}"
 : "${RUNPOD_SSH_PORT:?Set RUNPOD_SSH_PORT to the mapped SSH port}"
-: "${RUNPOD_SSH_KEY:?Set RUNPOD_SSH_KEY to the private-key path on the HPC}"
 : "${CMPILOT_RUNS_ROOT:?Set CMPILOT_RUNS_ROOT to a new persistent result directory}"
 
 runpod_user="${RUNPOD_SSH_USER:-root}"
+runpod_ssh_key="${RUNPOD_SSH_KEY:-/home/s224049759/.ssh/id_ed25519_runpod_qwen3}"
+runpod_known_hosts="${RUNPOD_KNOWN_HOSTS:-/home/s224049759/.ssh/known_hosts_runpod_qwen3}"
 remote_vllm_port="${RUNPOD_VLLM_PORT:-8000}"
 local_vllm_port="${LOCAL_VLLM_PORT:-18000}"
 workers="${CMPILOT_WORKERS:-2}"
@@ -16,8 +17,8 @@ tokenizer_path="${QWEN3_TOKENIZER_PATH:-/home/s224049759/model-cache/qwen3-coder
 v3_dependency_path="${QWEN3_V3_DEPENDENCY_PATH:-/home/s224049759/environments/qwen36-vllm-v1/lib/python3.12/site-packages}"
 base_url="http://127.0.0.1:${local_vllm_port}/v1"
 
-if [[ ! -f "$RUNPOD_SSH_KEY" ]]; then
-  printf 'RunPod SSH private key not found: %s\n' "$RUNPOD_SSH_KEY" >&2
+if [[ ! -f "$runpod_ssh_key" ]]; then
+  printf 'RunPod SSH private key not found: %s\n' "$runpod_ssh_key" >&2
   exit 2
 fi
 if [[ ! "$RUNPOD_SSH_PORT" =~ ^[1-9][0-9]{0,4}$ ]] || (( RUNPOD_SSH_PORT > 65535 )); then
@@ -29,13 +30,16 @@ mkdir -p "$CMPILOT_RUNS_ROOT"
 tunnel_log="$CMPILOT_RUNS_ROOT/ssh-tunnel.log"
 ssh \
   -N \
-  -i "$RUNPOD_SSH_KEY" \
+  -i "$runpod_ssh_key" \
   -p "$RUNPOD_SSH_PORT" \
   -L "127.0.0.1:${local_vllm_port}:127.0.0.1:${remote_vllm_port}" \
   -o BatchMode=yes \
   -o ExitOnForwardFailure=yes \
+  -o IdentitiesOnly=yes \
   -o ServerAliveInterval=15 \
   -o ServerAliveCountMax=4 \
+  -o StrictHostKeyChecking=accept-new \
+  -o "UserKnownHostsFile=${runpod_known_hosts}" \
   "${runpod_user}@${RUNPOD_SSH_HOST}" >"$tunnel_log" 2>&1 &
 tunnel_pid=$!
 cleanup() {
