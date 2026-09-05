@@ -21,12 +21,18 @@ import subprocess
 import traceback
 from typing import Any, Mapping, Sequence
 
+from .integrations.miniswe.action_protocol import (
+    INITIAL_SYSTEM_TEMPLATE,
+    INSTANCE_TEMPLATE,
+)
+from .integrations.miniswe.context_budget import ExactQwenChatTokenCounter
 from .mini_swe_adapter import mini_swe_info
 from .qualification_adapter import command, write_qualification_adapter
 from .qualification_runner import AdapterConfig
 from .repository_manager import final_patch, prepare_working_copy
 from .smoke_runner import _safe_agent_environment, _trajectory_metrics, execute_agent
 from .task_file_policy import (
+    CALCULATOR_AGENT_POLICY_TEXT,
     TaskFilePolicy,
     capture_protected_path_state,
     check_protected_path_integrity,
@@ -558,6 +564,64 @@ def validate_model_profile(project_root: Path) -> dict[str, Any]:
     return {"path": str(path), "sha256": sha256_file(path), "status": "PASS"}
 
 
+def validate_initial_context_budgets(
+    project_root: Path,
+    tokenizer_path: Path,
+) -> dict[str, Any]:
+    """Count every initial runtime prompt with the pinned Qwen3 chat template."""
+    counter = ExactQwenChatTokenCounter(
+        tokenizer_path,
+        expected_tokenizer_json_sha256=TOKENIZER_JSON_SHA256,
+        expected_tokenizer_config_sha256=TOKENIZER_CONFIG_SHA256,
+    )
+    observations: list[tuple[int, FrozenCell]] = []
+    for cell in qwen3_cells(project_root):
+        frozen_messages, _ = render_frozen_messages(project_root, cell)
+        binding = _binding_by_family(project_root, cell.family_id)
+        baseline = str(binding["baseline_B"]["path"])
+        if "/B/" not in baseline:
+            raise Qwen3Final13Error(
+                f"baseline path lacks B component: {cell.family_id}"
+            )
+        service = Path(baseline.split("/B/", 1)[1])
+        policy = task_policy(service, ())
+        if INITIAL_SYSTEM_TEMPLATE.count(CALCULATOR_AGENT_POLICY_TEXT) != 1:
+            raise Qwen3Final13Error("MiniSWE task-policy prompt anchor changed")
+        system = INITIAL_SYSTEM_TEMPLATE.replace(
+            CALCULATOR_AGENT_POLICY_TEXT,
+            policy.agent_visible_policy_text,
+            1,
+        )
+        runtime_messages = [
+            {"role": "system", "content": system},
+            {
+                "role": "user",
+                "content": INSTANCE_TEMPLATE.replace(
+                    "{{task}}", frozen_messages[1]["content"]
+                ),
+            },
+        ]
+        observations.append((counter.count(runtime_messages), cell))
+    minimum = min(observations, key=lambda item: item[0])
+    maximum = max(observations, key=lambda item: item[0])
+    if maximum[0] + 512 + 32 > 4096:
+        raise Qwen3Final13Error(
+            "an initial runtime prompt exceeds the frozen context budget"
+        )
+    return {
+        "cell_count": len(observations),
+        "maximum_initial_prompt": {
+            "cell": maximum[1].as_record(),
+            "tokens": maximum[0],
+        },
+        "minimum_initial_prompt": {
+            "cell": minimum[1].as_record(),
+            "tokens": minimum[0],
+        },
+        "status": "PASS",
+    }
+
+
 def preflight(config: RunConfig, *, check_endpoint: bool = True) -> dict[str, Any]:
     """Perform all read-only checks required before creating run artifacts."""
     checks: dict[str, bool] = {}
@@ -580,6 +644,15 @@ def preflight(config: RunConfig, *, check_endpoint: bool = True) -> dict[str, An
     except (OSError, Qwen3Final13Error) as error:
         checks["model_profile"] = False
         diagnostics["model_profile"] = str(error)
+    try:
+        diagnostics["initial_context_budgets"] = validate_initial_context_budgets(
+            config.project_root,
+            config.tokenizer_path,
+        )
+        checks["initial_context_budgets"] = True
+    except (OSError, ValueError, RuntimeError) as error:
+        checks["initial_context_budgets"] = False
+        diagnostics["initial_context_budgets"] = str(error)
 
     agent = mini_swe_info(config.mini_python)
     checks["mini_swe_agent_2_4_6"] = agent.available
@@ -1110,6 +1183,7 @@ __all__ = [
     "run_cell",
     "task_policy",
     "validate_frozen_inputs",
+    "validate_initial_context_budgets",
     "validate_model_profile",
     "validate_tokenizer",
 ]
