@@ -213,7 +213,48 @@ class ExactQwenChatTokenCounter:
             "chat_template_source": "tokenizer_config.json",
             "chat_template_add_generation_prompt": True,
             "encoding_add_special_tokens": False,
+            "tool_call_arguments_normalized_for_template": True,
         }
+
+    @staticmethod
+    def _template_messages(
+        messages: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Adapt OpenAI JSON-string arguments to Qwen's Jinja mapping shape."""
+        normalized_messages: list[dict[str, Any]] = []
+        for message in messages:
+            normalized_message = dict(message)
+            tool_calls = message.get("tool_calls")
+            if not isinstance(tool_calls, list):
+                normalized_messages.append(normalized_message)
+                continue
+            normalized_calls: list[Any] = []
+            for tool_call in tool_calls:
+                if not isinstance(tool_call, dict):
+                    normalized_calls.append(tool_call)
+                    continue
+                normalized_call = dict(tool_call)
+                function = tool_call.get("function")
+                if isinstance(function, dict):
+                    normalized_function = dict(function)
+                    arguments = function.get("arguments")
+                    if isinstance(arguments, str):
+                        try:
+                            arguments = json.loads(arguments)
+                        except json.JSONDecodeError as error:
+                            raise ContextBudgetError(
+                                "assistant tool-call arguments are not valid JSON"
+                            ) from error
+                        if not isinstance(arguments, dict):
+                            raise ContextBudgetError(
+                                "assistant tool-call arguments must decode to a mapping"
+                            )
+                        normalized_function["arguments"] = arguments
+                    normalized_call["function"] = normalized_function
+                normalized_calls.append(normalized_call)
+            normalized_message["tool_calls"] = normalized_calls
+            normalized_messages.append(normalized_message)
+        return normalized_messages
 
     def render(
         self,
@@ -222,7 +263,7 @@ class ExactQwenChatTokenCounter:
         tools: list[dict[str, Any]] | None = None,
     ) -> str:
         return self._template.render(
-            messages=messages,
+            messages=self._template_messages(messages),
             tools=tools,
             documents=None,
             add_generation_prompt=True,
