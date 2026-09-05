@@ -15,15 +15,14 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from cmpilot.qwen3_final13 import (  # noqa: E402
-    AGENT_CONFIG_PATH,
     RunConfig,
     SERVED_MODEL_NAME,
     preflight,
     qwen3_cells,
     run_batch,
+    run_canary,
     run_cell,
 )
-from cmpilot.smoke_runner import SmokeConfig, run_smoke  # noqa: E402
 
 
 DEFAULT_MINI_PYTHON = "/home/s224049759/environments/mini-swe-agent-smoke/bin/python"
@@ -103,16 +102,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(json.dumps(result, indent=2, sort_keys=True))
         return 0 if result["overall"] == "PASS" else 2
     if arguments.command == "canary":
-        smoke = SmokeConfig(
-            base_url=config.base_url,
-            model=config.model,
-            mini_python=config.mini_python,
-            runs_root=config.run_root / "canary",
-            agent_timeout=config.agent_timeout_seconds,
-            tokenizer_path=str(config.tokenizer_path),
-            agent_config_source=ROOT / AGENT_CONFIG_PATH,
-        )
-        return run_smoke(smoke)
+        result = run_canary(config)
+        print(json.dumps(result, indent=2, sort_keys=True))
+        return 0 if result.get("status") == "PASS" else 3
     if arguments.command == "cell":
         if (arguments.index is None) == (arguments.run_id is None):
             raise SystemExit("cell requires exactly one of --index or --run-id")

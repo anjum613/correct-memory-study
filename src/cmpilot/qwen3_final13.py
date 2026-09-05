@@ -20,6 +20,7 @@ import shutil
 import subprocess
 import traceback
 from typing import Any, Mapping, Sequence
+from uuid import uuid4
 
 from .integrations.miniswe.action_protocol import (
     INITIAL_SYSTEM_TEMPLATE,
@@ -92,6 +93,36 @@ BOUNDARY = (
     "Before reusing the procedure, verify whether its stated source-valid assumption "
     "still holds in the target context."
 )
+CANARY_TASK = """Implement `add(a, b)` in calculator.py so it returns the sum of its two arguments.
+
+Only calculator.py may be changed. Run `run_public_tests` to check the implementation,
+then submit using the completion command from the system message.
+"""
+CANARY_CALCULATOR = """\"\"\"Deliberately unfinished deployment canary.\"\"\"
+
+
+def add(a, b):
+    raise NotImplementedError
+"""
+CANARY_TESTS = """import unittest
+
+from calculator import add
+
+
+class CalculatorTests(unittest.TestCase):
+    def test_positive_integers(self):
+        self.assertEqual(add(2, 3), 5)
+
+    def test_opposite_integers(self):
+        self.assertEqual(add(-2, 2), 0)
+
+    def test_floats(self):
+        self.assertEqual(add(1.5, 2.5), 4.0)
+
+
+if __name__ == "__main__":
+    unittest.main()
+"""
 
 
 class Qwen3Final13Error(RuntimeError):
@@ -272,6 +303,22 @@ def validate_frozen_inputs(project_root: Path, *, check_git: bool = True) -> dic
     cells = qwen3_cells(root, matrix=matrix)
     if len(cells) != 104:
         raise Qwen3Final13Error("expected exactly 104 Qwen-arm cells")
+    expected_family_design = {
+        (condition, repetition)
+        for condition in CONDITIONS
+        for repetition in (1, 2)
+    }
+    for family_id in EXPECTED_FAMILY_ORDER:
+        observed_family_design = {
+            (cell.condition, cell.repetition)
+            for cell in cells
+            if cell.family_id == family_id
+        }
+        if observed_family_design != expected_family_design:
+            raise Qwen3Final13Error(
+                f"{family_id} does not use the identical four-condition, "
+                "two-repetition design"
+            )
     if check_git:
         tag_commit = _git_output(root, "rev-parse", f"{EXPECTED_COHORT_TAG}^{{commit}}")
         if tag_commit != EXPECTED_COHORT_COMMIT:
@@ -288,6 +335,9 @@ def validate_frozen_inputs(project_root: Path, *, check_git: bool = True) -> dic
         "cohort_commit": EXPECTED_COHORT_COMMIT,
         "cohort_tag": EXPECTED_COHORT_TAG,
         "family_count": len(EXPECTED_FAMILY_ORDER),
+        "conditions_per_family": len(CONDITIONS),
+        "repetitions_per_family_condition": 2,
+        "cells_per_family": len(expected_family_design),
         "protocol_manifest_sha256": sha256_file(root / PROTOCOL_MANIFEST),
         "qwen_source_cell_count": len(cells),
         "run_matrix_sha256": sha256_file(root / RUN_MATRIX_PATH),
@@ -500,10 +550,209 @@ def task_policy(service: Path, repository_files: Sequence[str]) -> TaskFilePolic
         agent_visible_policy_text=(
             "Task file policy: controlled-synthetic-final-13-task-policy-v1.\n"
             f"Only {service_text} may be modified. All other repository files are read-only.\n"
-            "You may inspect and run the public tests using existing shell tools.\n"
+            "Use ordinary shell inspection and noninteractive editing commands for the "
+            "list_files/read_file/edit_service operations named in AGENTS.md.\n"
+            "Run the complete frozen public suite with `run_public_tests` (also available "
+            "as `pytest`).\n"
             "Do not access hidden tests, harness files, network services, or parent paths.\n"
             "Use only dependencies already installed; do not install packages.\n"
             "Interactive terminal editors are unavailable.\n"
+        ),
+    )
+
+
+def _runner_header(config: RunConfig) -> str:
+    executable = Path(config.mini_python)
+    if (
+        not executable.is_absolute()
+        or not executable.is_file()
+        or any(character in config.mini_python for character in ("\n", "\r"))
+    ):
+        raise Qwen3Final13Error(
+            f"mini-SWE Python must be an absolute executable file: {config.mini_python}"
+        )
+    return f"#!{config.mini_python}\n"
+
+
+def _retained_public_runner_source(config: RunConfig) -> str:
+    return _runner_header(config) + '''"""Execute only the task repository's public tests."""
+from pathlib import Path
+import os
+import subprocess
+import sys
+
+root = Path.cwd().resolve()
+test_files = sorted((root / "tests" / "public_existing").glob("**/*.py"))
+test_files += sorted((root / "tests" / "public_feature").glob("**/*.py"))
+if not test_files:
+    print("No public tests were found.", file=sys.stderr)
+    raise SystemExit(2)
+environment = os.environ.copy()
+environment["PYTHONNOUSERSITE"] = "1"
+environment["PYTHONDONTWRITEBYTECODE"] = "1"
+environment["PYTHONPATH"] = str(root)
+failed = 0
+for test_file in test_files:
+    relative = test_file.relative_to(root)
+    print(f"== {relative} ==", flush=True)
+    result = subprocess.run(
+        [sys.executable, str(test_file)],
+        cwd=root,
+        env=environment,
+        text=True,
+    )
+    failed += int(result.returncode != 0)
+print(f"Public test files: {len(test_files)}; failed: {failed}")
+raise SystemExit(1 if failed else 0)
+'''
+
+
+def _v3_public_runner_source(
+    config: RunConfig,
+    family_id: str,
+    service_path: Path,
+) -> str:
+    if config.v3_dependency_path is None:
+        raise Qwen3Final13Error("V3 public tests require a dependency path")
+    dependency = config.v3_dependency_path.resolve(strict=True)
+    family_literal = repr(family_id)
+    service_literal = repr(service_path.as_posix())
+    dependency_literal = repr(str(dependency))
+    return _runner_header(config) + f'''"""Execute only this task repository's public checks."""
+from pathlib import Path
+import importlib.util
+import sys
+import traceback
+
+FAMILY = {family_literal}
+SERVICE = {service_literal}
+root = Path.cwd().resolve()
+sys.path.insert(0, str(root))
+sys.path.insert(1, {dependency_literal})
+
+def load_module(name, path):
+    specification = importlib.util.spec_from_file_location(name, path)
+    if specification is None or specification.loader is None:
+        raise ImportError(f"cannot load {{path.name}}")
+    module = importlib.util.module_from_spec(specification)
+    sys.modules[name] = module
+    specification.loader.exec_module(module)
+    return module
+
+if FAMILY == "X02":
+    from fixture_api.x02_inputs import InvalidInput, cells, validate_request
+    from fixture_api.x02_lowering import lower
+    from fixture_api.x02_machine import Execution, run as machine_run
+
+    compiled = lower((root / SERVICE).read_text(encoding="utf-8"))
+    def application(pattern, records, flags="NONE"):
+        try:
+            validate_request(pattern, records, flags)
+        except InvalidInput:
+            return Execution("INVALID_INPUT")
+        return machine_run(compiled, cells(pattern, records, flags), tuple(records))
+else:
+    service = load_module("candidate_service", root / SERVICE)
+    application = getattr(service, "run")
+    if not callable(application):
+        raise TypeError("app service must export callable run")
+
+public_tests = load_module("candidate_public_tests", root / "public_tests.py")
+failures = 0
+for suffix in ("existing", "feature"):
+    name = FAMILY.lower() + "_" + suffix
+    print(f"== {{name}} ==", flush=True)
+    try:
+        getattr(public_tests, name)(application)
+    except BaseException:
+        traceback.print_exc()
+        failures += 1
+    else:
+        print("PASS")
+print(f"Public checks: 2; failed: {{failures}}")
+raise SystemExit(1 if failures else 0)
+'''
+
+
+def _canary_public_runner_source(config: RunConfig) -> str:
+    return _runner_header(config) + '''"""Execute only the deployment canary's public tests."""
+from pathlib import Path
+import os
+import subprocess
+import sys
+
+root = Path.cwd().resolve()
+environment = os.environ.copy()
+environment["PYTHONNOUSERSITE"] = "1"
+environment["PYTHONDONTWRITEBYTECODE"] = "1"
+environment["PYTHONPATH"] = str(root)
+raise SystemExit(subprocess.run(
+    [sys.executable, str(root / "test_calculator.py")],
+    cwd=root,
+    env=environment,
+).returncode)
+'''
+
+
+def write_public_test_runner(
+    config: RunConfig,
+    destination: Path,
+    *,
+    binding: Mapping[str, Any] | None = None,
+    service_path: Path | None = None,
+    canary: bool = False,
+) -> dict[str, Any]:
+    """Create an agent-visible command backed exclusively by public task checks."""
+    if canary == (binding is not None):
+        raise Qwen3Final13Error(
+            "public test runner requires exactly one of canary or family binding"
+        )
+    destination.mkdir(mode=0o700)
+    runner = destination / "run_public_tests"
+    if canary:
+        source = _canary_public_runner_source(config)
+        family_id = "DEPLOYMENT_CANARY"
+        family_kind = "CANARY"
+    else:
+        assert binding is not None
+        if service_path is None:
+            raise Qwen3Final13Error("family public test runner requires service path")
+        family_id = str(binding["family_id"])
+        family_kind = str(binding["family_kind"])
+        if family_kind == "RETAINED_V2":
+            source = _retained_public_runner_source(config)
+        elif family_kind == "ADMITTED_V3":
+            source = _v3_public_runner_source(config, family_id, service_path)
+        else:
+            raise Qwen3Final13Error(f"unknown family kind: {family_kind}")
+    _write_text(runner, source)
+    runner.chmod(0o500)
+    pytest_alias = destination / "pytest"
+    pytest_alias.symlink_to(runner.name)
+    return {
+        "commands": ["run_public_tests", "pytest"],
+        "directory": str(destination),
+        "family_id": family_id,
+        "family_kind": family_kind,
+        "runner_sha256": sha256_file(runner),
+        "schema": "cmpilot-agent-public-test-runner-v1",
+    }
+
+
+def _canary_task_policy() -> TaskFilePolicy:
+    return TaskFilePolicy(
+        version="qwen3-runpod-deployment-canary-policy-v1",
+        writable_paths=("calculator.py",),
+        readable_protected_paths=("test_calculator.py",),
+        hidden_external_oracle_paths=(),
+        inaccessible_harness_paths=(".git", ".cmpilot", "harness", "run-metadata"),
+        agent_visible_policy_text=(
+            "Task file policy: qwen3-runpod-deployment-canary-policy-v1.\n"
+            "Only calculator.py may be modified; test_calculator.py is read-only.\n"
+            "Run the complete public suite with `run_public_tests` (also available as "
+            "`pytest`).\n"
+            "Do not access parent paths or network services and do not install packages.\n"
+            "Use authorized noninteractive repository editing commands.\n"
         ),
     )
 
@@ -976,6 +1225,13 @@ def run_cell(
         adapter_path = attempt / "mini_swe_adapter.py"
         adapter_record = write_qualification_adapter(adapter_path)
         _write_json(attempt / "mini-swe-adapter.json", adapter_record)
+        public_runner = write_public_test_runner(
+            config,
+            attempt / "agent-bin",
+            binding=binding,
+            service_path=service_path,
+        )
+        _write_json(attempt / "agent-public-test-runner.json", public_runner)
         adapter_config = AdapterConfig(
             model=config.model,
             tokenizer_path=str(config.tokenizer_path.resolve(strict=True)),
@@ -989,6 +1245,9 @@ def run_cell(
             adapter_config,
             trajectory,
             attempt / "rendered-task.md",
+        )
+        environment["CMPILOT_AGENT_PATH"] = os.pathsep.join(
+            (public_runner["directory"], environment["CMPILOT_AGENT_PATH"])
         )
         environment.update(
             {
@@ -1050,6 +1309,172 @@ def run_cell(
         result.update(
             {
                 "error": f"{type(error).__name__}: {error}",
+                "status": "TECHNICAL_FAILURE",
+                "technical_valid": False,
+                "traceback": traceback.format_exc(),
+            }
+        )
+    result["finished_at_utc"] = datetime.now(UTC).isoformat()
+    _write_json(attempt / "result.json", result)
+    return result
+
+
+def run_canary(config: RunConfig) -> dict[str, Any]:
+    """Run one tiny non-cohort task through the exact production adapter and endpoint."""
+    readiness = preflight(config)
+    if readiness["overall"] != "PASS":
+        raise Qwen3Final13Error(f"preflight failed: {readiness['checks']}")
+    canary_root = config.run_root / "canary"
+    canary_root.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    attempt = canary_root / f"canary-{timestamp}-{uuid4().hex[:8]}"
+    attempt.mkdir(mode=0o700)
+    result: dict[str, Any] = {
+        "finished_at_utc": None,
+        "model": {
+            "id": MODEL_ID,
+            "revision": MODEL_REVISION,
+            "served_model_name": config.model,
+        },
+        "run_directory": str(attempt),
+        "schema": "cmpilot-qwen3-runpod-canary-result-v1",
+        "started_at_utc": datetime.now(UTC).isoformat(),
+        "status": "RUNNING",
+    }
+    _write_json(attempt / "preflight.json", readiness)
+    _write_json(attempt / "runtime-identity.json", runtime_identity(config))
+    try:
+        initial_repository = attempt / "initial-repository"
+        initial_repository.mkdir(mode=0o700)
+        _write_text(initial_repository / "calculator.py", CANARY_CALCULATOR)
+        _write_text(initial_repository / "test_calculator.py", CANARY_TESTS)
+        task_instruction = attempt / "task.md"
+        _write_text(task_instruction, CANARY_TASK)
+        policy = _canary_task_policy()
+        policy_source = attempt / "task-policy-source.json"
+        _write_json(policy_source, policy.as_dict())
+        working_copy, initial_commit = prepare_working_copy(
+            initial_repository,
+            destination=attempt / "working-copy",
+            task_policy=policy,
+        )
+        expected_protected = capture_protected_path_state(working_copy, policy)
+        evaluator_environment = _minimal_evaluator_environment(
+            config.project_root,
+            working_copy,
+        )
+        before = _run_check(
+            [config.mini_python, "test_calculator.py"],
+            cwd=working_copy,
+            environment=evaluator_environment,
+        )
+        _write_json(attempt / "before-public-tests.json", before)
+        initial_failure_expected = bool(
+            before["status"] == "FAIL"
+            and "NotImplementedError" in (before["stdout"] + before["stderr"])
+        )
+        if not initial_failure_expected:
+            raise Qwen3Final13Error(
+                "canary public tests did not expose the unfinished implementation"
+            )
+
+        adapter_path = attempt / "mini_swe_adapter.py"
+        adapter_record = write_qualification_adapter(adapter_path)
+        _write_json(attempt / "mini-swe-adapter.json", adapter_record)
+        public_runner = write_public_test_runner(
+            config,
+            attempt / "agent-bin",
+            canary=True,
+        )
+        _write_json(attempt / "agent-public-test-runner.json", public_runner)
+        adapter_config = AdapterConfig(
+            model=config.model,
+            tokenizer_path=str(config.tokenizer_path.resolve(strict=True)),
+            base_url=config.base_url,
+            agent_config_source=(config.project_root / AGENT_CONFIG_PATH).resolve(
+                strict=True
+            ),
+        )
+        trajectory = attempt / "trajectory.json"
+        environment = _safe_agent_environment(
+            attempt,
+            working_copy,
+            adapter_config,
+            trajectory,
+            task_instruction,
+        )
+        environment["CMPILOT_AGENT_PATH"] = os.pathsep.join(
+            (public_runner["directory"], environment["CMPILOT_AGENT_PATH"])
+        )
+        environment.update(
+            {
+                "CMPILOT_FROZEN_ADAPTER_SHA256": adapter_record[
+                    "frozen_adapter_sha256"
+                ],
+                "CMPILOT_TASK_POLICY_SHA256": sha256_file(policy_source),
+                "CMPILOT_TASK_POLICY_SOURCE": str(policy_source),
+            }
+        )
+        command_line = command(config.mini_python, adapter_path)
+        _write_json(attempt / "mini-swe-command.json", command_line)
+        execution = execute_agent(
+            command_line,
+            working_copy,
+            environment,
+            config.agent_timeout_seconds,
+        )
+        _write_text(attempt / "agent-stdout.txt", execution.stdout)
+        _write_text(attempt / "agent-stderr.txt", execution.stderr)
+        _write_text(attempt / "final.patch", final_patch(working_copy, initial_commit))
+        integrity = check_protected_path_integrity(working_copy, expected_protected)
+        _write_json(attempt / "protected-path-integrity.json", integrity.as_dict())
+        after = _run_check(
+            [config.mini_python, "test_calculator.py"],
+            cwd=working_copy,
+            environment=evaluator_environment,
+        )
+        _write_json(attempt / "after-public-tests.json", after)
+        metrics = _trajectory_metrics(
+            trajectory,
+            {"calculator.py", "test_calculator.py"},
+        )
+        _write_json(attempt / "trajectory-metrics.json", metrics)
+        technical_valid = bool(
+            execution.exit_code == 0
+            and not execution.timed_out
+            and execution.launch_error is None
+            and integrity.ok
+            and trajectory.is_file()
+            and int(metrics.get("model_request_count") or 0) > 0
+        )
+        functional_pass = after["status"] == "PASS"
+        if technical_valid and functional_pass:
+            status = "PASS"
+        elif technical_valid:
+            status = "FUNCTIONAL_FAILURE"
+        else:
+            status = "TECHNICAL_FAILURE"
+        result.update(
+            {
+                "agent": {
+                    "exit_code": execution.exit_code,
+                    "launch_error": execution.launch_error,
+                    "timed_out": execution.timed_out,
+                },
+                "functional_pass": functional_pass,
+                "initial_commit": initial_commit,
+                "initial_failure_expected": initial_failure_expected,
+                "protected_paths_intact": integrity.ok,
+                "status": status,
+                "technical_valid": technical_valid,
+                "trajectory_metrics": metrics,
+            }
+        )
+    except Exception as error:
+        result.update(
+            {
+                "error": f"{type(error).__name__}: {error}",
+                "functional_pass": False,
                 "status": "TECHNICAL_FAILURE",
                 "technical_valid": False,
                 "traceback": traceback.format_exc(),
@@ -1180,10 +1605,12 @@ __all__ = [
     "qwen3_cells",
     "render_frozen_messages",
     "run_batch",
+    "run_canary",
     "run_cell",
     "task_policy",
     "validate_frozen_inputs",
     "validate_initial_context_budgets",
     "validate_model_profile",
     "validate_tokenizer",
+    "write_public_test_runner",
 ]

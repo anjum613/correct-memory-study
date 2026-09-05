@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import subprocess
 import sys
+from unittest.mock import patch
 
 import pytest
 
@@ -15,10 +17,13 @@ from cmpilot.qwen3_final13 import (
     materialize_repository,
     qwen3_cells,
     render_frozen_messages,
+    run_canary,
     task_policy,
     validate_frozen_inputs,
     validate_model_profile,
+    write_public_test_runner,
 )
+from cmpilot.smoke_runner import AgentExecution
 
 
 ROOT = Path(__file__).parents[1]
@@ -48,6 +53,22 @@ def test_frozen_cohort_and_qwen_projection_are_complete_and_unique() -> None:
         "MATCHED_IRRELEVANT_MEMORY",
         "SOURCE_MEMORY_PLUS_APPLICABILITY_BOUNDARY",
     }
+    expected_design = {
+        (condition, repetition)
+        for condition in {
+            "NO_MEMORY",
+            "SOURCE_CORRECT_MEMORY",
+            "MATCHED_IRRELEVANT_MEMORY",
+            "SOURCE_MEMORY_PLUS_APPLICABILITY_BOUNDARY",
+        }
+        for repetition in (1, 2)
+    }
+    for family_id in FAMILIES:
+        assert {
+            (cell.condition, cell.repetition)
+            for cell in cells
+            if cell.family_id == family_id
+        } == expected_design
 
 
 def test_every_projected_cell_reconstructs_its_frozen_message_hash() -> None:
@@ -130,3 +151,99 @@ def test_baseline_materialization_has_expected_matrix(
         "feature": "FAIL",
         "invariant": "PASS",
     }
+
+
+@pytest.mark.parametrize("family_id", FAMILIES)
+def test_agent_public_runner_exposes_only_public_checks(
+    tmp_path: Path,
+    family_id: str,
+) -> None:
+    if family_id.startswith("X"):
+        cryptography = pytest.importorskip("cryptography")
+        dependency_path = Path(cryptography.__file__).parents[1]
+    else:
+        dependency_path = None
+    binding = _binding_by_family(ROOT, family_id)
+    repository = tmp_path / "repository"
+    service, _ = materialize_repository(ROOT, binding, repository)
+    config = RunConfig(
+        project_root=ROOT,
+        run_root=tmp_path / "runs",
+        base_url="http://127.0.0.1:9/v1",
+        mini_python=sys.executable,
+        tokenizer_path=tmp_path,
+        v3_dependency_path=dependency_path,
+    )
+    record = write_public_test_runner(
+        config,
+        tmp_path / "agent-bin",
+        binding=binding,
+        service_path=service,
+    )
+    result = subprocess.run(
+        [str(tmp_path / "agent-bin" / "run_public_tests")],
+        cwd=repository,
+        text=True,
+        capture_output=True,
+        timeout=30,
+    )
+    source = (tmp_path / "agent-bin" / "run_public_tests").read_text(
+        encoding="utf-8"
+    )
+
+    assert result.returncode == 1
+    assert "failed: 1" in result.stdout
+    assert record["commands"] == ["run_public_tests", "pytest"]
+    assert (tmp_path / "agent-bin" / "pytest").resolve() == (
+        tmp_path / "agent-bin" / "run_public_tests"
+    )
+    assert "sealed" not in source
+    assert "invariant" not in source
+    assert "security_artifacts" not in source
+
+
+def test_deployment_canary_runs_through_production_adapter_shape(
+    tmp_path: Path,
+) -> None:
+    tokenizer = tmp_path / "tokenizer"
+    tokenizer.mkdir()
+    config = RunConfig(
+        project_root=ROOT,
+        run_root=tmp_path / "runs",
+        base_url="http://127.0.0.1:9/v1",
+        mini_python=sys.executable,
+        tokenizer_path=tokenizer,
+    )
+
+    def successful_agent(_command, _cwd, environment, _timeout):
+        repository = Path(environment["CMPILOT_REPOSITORY"])
+        (repository / "calculator.py").write_text(
+            "def add(a, b):\n    return a + b\n",
+            encoding="utf-8",
+        )
+        Path(environment["CMPILOT_TRAJECTORY"]).write_text(
+            '{"info":{"model_stats":{"api_calls":2},"exit_status":"Submitted"},'
+            '"messages":[]}\n',
+            encoding="utf-8",
+        )
+        assert environment["CMPILOT_AGENT_PATH"].split(":", 1)[0].endswith(
+            "agent-bin"
+        )
+        return AgentExecution(0, "completed\n", "", False)
+
+    with patch(
+        "cmpilot.qwen3_final13.preflight",
+        return_value={"overall": "PASS", "checks": {"mock": True}},
+    ), patch(
+        "cmpilot.qwen3_final13.execute_agent",
+        side_effect=successful_agent,
+    ):
+        result = run_canary(config)
+
+    attempt = Path(result["run_directory"])
+    assert result["status"] == "PASS"
+    assert result["technical_valid"] is True
+    assert result["functional_pass"] is True
+    assert result["initial_failure_expected"] is True
+    assert (attempt / "agent-public-test-runner.json").is_file()
+    assert (attempt / "after-public-tests.json").is_file()
