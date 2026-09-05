@@ -88,8 +88,8 @@ CONDITIONS = (
     "SOURCE_MEMORY_PLUS_APPLICABILITY_BOUNDARY",
 )
 MODEL_ORDER = (
-    "qwen2.5-coder-32b-instruct",
     "devstral-small-2507",
+    "qwen2.5-coder-32b-instruct",
 )
 SEEDS = (104729, 130363)
 
@@ -739,8 +739,11 @@ def render_v2_memory(content: str, boundary: bool) -> str:
 
 
 def freeze_experiment(cohort_commit: str, frozen_at: str) -> None:
-    require(git("rev-parse", "HEAD") == cohort_commit,
-            "experiment must be generated directly from the cohort commit")
+    subprocess.run(
+        ["git", "merge-base", "--is-ancestor", cohort_commit, "HEAD"],
+        cwd=ROOT, check=True,
+    )
+    generator_commit = git("rev-parse", "HEAD")
     cohort_path = ROOT / COHORT_DIR / "cohort_manifest.json"
     inventory_path = ROOT / COHORT_DIR / "artifact_inventory.json"
     cohort = read_json(cohort_path)
@@ -757,6 +760,9 @@ def freeze_experiment(cohort_commit: str, frozen_at: str) -> None:
     )
     x_pairing = read_json(
         ROOT / "protocols/controlled-synthetic-v3-difficulty-amendment-v1/irrelevant_pairing.json"
+    )
+    x_export_index = read_json(
+        ROOT / "protocols/controlled-synthetic-v3-difficulty-amendment-v1/export_index.json"
     )
     v2_pairing = {
         "F01": "F17", "F17": "F01",
@@ -846,6 +852,11 @@ def freeze_experiment(cohort_commit: str, frozen_at: str) -> None:
                 {"role": "user", "content": rendered[condition]},
             ]
             hashes[condition] = digest(canonical(messages))
+        if family in ADMITTED_V3:
+            require(
+                hashes == x_export_index[family]["messages_sha256"],
+                f"{family} message hashes differ from the frozen V3 envelope",
+            )
         message_hashes[family] = {
             "target_task": {"path": str(task_path), "sha256": digest(task.encode("utf-8"))},
             "messages_sha256": hashes,
@@ -914,6 +925,7 @@ def freeze_experiment(cohort_commit: str, frozen_at: str) -> None:
         "protocol_id": "controlled-synthetic-final-13-experiment-v1",
         "status": "FROZEN_BEFORE_EVALUATED_AGENT_RUNS",
         "frozen_at_utc": frozen_at,
+        "generator_commit": generator_commit,
         "cohort": {
             "commit": cohort_commit,
             "tag": "controlled-synthetic-final-13-cohort-v1",
