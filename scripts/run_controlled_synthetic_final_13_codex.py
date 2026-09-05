@@ -29,7 +29,7 @@ import time
 from typing import Any, Iterable, Mapping
 
 
-PROTOCOL_ID = "controlled-synthetic-final-13-codex-v2"
+PROTOCOL_ID = "controlled-synthetic-final-13-codex-v3"
 PROTOCOL_TAG = PROTOCOL_ID
 SOURCE_PROTOCOL_ID = "controlled-synthetic-final-13-experiment-v1"
 SOURCE_COHORT_COMMIT = "c03215d43faec963affae284db08b12743cd9fb6"
@@ -482,6 +482,14 @@ def freeze_protocol(repo: Path, model_cache: Path) -> None:
             "technical_retry_policy": "NO_RETRY; interrupted attempts are technical invalids",
             "hidden_witness_exposure": "separate post-session networkless namespace",
         },
+        "evaluator_release": {
+            "adapter": "synthetic_triplets/controlled_v3_difficulty_amendment_v1",
+            "adapter_manifest": "protocols/controlled-synthetic-v3-difficulty-amendment-v1/manifest.json",
+            "adapter_manifest_sha256": sha256_file(
+                repo / "protocols/controlled-synthetic-v3-difficulty-amendment-v1/manifest.json"
+            ),
+            "base": "synthetic_triplets/controlled_v3_executable_oracle_release_v1",
+        },
     }
     write_new(destination / "protocol.json", protocol)
     readme = f"""# Final 13-family Codex production experiment
@@ -655,6 +663,8 @@ def build_snapshot(repo: Path, snapshot: Path) -> None:
 
     oracle_source = repo / "synthetic_triplets/controlled_v3_executable_oracle_release_v1"
     copy_tree_clean(oracle_source, snapshot / "v3_oracle")
+    difficulty_source = repo / "synthetic_triplets/controlled_v3_difficulty_amendment_v1"
+    copy_tree_clean(difficulty_source, snapshot / "v3_difficulty_oracle")
 
 
 def find_codex_environment() -> dict[str, Any]:
@@ -825,14 +835,24 @@ def evaluate_x(
     copy_tree_clean(source_workspace, evaluation_workspace)
     runtime = destination / "runtime"
     runtime.mkdir(parents=True)
-    copy_tree_clean(output_root / "frozen/snapshot/v3_oracle", runtime / "oracle")
+    package_root = runtime / "synthetic_triplets"
+    package_root.mkdir()
+    write_new(package_root / "__init__.py", "")
+    oracle_package = package_root / "controlled_v3_executable_oracle_release_v1"
+    copy_tree_clean(output_root / "frozen/snapshot/v3_oracle", oracle_package)
+    difficulty_package = package_root / "controlled_v3_difficulty_amendment_v1"
+    copy_tree_clean(
+        output_root / "frozen/snapshot/v3_difficulty_oracle", difficulty_package
+    )
     allowed = read_json(
         output_root / "frozen/snapshot/families" / family / "metadata.json"
     )["allowed_edit_path"]
     command = namespace_command(
         output_root, evaluation_workspace, runtime, destination / "jail",
         [
-            "/usr/bin/python3", "-m", "oracle.candidate_worker", family, state,
+            "/usr/bin/python3", "-m",
+            "synthetic_triplets.controlled_v3_difficulty_amendment_v1.worker",
+            family, state,
             "/workspace/" + allowed,
         ],
         network=False,
