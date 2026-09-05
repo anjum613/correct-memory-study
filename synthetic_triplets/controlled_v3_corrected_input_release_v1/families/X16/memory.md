@@ -1,0 +1,1 @@
+# Frozen source memory X16\n\nProcedure: Attach authenticated user state to the current session identifier.\n\nApplicability assumption: The server exclusively chose the current identifier for its session owner.\n

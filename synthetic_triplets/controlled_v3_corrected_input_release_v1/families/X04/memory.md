@@ -1,0 +1,1 @@
+# Frozen source memory X04\n\nProcedure: Authorize one requested record and serialize the selected record set.\n\nApplicability assumption: The selected set contains exactly the one record whose access was authorized.\n

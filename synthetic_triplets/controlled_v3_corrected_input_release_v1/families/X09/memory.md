@@ -1,0 +1,1 @@
+# Frozen source memory X09\n\nProcedure: Apply an authenticated operation when its request arrives, then return the result.\n\nApplicability assumption: Each authenticated operation is delivered at most once.\n
