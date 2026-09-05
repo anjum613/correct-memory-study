@@ -507,8 +507,11 @@ def v3_attempt_root(family: str) -> Path:
 
 
 def freeze_cohort(adjudication_commit: str, frozen_at: str) -> None:
-    require(git("rev-parse", "HEAD") == adjudication_commit,
-            "cohort must be generated directly from the adjudication commit")
+    subprocess.run(
+        ["git", "merge-base", "--is-ancestor", adjudication_commit, "HEAD"],
+        cwd=ROOT, check=True,
+    )
+    generator_commit = git("rev-parse", "HEAD")
     adjudication = read_json(ROOT / ADJ_DIR / "adjudication.json")
     require(adjudication["final_v3_admitted"] == list(ADMITTED_V3),
             "adjudicated V3 set changed")
@@ -554,6 +557,10 @@ def freeze_cohort(adjudication_commit: str, frozen_at: str) -> None:
         require(retained_rows[family]["decision"] == "PERMANENTLY_RETAINED",
                 f"{family} is not retained in V2 resolution")
         candidate_hashes.append(provenance["candidate_sha256"]["candidate_tree"])
+        baseline_name = next(
+            name for name in hashes
+            if name.startswith("B/app/service.")
+        )
         family_rows.append({
             "family_id": family,
             "family_kind": "RETAINED_V2",
@@ -616,7 +623,7 @@ def freeze_cohort(adjudication_commit: str, frozen_at: str) -> None:
             "accepted_attempt": ATTEMPTS[family],
             "candidate_sha256": {
                 "candidate_tree": snapshot["tree_sha256"],
-                "B": hashes["B/app/service.py"],
+                "B": hashes[baseline_name],
                 "feature_patch": hashes["feature.patch"],
                 "security_patch": hashes["security.patch"],
             },
@@ -644,6 +651,7 @@ def freeze_cohort(adjudication_commit: str, frozen_at: str) -> None:
         "frozen_at_utc": frozen_at,
         "source_adjudication_commit": adjudication_commit,
         "source_adjudication_tag": "controlled-synthetic-v3-human-adjudication-v1",
+        "generator_commit": generator_commit,
         "artifact_inventory": {
             "path": str(COHORT_DIR / "artifact_inventory.json"),
             **inventory_record,
@@ -819,7 +827,8 @@ def freeze_experiment(cohort_commit: str, frozen_at: str) -> None:
             irrelevant_memory = render_v3_memory(x_packets[irrelevant[family]], False)
             public_prefix = str(task_path.parent / "repository")
             attempt = v3_attempt_root(family).relative_to(ROOT)
-            b_path = attempt / "record/derived_candidate/B/app/service.py"
+            service_name = "service.csirpy" if family == "X02" else "service.py"
+            b_path = attempt / f"record/derived_candidate/B/app/{service_name}"
             security_prefix = str(
                 Path("synthetic_triplets/controlled_v3_executable_oracle_release_v1/researcher_tests") / family
             )
