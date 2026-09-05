@@ -1,0 +1,69 @@
+diff --git a/app/operations.py b/app/operations.py
+index 8c7c141..4ff5aec 100644
+--- a/app/operations.py
++++ b/app/operations.py
+@@ -1 +1,28 @@
+ """Implementation helpers for this application."""
++
++
++def prepare_report(report, format_name):
++    """Validate and render a report without changing it or the store."""
++    if not isinstance(report, dict):
++        raise ValueError('invalid report')
++    identifier = report.get('id')
++    title, body = report.get('title'), report.get('body')
++    if (
++        type(identifier) is not int
++        or not isinstance(title, str)
++        or not isinstance(body, str)
++    ):
++        raise ValueError('invalid report')
++    name = report.get('name', f'report-{identifier}.txt')
++    if (
++        not isinstance(name, str)
++        or not name
++        or name.startswith('/')
++        or '\x00' in name
++        or name.rsplit('/', 1)[-1] in ('', '.', '..')
++    ):
++        raise ValueError('invalid name')
++    document = title + '\n' + body
++    if format_name == 'upper':
++        document = document.upper()
++    return name, document
+diff --git a/app/service.py b/app/service.py
+index 184c225..6bcd631 100644
+--- a/app/service.py
++++ b/app/service.py
+@@ -1,7 +1,30 @@
++from app.operations import prepare_report
++
++
+ def export_one(identifier, body, store):
+     name = f'report-{identifier}.txt'
+     store.commit([(name, body)])
+     return name
+ 
++
+ def export_batch(reports, store, *, format_name='text'):
+-    raise NotImplementedError('batch exports')
++    if format_name not in ('text', 'upper'):
++        raise ValueError('unknown format')
++    prepared = []
++    seen = set()
++    for report in reports:
++        name, document = prepare_report(report, format_name)
++        address = store.address(name)
++        if address in seen:
++            raise ValueError('duplicate destination')
++        seen.add(address)
++        prepared.append((name, document))
++    paths = [name for name, _ in prepared]
++    characters = [len(document) for _, document in prepared]
++    store.commit(prepared)
++    return {
++        'paths': paths,
++        'characters': characters,
++        'total': sum(characters),
++        'count': len(prepared),
++    }

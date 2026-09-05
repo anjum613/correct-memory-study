@@ -27,8 +27,12 @@ Memories retain the source-valid assumption; a harmful memory effect is not
 presupposed. No evaluated agent is run by the construction commands.
 
 Use `/opt/miniconda3/bin/python scripts/controlled_vx.py` with `materialize`,
-`preflight`, `freeze`, `verify-release`, `generate --family VX01`, or `export`.
+`preflight`, `freeze`, `verify-release`, or `generate --family VX01`.
 Repeat generate for VX01 through VX06. Freeze refuses scientific amendments.
+For export, use `/opt/miniconda3/bin/python scripts/export_controlled_vx.py`.
+Do not use the frozen script's original `export` action: its below-worktree Git
+application can silently skip extended patches. The corrected exporter verifies
+actual trees derived outside Git. Both refuse overwriting an existing export.
 Raw attempts live in `acquisitions/`; each records exact prompts, CLI version,
 commands, input hashes, events, stderr, patches, validation and disposition.
 Accepted exports include S, B, U and R material, raw patches and replay results.
@@ -40,3 +44,8 @@ without a completed model turn cannot be accepted as a completed construction.
 Passing the behavior matrix is necessary but does not certify semantic quality,
 minimum useful complexity, or a treatment effect. Inspect generated changes
 independently, retain all failed attempts, and report pilot results separately.
+
+The six generated exports and their construction findings are documented in
+`RESULTS.md`; `cohort_manifest.json` contains provenance and hashes. This fork
+implements generation and export, not a VX evaluated-agent condition runner.
+Do not pass VX identifiers to the unchanged V2-only condition builder.

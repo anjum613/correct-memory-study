@@ -1,0 +1,47 @@
+--- a/app/service.py
++++ b/app/service.py
+@@ -1,5 +1,18 @@
++from app.operations import group_status_rows
++from app.runtime import TABLE_START, TABLE_END
++
++
+ def badge(code):
+     return f'<span class="status">{int(code)}</span>'
+ 
++
+ def render_table(rows, *, descending=False):
+-    raise NotImplementedError('grouped status table')
++    groups = group_status_rows(rows, descending=descending)
++    fragments = [TABLE_START]
++    total = 0
++    for group in groups:
++        code, label, count = group['code'], group['label'], group['count']
++        fragments.append(f'<tr><td>{code}</td><td>{label}</td><td>{count}</td></tr>')
++        total += count
++    fragments.append(TABLE_END)
++    return {'html': ''.join(fragments), 'total': total, 'groups': groups}
+--- a/app/operations.py
++++ b/app/operations.py
+@@ -1 +1,22 @@
+ """Implementation helpers for this application."""
++
++
++def group_status_rows(rows, *, descending=False):
++    groups = {}
++    for row in rows:
++        if not isinstance(row, dict):
++            raise ValueError('invalid status row')
++        code, count = row.get('code'), row.get('count')
++        if type(code) is not int or type(count) is not int or count < 0:
++            raise ValueError('invalid numeric row')
++        label = row.get('label', str(code))
++        if not isinstance(label, str):
++            raise ValueError('invalid label')
++        if code in groups:
++            group = groups[code]
++            if group['label'] != label:
++                raise ValueError('conflicting labels for code')
++            group['count'] += count
++        else:
++            groups[code] = {'code': code, 'label': label, 'count': count}
++    return [groups[code] for code in sorted(groups, reverse=descending)]

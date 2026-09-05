@@ -1,0 +1,28 @@
+diff --git a/app/operations.py b/app/operations.py
+index c9a013a..13f5b5c 100644
+--- a/app/operations.py
++++ b/app/operations.py
+@@ -1,9 +1,9 @@
+ """Implementation helpers for this application."""
+ 
+ 
+-def make_callback(key, prefix, suffix, ordinal, record, formatter):
++def make_callback(key, prefix, suffix, ordinal, value, formatter):
+     def callback():
+-        text = prefix + formatter(record.text) + suffix
++        text = prefix + formatter(value) + suffix
+         return {"id": key, "text": text, "ordinal": ordinal}
+ 
+     return callback
+diff --git a/app/service.py b/app/service.py
+index 209fba5..b4a0e2c 100644
+--- a/app/service.py
++++ b/app/service.py
+@@ -23,6 +23,6 @@ def prepare_batch(store, requests, formatter):
+     for ordinal, (key, prefix, suffix) in enumerate(prepared):
+         with store.open(key) as record:
+             callbacks.append(
+-                make_callback(key, prefix, suffix, ordinal, record, formatter)
++                make_callback(key, prefix, suffix, ordinal, record.text, formatter)
+             )
+     return callbacks

@@ -1,0 +1,48 @@
+diff --git a/app/operations.py b/app/operations.py
+index 8c7c141..c9a013a 100644
+--- a/app/operations.py
++++ b/app/operations.py
+@@ -1 +1,9 @@
+ """Implementation helpers for this application."""
++
++
++def make_callback(key, prefix, suffix, ordinal, record, formatter):
++    def callback():
++        text = prefix + formatter(record.text) + suffix
++        return {"id": key, "text": text, "ordinal": ordinal}
++
++    return callback
+diff --git a/app/service.py b/app/service.py
+index ad4e73a..209fba5 100644
+--- a/app/service.py
++++ b/app/service.py
+@@ -1,6 +1,28 @@
++from app.operations import make_callback
++
++
+ def render_now(store, key, formatter):
+     with store.open(key) as record:
+         return formatter(record.text)
+ 
+ def prepare_batch(store, requests, formatter):
+-    raise NotImplementedError("batch preparation")
++    prepared = []
++    for request in requests:
++        if not isinstance(request, dict):
++            raise ValueError("request must be a mapping")
++        key = request.get("id")
++        prefix = request.get("prefix")
++        suffix = request.get("suffix")
++        if not isinstance(key, str) or not key or not store.contains(key):
++            raise ValueError("unknown record")
++        if not isinstance(prefix, str) or not isinstance(suffix, str):
++            raise ValueError("decoration must be text")
++        prepared.append((key, prefix, suffix))
++
++    callbacks = []
++    for ordinal, (key, prefix, suffix) in enumerate(prepared):
++        with store.open(key) as record:
++            callbacks.append(
++                make_callback(key, prefix, suffix, ordinal, record, formatter)
++            )
++    return callbacks
