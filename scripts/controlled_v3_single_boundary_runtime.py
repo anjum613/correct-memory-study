@@ -3,8 +3,9 @@
 
 Codex runs with its internal command sandbox disabled only after entering a
 dedicated user/mount/pid namespace and chroot containing the rendered workspace.
-This avoids nested bubblewrap/user-namespace and nested devpts setup.  The host
-devpts mount is bound once so Codex command execution can open a PTY.
+This avoids nested bubblewrap/user-namespace and nested devpts setup.  One
+devpts instance is created at the outer boundary so Codex command execution can
+open a PTY without another namespace layer.
 """
 
 from __future__ import annotations
@@ -72,7 +73,7 @@ done
 for name in null random urandom; do
   mount --bind "/dev/$name" "$root/dev/$name"
 done
-mount --bind /dev/pts "$root/dev/pts"
+mount -t devpts -o newinstance,ptmxmode=0666,mode=0620 devpts "$root/dev/pts"
 mount -t tmpfs -o size=256m,nosuid,nodev tmpfs "$root/tmp"
 mount -t proc -o nosuid,nodev,noexec proc "$root/proc"
 exec /usr/sbin/chroot "$root" /usr/bin/env -i \
@@ -419,7 +420,7 @@ def static_preflight() -> dict[str, Any]:
         "benchmark_invocation": False,
         "constructor_attempts": 0,
         "runtime": observation,
-        "pty_strategy": "single host devpts bind",
+        "pty_strategy": "one devpts instance at the external boundary",
         "bubblewrap_dependency": False,
         "platform": platform.platform(),
     }

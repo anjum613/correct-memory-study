@@ -34,8 +34,8 @@ fixture exists.
 
 Codex executes behind one external user/mount/pid namespace and chroot. Its
 internal bubblewrap sandbox is disabled only inside that external containment.
-The host devpts mount is bound once. There is no nested bubblewrap namespace and
-no nested devpts mount. Scientific inputs are bind-mounted read-only; only
+One devpts instance is mounted at that boundary. There is no nested bubblewrap
+namespace and no nested PTY/devpts setup. Scientific inputs are bind-mounted read-only; only
 `components/` and `.scratch/` are writable.
 
 Constructor model/runtime identity is operational metadata, not a scientific

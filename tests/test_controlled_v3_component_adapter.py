@@ -168,8 +168,8 @@ def test_runtime_uses_one_boundary_without_nested_bubblewrap_or_devpts():
     assert "--dangerously-bypass-approvals-and-sandbox" in inside
     assert "--sandbox" not in inside
     assert "bwrap" not in script
-    assert "mount --bind /dev/pts" in script
-    assert "mount -t devpts" not in script
+    assert script.count("mount -t devpts") == 1
+    assert "newinstance" in script
     assert "--user" in constructor_runtime.isolated_command(
         Path("/tmp/root"),
         Path("/tmp/workspace"),
