@@ -99,6 +99,62 @@ def test_qwen3_run_ids_bind_the_actual_model_revision() -> None:
     assert first.actual_run_id == expected
 
 
+def test_coder_next_projects_the_devstral_arm_with_the_identical_design() -> None:
+    model_id = "Qwen/Qwen3-Coder-Next-FP8"
+    revision = "da6e2ed27304dd39abadd9c82ef50e8de67bdd4c"
+    cells = qwen3_cells(
+        ROOT,
+        source_model_key="devstral-small-2507",
+        model_id=model_id,
+        model_revision=revision,
+    )
+    validation = validate_frozen_inputs(
+        ROOT,
+        source_model_key="devstral-small-2507",
+        model_id=model_id,
+        model_revision=revision,
+    )
+
+    assert validation["status"] == "PASS"
+    assert len(cells) == 104
+    assert len({cell.actual_run_id for cell in cells}) == 104
+    assert {cell.family_id for cell in cells} == set(FAMILIES)
+    expected_design = {
+        (condition, repetition)
+        for condition in {
+            "NO_MEMORY",
+            "SOURCE_CORRECT_MEMORY",
+            "MATCHED_IRRELEVANT_MEMORY",
+            "SOURCE_MEMORY_PLUS_APPLICABILITY_BOUNDARY",
+        }
+        for repetition in (1, 2)
+    }
+    for family_id in FAMILIES:
+        assert {
+            (cell.condition, cell.repetition)
+            for cell in cells
+            if cell.family_id == family_id
+        } == expected_design
+
+
+def test_coder_next_runpod_profile_is_pinned_to_two_l40s() -> None:
+    result = validate_model_profile(
+        ROOT,
+        model_profile_path=Path("configs/models/qwen3-coder-next-fp8-runpod.json"),
+        model_id="Qwen/Qwen3-Coder-Next-FP8",
+        model_revision="da6e2ed27304dd39abadd9c82ef50e8de67bdd4c",
+        served_model_name="qwen3-coder-next-fp8",
+        tokenizer_json_sha256=(
+            "19564a48c4f71a2a1b937cce34c737a1e662b171c5f5d7edf641a15cd896f07d"
+        ),
+        tokenizer_config_sha256=(
+            "fc76878832c668e3f0f8be66e6239a475b9093d2fe5cef97c242369779e6c6e6"
+        ),
+    )
+
+    assert result["status"] == "PASS"
+
+
 def test_runpod_profile_binds_two_l40s_and_frozen_generation_budget() -> None:
     result = validate_model_profile(ROOT)
     profile = json.loads(

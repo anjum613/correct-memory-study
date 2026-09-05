@@ -154,6 +154,13 @@ class RunConfig:
     v3_dependency_path: Path | None = None
     model: str = SERVED_MODEL_NAME
     agent_timeout_seconds: int = 600
+    source_model_key: str = SOURCE_MODEL_KEY
+    model_id: str = MODEL_ID
+    model_revision: str = MODEL_REVISION
+    agent_config_path: Path = AGENT_CONFIG_PATH
+    model_profile_path: Path = MODEL_PROFILE_PATH
+    tokenizer_json_sha256: str = TOKENIZER_JSON_SHA256
+    tokenizer_config_sha256: str = TOKENIZER_CONFIG_SHA256
 
 
 def canonical(value: Any) -> bytes:
@@ -237,7 +244,14 @@ def _git_output(project_root: Path, *arguments: str) -> str:
     return result.stdout.strip()
 
 
-def validate_frozen_inputs(project_root: Path, *, check_git: bool = True) -> dict[str, Any]:
+def validate_frozen_inputs(
+    project_root: Path,
+    *,
+    check_git: bool = True,
+    source_model_key: str = SOURCE_MODEL_KEY,
+    model_id: str = MODEL_ID,
+    model_revision: str = MODEL_REVISION,
+) -> dict[str, Any]:
     """Verify the frozen protocol plus every one of its 391 cohort artifacts."""
     root = project_root.resolve(strict=True)
     manifest = load_json(root / PROTOCOL_MANIFEST)
@@ -300,7 +314,13 @@ def validate_frozen_inputs(project_root: Path, *, check_git: bool = True) -> dic
     if messages.get("system_message_sha256") != sha256_bytes(SYSTEM_MESSAGE.encode("utf-8")):
         raise Qwen3Final13Error("frozen system-message hash changed")
 
-    cells = qwen3_cells(root, matrix=matrix)
+    cells = qwen3_cells(
+        root,
+        matrix=matrix,
+        source_model_key=source_model_key,
+        model_id=model_id,
+        model_revision=model_revision,
+    )
     if len(cells) != 104:
         raise Qwen3Final13Error("expected exactly 104 Qwen-arm cells")
     expected_family_design = {
@@ -349,12 +369,19 @@ def qwen3_cells(
     project_root: Path,
     *,
     matrix: Mapping[str, Any] | None = None,
+    source_model_key: str = SOURCE_MODEL_KEY,
+    model_id: str = MODEL_ID,
+    model_revision: str = MODEL_REVISION,
 ) -> tuple[FrozenCell, ...]:
-    """Project the frozen Qwen2.5 arm onto the declared Qwen3 model revision."""
+    """Project one frozen source arm onto a declared replacement model revision."""
     root = project_root.resolve(strict=True)
     value = load_json(root / RUN_MATRIX_PATH) if matrix is None else matrix
     selected = sorted(
-        (cell for cell in value.get("cells", ()) if cell.get("model") == SOURCE_MODEL_KEY),
+        (
+            cell
+            for cell in value.get("cells", ())
+            if cell.get("model") == source_model_key
+        ),
         key=lambda cell: cell["execution_order"],
     )
     result: list[FrozenCell] = []
@@ -363,8 +390,8 @@ def qwen3_cells(
         identity = {
             "condition": cell["condition"],
             "family_id": cell["family_id"],
-            "model_id": MODEL_ID,
-            "model_revision": MODEL_REVISION,
+            "model_id": model_id,
+            "model_revision": model_revision,
             "repetition": cell["repetition"],
             "seed": cell["seed"],
             "source_run_id": source_run_id,
@@ -757,13 +784,18 @@ def _canary_task_policy() -> TaskFilePolicy:
     )
 
 
-def validate_tokenizer(tokenizer_path: Path) -> dict[str, Any]:
+def validate_tokenizer(
+    tokenizer_path: Path,
+    *,
+    expected_tokenizer_json_sha256: str = TOKENIZER_JSON_SHA256,
+    expected_tokenizer_config_sha256: str = TOKENIZER_CONFIG_SHA256,
+) -> dict[str, Any]:
     root = tokenizer_path.resolve(strict=True)
     if not root.is_dir():
         raise Qwen3Final13Error(f"tokenizer path is not a directory: {root}")
     expected = {
-        "tokenizer.json": TOKENIZER_JSON_SHA256,
-        "tokenizer_config.json": TOKENIZER_CONFIG_SHA256,
+        "tokenizer.json": expected_tokenizer_json_sha256,
+        "tokenizer_config.json": expected_tokenizer_config_sha256,
     }
     observed: dict[str, str] = {}
     for name, digest in expected.items():
@@ -774,14 +806,23 @@ def validate_tokenizer(tokenizer_path: Path) -> dict[str, Any]:
     return {"path": str(root), "sha256": observed, "status": "PASS"}
 
 
-def validate_model_profile(project_root: Path) -> dict[str, Any]:
-    path = project_root / MODEL_PROFILE_PATH
+def validate_model_profile(
+    project_root: Path,
+    *,
+    model_profile_path: Path = MODEL_PROFILE_PATH,
+    model_id: str = MODEL_ID,
+    model_revision: str = MODEL_REVISION,
+    served_model_name: str = SERVED_MODEL_NAME,
+    tokenizer_json_sha256: str = TOKENIZER_JSON_SHA256,
+    tokenizer_config_sha256: str = TOKENIZER_CONFIG_SHA256,
+) -> dict[str, Any]:
+    path = project_root / model_profile_path
     value = load_json(path)
     expected = {
         "model": {
-            "id": MODEL_ID,
-            "revision": MODEL_REVISION,
-            "served_model_name": SERVED_MODEL_NAME,
+            "id": model_id,
+            "revision": model_revision,
+            "served_model_name": served_model_name,
         },
         "generation": {
             "max_tokens": 512,
@@ -805,9 +846,9 @@ def validate_model_profile(project_root: Path) -> dict[str, Any]:
             raise Qwen3Final13Error(f"RunPod model profile changed: {field}")
     serialization = value.get("serialization", {})
     if (
-        serialization.get("tokenizer_json_sha256") != TOKENIZER_JSON_SHA256
+        serialization.get("tokenizer_json_sha256") != tokenizer_json_sha256
         or serialization.get("tokenizer_config_sha256")
-        != TOKENIZER_CONFIG_SHA256
+        != tokenizer_config_sha256
     ):
         raise Qwen3Final13Error("RunPod profile tokenizer identity changed")
     return {"path": str(path), "sha256": sha256_file(path), "status": "PASS"}
@@ -816,15 +857,26 @@ def validate_model_profile(project_root: Path) -> dict[str, Any]:
 def validate_initial_context_budgets(
     project_root: Path,
     tokenizer_path: Path,
+    *,
+    source_model_key: str = SOURCE_MODEL_KEY,
+    model_id: str = MODEL_ID,
+    model_revision: str = MODEL_REVISION,
+    tokenizer_json_sha256: str = TOKENIZER_JSON_SHA256,
+    tokenizer_config_sha256: str = TOKENIZER_CONFIG_SHA256,
 ) -> dict[str, Any]:
     """Count every initial runtime prompt with the pinned Qwen3 chat template."""
     counter = ExactQwenChatTokenCounter(
         tokenizer_path,
-        expected_tokenizer_json_sha256=TOKENIZER_JSON_SHA256,
-        expected_tokenizer_config_sha256=TOKENIZER_CONFIG_SHA256,
+        expected_tokenizer_json_sha256=tokenizer_json_sha256,
+        expected_tokenizer_config_sha256=tokenizer_config_sha256,
     )
     observations: list[tuple[int, FrozenCell]] = []
-    for cell in qwen3_cells(project_root):
+    for cell in qwen3_cells(
+        project_root,
+        source_model_key=source_model_key,
+        model_id=model_id,
+        model_revision=model_revision,
+    ):
         frozen_messages, _ = render_frozen_messages(project_root, cell)
         binding = _binding_by_family(project_root, cell.family_id)
         baseline = str(binding["baseline_B"]["path"])
@@ -876,19 +928,36 @@ def preflight(config: RunConfig, *, check_endpoint: bool = True) -> dict[str, An
     checks: dict[str, bool] = {}
     diagnostics: dict[str, Any] = {}
     try:
-        diagnostics["frozen_inputs"] = validate_frozen_inputs(config.project_root)
+        diagnostics["frozen_inputs"] = validate_frozen_inputs(
+            config.project_root,
+            source_model_key=config.source_model_key,
+            model_id=config.model_id,
+            model_revision=config.model_revision,
+        )
         checks["frozen_inputs"] = True
     except (OSError, Qwen3Final13Error) as error:
         checks["frozen_inputs"] = False
         diagnostics["frozen_inputs"] = str(error)
     try:
-        diagnostics["tokenizer"] = validate_tokenizer(config.tokenizer_path)
+        diagnostics["tokenizer"] = validate_tokenizer(
+            config.tokenizer_path,
+            expected_tokenizer_json_sha256=config.tokenizer_json_sha256,
+            expected_tokenizer_config_sha256=config.tokenizer_config_sha256,
+        )
         checks["tokenizer"] = True
     except (OSError, Qwen3Final13Error) as error:
         checks["tokenizer"] = False
         diagnostics["tokenizer"] = str(error)
     try:
-        diagnostics["model_profile"] = validate_model_profile(config.project_root)
+        diagnostics["model_profile"] = validate_model_profile(
+            config.project_root,
+            model_profile_path=config.model_profile_path,
+            model_id=config.model_id,
+            model_revision=config.model_revision,
+            served_model_name=config.model,
+            tokenizer_json_sha256=config.tokenizer_json_sha256,
+            tokenizer_config_sha256=config.tokenizer_config_sha256,
+        )
         checks["model_profile"] = True
     except (OSError, Qwen3Final13Error) as error:
         checks["model_profile"] = False
@@ -897,6 +966,11 @@ def preflight(config: RunConfig, *, check_endpoint: bool = True) -> dict[str, An
         diagnostics["initial_context_budgets"] = validate_initial_context_budgets(
             config.project_root,
             config.tokenizer_path,
+            source_model_key=config.source_model_key,
+            model_id=config.model_id,
+            model_revision=config.model_revision,
+            tokenizer_json_sha256=config.tokenizer_json_sha256,
+            tokenizer_config_sha256=config.tokenizer_config_sha256,
         )
         checks["initial_context_budgets"] = True
     except (OSError, ValueError, RuntimeError) as error:
@@ -906,21 +980,21 @@ def preflight(config: RunConfig, *, check_endpoint: bool = True) -> dict[str, An
     agent = mini_swe_info(config.mini_python)
     checks["mini_swe_agent_2_4_6"] = agent.available
     diagnostics["mini_swe_agent"] = asdict(agent)
-    config_path = config.project_root / AGENT_CONFIG_PATH
+    config_path = config.project_root / config.agent_config_path
     checks["agent_config"] = config_path.is_file()
     diagnostics["agent_config"] = {
         "path": str(config_path),
         "sha256": sha256_file(config_path) if config_path.is_file() else None,
     }
     checks["run_configuration"] = bool(
-        config.model == SERVED_MODEL_NAME
+        config.model.strip()
         and config.agent_timeout_seconds > 0
         and config.base_url.strip()
     )
     diagnostics["model_substitution"] = {
-        "frozen_source_model_key": SOURCE_MODEL_KEY,
-        "requested_model_id": MODEL_ID,
-        "requested_revision": MODEL_REVISION,
+        "frozen_source_model_key": config.source_model_key,
+        "requested_model_id": config.model_id,
+        "requested_revision": config.model_revision,
         "served_model_name": config.model,
         "source_cell_count": 104,
     }
@@ -962,8 +1036,8 @@ def preflight(config: RunConfig, *, check_endpoint: bool = True) -> dict[str, An
     return {
         "checks": checks,
         "diagnostics": diagnostics,
-        "model_id": MODEL_ID,
-        "model_revision": MODEL_REVISION,
+        "model_id": config.model_id,
+        "model_revision": config.model_revision,
         "overall": "PASS" if checks and all(checks.values()) else "FAIL",
         "schema": "cmpilot-qwen3-final13-preflight-v1",
         "side_effects": False,
@@ -1134,8 +1208,13 @@ def evaluate_repository(
     }
 
 
-def _select_cell(project_root: Path, selector: int | str) -> FrozenCell:
-    cells = qwen3_cells(project_root)
+def _select_cell(config: RunConfig, selector: int | str) -> FrozenCell:
+    cells = qwen3_cells(
+        config.project_root,
+        source_model_key=config.source_model_key,
+        model_id=config.model_id,
+        model_revision=config.model_revision,
+    )
     if isinstance(selector, int):
         if selector < 0 or selector >= len(cells):
             raise Qwen3Final13Error(f"Qwen cell index is out of range: {selector}")
@@ -1160,7 +1239,7 @@ def run_cell(
         readiness = preflight(config)
         if readiness["overall"] != "PASS":
             raise Qwen3Final13Error(f"preflight failed: {readiness['checks']}")
-    cell = _select_cell(config.project_root, selector)
+    cell = _select_cell(config, selector)
     attempt = config.run_root / cell.actual_run_id
     attempt.parent.mkdir(parents=True, exist_ok=True)
     attempt.mkdir(mode=0o700)
@@ -1169,10 +1248,10 @@ def run_cell(
         "cell": cell.as_record(),
         "finished_at_utc": None,
         "model": {
-            "id": MODEL_ID,
-            "revision": MODEL_REVISION,
+            "id": config.model_id,
+            "revision": config.model_revision,
             "served_model_name": config.model,
-            "substitutes_frozen_model_key": SOURCE_MODEL_KEY,
+            "substitutes_frozen_model_key": config.source_model_key,
         },
         "schema": "cmpilot-qwen3-final13-cell-result-v1",
         "started_at_utc": started.isoformat(),
@@ -1182,10 +1261,10 @@ def run_cell(
     _write_json(
         attempt / "model-substitution.json",
         {
-            "actual_model_id": MODEL_ID,
-            "actual_model_revision": MODEL_REVISION,
+            "actual_model_id": config.model_id,
+            "actual_model_revision": config.model_revision,
             "actual_served_model_name": config.model,
-            "frozen_source_model_key": SOURCE_MODEL_KEY,
+            "frozen_source_model_key": config.source_model_key,
             "reason": "requested experimental setup change before outcome generation",
             "source_run_id": cell.source_run_id,
         },
@@ -1236,7 +1315,9 @@ def run_cell(
             model=config.model,
             tokenizer_path=str(config.tokenizer_path.resolve(strict=True)),
             base_url=config.base_url,
-            agent_config_source=(config.project_root / AGENT_CONFIG_PATH).resolve(strict=True),
+            agent_config_source=(
+                config.project_root / config.agent_config_path
+            ).resolve(strict=True),
         )
         trajectory = attempt / "trajectory.json"
         environment = _safe_agent_environment(
@@ -1332,8 +1413,8 @@ def run_canary(config: RunConfig) -> dict[str, Any]:
     result: dict[str, Any] = {
         "finished_at_utc": None,
         "model": {
-            "id": MODEL_ID,
-            "revision": MODEL_REVISION,
+            "id": config.model_id,
+            "revision": config.model_revision,
             "served_model_name": config.model,
         },
         "run_directory": str(attempt),
@@ -1391,7 +1472,7 @@ def run_canary(config: RunConfig) -> dict[str, Any]:
             model=config.model,
             tokenizer_path=str(config.tokenizer_path.resolve(strict=True)),
             base_url=config.base_url,
-            agent_config_source=(config.project_root / AGENT_CONFIG_PATH).resolve(
+            agent_config_source=(config.project_root / config.agent_config_path).resolve(
                 strict=True
             ),
         )
@@ -1493,7 +1574,12 @@ def run_batch(config: RunConfig, *, workers: int = 2) -> dict[str, Any]:
     if readiness["overall"] != "PASS":
         raise Qwen3Final13Error(f"preflight failed: {readiness['checks']}")
     config.run_root.mkdir(parents=True, exist_ok=True)
-    cells = qwen3_cells(config.project_root)
+    cells = qwen3_cells(
+        config.project_root,
+        source_model_key=config.source_model_key,
+        model_id=config.model_id,
+        model_revision=config.model_revision,
+    )
     batch_path = config.run_root / "batch.json"
     if batch_path.exists():
         raise FileExistsError(f"batch has already been started: {batch_path}")
@@ -1503,8 +1589,8 @@ def run_batch(config: RunConfig, *, workers: int = 2) -> dict[str, Any]:
             "cells": [cell.as_record() for cell in cells],
             "concurrency": workers,
             "dispatch_order": "frozen Qwen-arm relative execution order",
-            "model_id": MODEL_ID,
-            "model_revision": MODEL_REVISION,
+            "model_id": config.model_id,
+            "model_revision": config.model_revision,
             "preflight": readiness,
             "schema": "cmpilot-qwen3-final13-batch-v1",
             "started_at_utc": datetime.now(UTC).isoformat(),
@@ -1576,8 +1662,8 @@ def runtime_identity(config: RunConfig) -> dict[str, Any]:
         "base_url": config.base_url,
         "hostname": platform.node(),
         "mini_python": config.mini_python,
-        "model_id": MODEL_ID,
-        "model_revision": MODEL_REVISION,
+        "model_id": config.model_id,
+        "model_revision": config.model_revision,
         "python_version": platform.python_version(),
         "served_model_name": config.model,
         "tokenizer_path": str(config.tokenizer_path),
