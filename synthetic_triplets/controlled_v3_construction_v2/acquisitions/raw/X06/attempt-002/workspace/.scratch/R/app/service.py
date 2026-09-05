@@ -1,0 +1,69 @@
+"""Project documented public diagnostics before writing to the log."""
+import json
+import math
+
+from fixture_api.contracts import X06_MAX_CHILDREN, X06_MAX_DEPTH
+
+
+_ABSENT = object()
+
+
+def _scalar(value):
+    if value is None or type(value) in (str, bool, int):
+        return value
+    if type(value) is float and math.isfinite(value):
+        return value
+    return _ABSENT
+
+
+def _fields(record, names):
+    result = {}
+    for name in names:
+        if name in record:
+            value = _scalar(record[name])
+            if value is not _ABSENT:
+                result[name] = value
+    return result
+
+
+def _error(value):
+    if type(value) is dict:
+        return _fields(value, ('type', 'code'))
+    if isinstance(value, BaseException):
+        # Exception messages, arguments, and representations are not public.
+        return {'type': type(value).__name__}
+    return {}
+
+
+def _project(record, depth=0, active=None):
+    if type(record) is not dict:
+        return {}
+    if active is None:
+        active = set()
+    if id(record) in active:
+        return {}
+    active.add(id(record))
+    try:
+        result = _fields(record, ('correlation', 'message', 'code'))
+        if 'error' in record:
+            result['error'] = _error(record['error'])
+        if 'children' in record and type(record['children']) in (list, tuple):
+            result['children'] = []
+            if depth < X06_MAX_DEPTH:
+                result['children'] = [
+                    _project(child, depth + 1, active)
+                    for child in record['children'][:X06_MAX_CHILDREN]
+                ]
+        return result
+    finally:
+        active.remove(id(record))
+
+
+def run(diagnostic_record, sink):
+    try:
+        record = _project(diagnostic_record)
+        sink.write(json.dumps(record, allow_nan=False))
+    except Exception:
+        # Never serialize the original object or the failing sink's exception.
+        return 'log-error'
+    return 'logged'
