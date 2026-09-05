@@ -504,6 +504,13 @@ class HardenedDefaultAgent(DefaultAgent):
         if not evaluation.accepted:
             raise ProtocolRejected(evaluation)
 
+        if native_tool_calls:
+            # Execute exactly the normalized command that passed semantic validation.
+            # Native providers may preserve insignificant surrounding whitespace in
+            # function arguments, unlike the fenced-text parser which strips it.
+            actions[0] = {**actions[0], "command": evaluation.command}
+            message["extra"]["actions"] = actions
+
         if (
             not isinstance(actions, list)
             or len(actions) != 1
