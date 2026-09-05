@@ -129,6 +129,13 @@ class VllmTextModelConfig(BaseModel):
                 "aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4",
                 "60f6e8cb15c98dd07300a3cc465ea662de245d2095e4245616af21b2324db3fc",
             ): 4096,
+            # Qwen/Qwen3-Coder-Next-FP8, revision
+            # da6e2ed27304dd39abadd9c82ef50e8de67bdd4c.  Keep the same frozen
+            # 4,096-token physical budget used by both experimental arms.
+            (
+                "19564a48c4f71a2a1b937cce34c737a1e662b171c5f5d7edf641a15cd896f07d",
+                "fc76878832c668e3f0f8be66e6239a475b9093d2fe5cef97c242369779e6c6e6",
+            ): 4096,
         }
         identity = (
             self.tokenizer_json_sha256,

@@ -271,6 +271,28 @@ def test_direct_model_accepts_pinned_qwen3_tokenizer_at_frozen_context() -> None
     assert result.stdout.strip().endswith("qwen3-profile-accepted")
 
 
+def test_direct_model_accepts_pinned_qwen3_coder_next_tokenizer() -> None:
+    result = _run_in_mini_environment(
+        """
+        from cmpilot.integrations.miniswe.vllm_text_model import VllmTextModelConfig
+
+        config = VllmTextModelConfig(
+            model_name='qwen3-coder-next-fp8',
+            base_url='http://127.0.0.1:18000/v1',
+            tokenizer_path='/tmp/not-opened-during-config-validation',
+            tokenizer_json_sha256='19564a48c4f71a2a1b937cce34c737a1e662b171c5f5d7edf641a15cd896f07d',
+            tokenizer_config_sha256='fc76878832c668e3f0f8be66e6239a475b9093d2fe5cef97c242369779e6c6e6',
+            context_limit=4096,
+        )
+        assert config.context_limit == 4096
+        print('qwen3-coder-next-profile-accepted')
+        """
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip().endswith("qwen3-coder-next-profile-accepted")
+
+
 def test_secret_wrapper_is_rejected() -> None:
     class SecretWrapper:
         def get_secret_value(self) -> str:
