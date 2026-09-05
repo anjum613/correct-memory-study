@@ -11,6 +11,7 @@ import cmpilot_vllm_text_model
 from cmpilot_devstral_native_serialization import (
     ExactMistralNativeChatTokenCounter,
     PINNED_TEKKEN_SHA256,
+    canonicalize_mistral_native_history,
 )
 
 
@@ -63,6 +64,9 @@ def main() -> None:
         raise RuntimeError("Devstral policy adapter changed")
     cmpilot_vllm_text_model.ExactQwenChatTokenCounter = (
         ExactDevstralNativeChatTokenCounter
+    )
+    cmpilot_vllm_text_model.canonicalize_provider_messages = (
+        canonicalize_mistral_native_history
     )
     runpy.run_path(str(policy_adapter), run_name="__main__")
 

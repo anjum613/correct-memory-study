@@ -5,6 +5,9 @@ from pathlib import Path
 from cmpilot.devstral_native_mini_swe_adapter import (
     write_devstral_native_production_adapter,
 )
+from cmpilot.devstral_native_serialization import (
+    canonicalize_mistral_native_history,
+)
 from cmpilot.qwen3_final13 import qwen3_cells, validate_model_profile
 from scripts.run_devstral_final13 import (
     DEFAULT_AGENT_DEPENDENCIES,
@@ -98,3 +101,46 @@ def test_devstral_uses_proven_agent_and_isolated_native_dependencies() -> None:
     wrapper = (ROOT / "scripts/run_devstral_final13_hpc.sh").read_text()
     assert "devstral-small-2507-agent-v1" not in wrapper
     assert "--agent-dependency-path" in wrapper
+
+
+def test_devstral_maps_rejected_native_actions_to_tool_feedback() -> None:
+    history = [
+        {"role": "system", "content": "system"},
+        {"role": "user", "content": "task"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call-one",
+                    "type": "function",
+                    "function": {"name": "bash", "arguments": "{}"},
+                },
+                {
+                    "id": "call-two",
+                    "type": "function",
+                    "function": {"name": "bash", "arguments": "{}"},
+                },
+            ],
+        },
+        {"role": "user", "content": "That action is not permitted."},
+        {"role": "assistant", "content": "Try again."},
+    ]
+
+    canonical = canonicalize_mistral_native_history(history)
+
+    assert [message["role"] for message in canonical] == [
+        "system",
+        "user",
+        "assistant",
+        "tool",
+        "tool",
+        "assistant",
+    ]
+    assert [canonical[3]["tool_call_id"], canonical[4]["tool_call_id"]] == [
+        "call-one",
+        "call-two",
+    ]
+    assert canonical[3]["content"] == canonical[4]["content"]
+    assert history[3]["role"] == "user"
+    assert canonicalize_mistral_native_history(canonical) == canonical

@@ -269,6 +269,13 @@ def _parse_native_tool_actions(message: dict[str, Any]) -> list[dict[str, str]]:
     return [{"command": command, "tool_call_id": call_id}]
 
 
+def canonicalize_provider_messages(
+    messages: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Provider-specific history hook; the shared OpenAI form is the default."""
+    return messages
+
+
 class VllmTextModel:
     """Direct HTTP implementation of mini-SWE-agent's 2.4.6 Model protocol."""
 
@@ -368,6 +375,7 @@ class VllmTextModel:
         http_request_sent = False
         try:
             canonical_messages, _ = normalize_messages(messages)
+            canonical_messages = canonicalize_provider_messages(canonical_messages)
             native_tools = [BASH_TOOL_SPEC] if self.config.native_tool_calls else None
             counter = self._exact_token_counter()
             prompt_tokens = (

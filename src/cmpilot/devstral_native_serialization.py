@@ -21,6 +21,63 @@ class DevstralNativeSerializationError(ValueError):
     """The pinned tokenizer or OpenAI-compatible native-tool history is invalid."""
 
 
+def canonicalize_mistral_native_history(
+    messages: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Represent rejected native actions as tool responses for Mistral.
+
+    The shared hardened agent reports a rejected shell action with a user-role
+    recovery message because that is the historical scaffold contract. Mistral's
+    native protocol instead requires every assistant tool call to have a matching
+    tool response before the conversation can continue. Convert only that
+    unambiguous adjacency and leave executed tool responses and ordinary user
+    messages unchanged.
+    """
+    if type(messages) is not list:
+        raise DevstralNativeSerializationError("messages must be a list")
+    canonical: list[dict[str, Any]] = []
+    index = 0
+    while index < len(messages):
+        message = messages[index]
+        if type(message) is not dict:
+            raise DevstralNativeSerializationError(
+                f"messages[{index}] must be a dictionary"
+            )
+        copied = dict(message)
+        canonical.append(copied)
+        tool_calls = copied.get("tool_calls")
+        following = messages[index + 1] if index + 1 < len(messages) else None
+        if (
+            copied.get("role") == "assistant"
+            and isinstance(tool_calls, list)
+            and tool_calls
+            and isinstance(following, dict)
+            and following.get("role") == "user"
+        ):
+            content = following.get("content")
+            if not isinstance(content, str):
+                raise DevstralNativeSerializationError(
+                    f"messages[{index + 1}] recovery content must be text"
+                )
+            for call_index, tool_call in enumerate(tool_calls):
+                call_id = tool_call.get("id") if isinstance(tool_call, dict) else None
+                if not isinstance(call_id, str) or not call_id:
+                    raise DevstralNativeSerializationError(
+                        f"messages[{index}].tool_calls[{call_index}] has no ID"
+                    )
+                canonical.append(
+                    {
+                        "role": "tool",
+                        "content": content,
+                        "tool_call_id": call_id,
+                    }
+                )
+            index += 2
+            continue
+        index += 1
+    return canonical
+
+
 def _sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
@@ -80,6 +137,7 @@ class ExactMistralNativeChatTokenCounter:
             "tools": "openai-function-tools",
             "response_conversion": "vllm-mistral-tool-parser",
             "mistral_common_version": importlib.metadata.version("mistral-common"),
+            "rejected_tool_call_feedback": "tool-response-per-call-v1",
         }
 
     @staticmethod
@@ -104,6 +162,7 @@ class ExactMistralNativeChatTokenCounter:
         *,
         tools: list[dict[str, Any]] | None = None,
     ) -> MistralNativeEncoding:
+        messages = canonicalize_mistral_native_history(messages)
         self._validate_messages(messages)
         if tools is not None and type(tools) is not list:
             raise DevstralNativeSerializationError("tools must be a list or null")
@@ -138,4 +197,5 @@ __all__ = [
     "ExactMistralNativeChatTokenCounter",
     "MistralNativeEncoding",
     "PINNED_TEKKEN_SHA256",
+    "canonicalize_mistral_native_history",
 ]
