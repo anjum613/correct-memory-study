@@ -361,9 +361,11 @@ class VllmTextModel:
         try:
             canonical_messages, _ = normalize_messages(messages)
             native_tools = [BASH_TOOL_SPEC] if self.config.native_tool_calls else None
-            prompt_tokens = self._exact_token_counter().count(
-                canonical_messages,
-                tools=native_tools,
+            counter = self._exact_token_counter()
+            prompt_tokens = (
+                counter.count(canonical_messages, tools=native_tools)
+                if native_tools is not None
+                else counter.count(canonical_messages)
             )
             budget = calculate_request_budget(
                 prompt_tokens=prompt_tokens,
