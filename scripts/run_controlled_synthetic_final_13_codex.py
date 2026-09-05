@@ -29,7 +29,7 @@ import time
 from typing import Any, Iterable, Mapping
 
 
-PROTOCOL_ID = "controlled-synthetic-final-13-codex-v1"
+PROTOCOL_ID = "controlled-synthetic-final-13-codex-v2"
 PROTOCOL_TAG = PROTOCOL_ID
 SOURCE_PROTOCOL_ID = "controlled-synthetic-final-13-experiment-v1"
 SOURCE_COHORT_COMMIT = "c03215d43faec963affae284db08b12743cd9fb6"
@@ -923,15 +923,19 @@ def preflight(repo: Path, output_root: Path) -> None:
         raise RuntimeError("filesystem isolation preflight failed")
 
     (runtime / "codex-home").mkdir(exist_ok=True)
-    shell_probe = (
-        "from pathlib import Path; import socket; "
-        "assert Path('/workspace/sentinel.txt').exists(); "
-        "Path('/workspace/write_probe.txt').write_text('ok'); "
-        "assert not Path('/home/s224049759/projects').exists(); "
-        "s=socket.socket(); s.settimeout(1); "
-        "assert s.connect_ex(('127.0.0.1',9)) in (1,13); "
-        "print('CODEX_COMMAND_SANDBOX_OK')"
-    )
+    shell_probe = """from pathlib import Path
+import socket
+assert Path('/workspace/sentinel.txt').exists()
+Path('/workspace/write_probe.txt').write_text('ok')
+assert not Path('/home/s224049759/projects').exists()
+try:
+    sock = socket.socket()
+    sock.settimeout(1)
+    assert sock.connect_ex(('127.0.0.1', 9)) in (1, 13)
+except PermissionError:
+    pass
+print('CODEX_COMMAND_SANDBOX_OK')
+"""
     command = namespace_command(
         output_root, sentinel, runtime, preflight_root / "jail-command",
         [

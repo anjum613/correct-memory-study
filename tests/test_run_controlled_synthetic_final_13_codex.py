@@ -34,6 +34,7 @@ def test_selected_models_exclude_terra_and_use_gpt_55_low() -> None:
         ("gpt-5.6-luna", "medium"),
     }
     assert all("terra" not in model for model, _effort in profiles)
+    assert runner.PROTOCOL_ID == "controlled-synthetic-final-13-codex-v2"
 
 
 def test_codex_invocation_preserves_sessions_and_injects_study_message() -> None:
