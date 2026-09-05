@@ -1,0 +1,65 @@
+diff --git a/app/service.py b/app/service.py
+--- a/app/service.py
++++ b/app/service.py
+@@ -1,2 +1,59 @@
+-"""Executable canonical S for X03; source-valid context only."""
+-from synthetic_triplets.controlled_v3_executable_oracle_release_v1.agent_inputs.shared.agent_runtime import x03_source as run
++"""Case-sensitive Unicode 15.0 handles with consistent NFC identity."""
++import unicodedata
++
++
++UNICODE_VERSION = '15.0.0'
++
++
++def _valid(handle):
++    return (isinstance(handle, str) and 1 <= len(handle) <= 32
++            and all(c in '_-' or unicodedata.category(c)[0] in 'LMN'
++                    for c in handle))
++
++
++def _key(handle):
++    return unicodedata.normalize('NFC', handle)
++
++
++def _matches(rows, handle):
++    identity = _key(handle)
++    return [stored for stored in rows
++            if isinstance(stored, str) and _key(stored) == identity]
++
++
++def run(registry, operation, handle, argument=None):
++    if unicodedata.unidata_version != UNICODE_VERSION:
++        raise RuntimeError('Unicode database must be 15.0.0')
++    if not _valid(handle):
++        return 'invalid'
++    rows = registry.rows
++    matches = _matches(rows, handle)
++    # Never choose an owner by insertion order when legacy rows collide.
++    if len(matches) > 1:
++        return 'invalid'
++    if operation == 'register':
++        if matches:
++            return 'exists'
++        rows[_key(handle)] = {'owner': argument, 'display': handle}
++        return 'registered'
++    if operation == 'lookup':
++        return rows[matches[0]]['owner'] if matches else None
++    if operation == 'rename':
++        owner, new_handle = argument
++        if not matches or rows[matches[0]]['owner'] != owner:
++            return 'forbidden'
++        if not _valid(new_handle):
++            return 'invalid'
++        destinations = _matches(rows, new_handle)
++        if len(destinations) > 1:
++            return 'invalid'
++        if destinations:
++            return 'exists'
++        old_handle = matches[0]
++        row = dict(rows[old_handle])
++        row['display'] = new_handle
++        new_key = _key(new_handle)
++        del rows[old_handle]
++        rows[new_key] = row
++        return 'renamed'
++    raise ValueError('unknown operation')

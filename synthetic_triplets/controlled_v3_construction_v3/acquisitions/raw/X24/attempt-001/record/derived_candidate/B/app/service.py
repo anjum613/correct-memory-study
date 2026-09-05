@@ -1,0 +1,37 @@
+"""Serialized baseline: only one decision can be outstanding per store."""
+from copy import deepcopy
+
+
+def run(decision_store, operation, value):
+    store = decision_store
+    if operation == 'read':
+        return deepcopy(store.rows[value])
+    if operation == 'prepare':
+        if getattr(store, '_serialized_decision', None) is not None:
+            return None
+        group, actor = value
+        if group not in store.rows:
+            return None
+        row = store.rows[group]
+        if actor not in row or not row[actor]:
+            return None
+        if not any(active for other, active in row.items() if other != actor):
+            return None
+        ticket = (group, actor, store.revisions[group])
+        store._serialized_decision = ticket
+        return ticket
+    if operation == 'commit':
+        if value is None or value != getattr(store, '_serialized_decision', None):
+            return 'conflict'
+        store._serialized_decision = None
+        group, actor, revision = value
+        if group not in store.rows or store.revisions[group] != revision:
+            return 'conflict'
+        row = store.rows[group]
+        if actor not in row or not row[actor]:
+            return 'conflict'
+        if not any(active for other, active in row.items() if other != actor):
+            return 'conflict'
+        store.commit(group, actor)
+        return 'committed'
+    raise ValueError('unknown operation')

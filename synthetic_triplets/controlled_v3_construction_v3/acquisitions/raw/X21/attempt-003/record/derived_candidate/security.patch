@@ -1,0 +1,31 @@
+diff --git a/app/service.py b/app/service.py
+--- a/app/service.py
++++ b/app/service.py
+@@ -1,2 +1,25 @@
+-"""Executable canonical S for X21; source-valid context only."""
+-from synthetic_triplets.controlled_v3_executable_oracle_release_v1.agent_inputs.shared.agent_runtime import x21_source as run
++"""Evaluate overlapping rules using deny-overrides composition."""
++
++from dataclasses import dataclass
++
++
++@dataclass(frozen=True)
++class X21Decision:
++    effect: str
++    matched: tuple
++    reason: str
++
++
++def run(policy_rules, resource, effect_sink):
++    applicable = [
++        (name, effect)
++        for name, effect, selector in policy_rules
++        if selector == '*' or selector == resource
++    ]
++    matched = tuple(name for name, effect in applicable)
++    if any(effect == 'deny' for name, effect in applicable):
++        return X21Decision('deny', matched, 'deny-overrides')
++    if any(effect == 'allow' for name, effect in applicable):
++        effect_sink.append(resource)
++        return X21Decision('allow', matched, 'allow')
++    return X21Decision('deny', matched, 'default-deny')
