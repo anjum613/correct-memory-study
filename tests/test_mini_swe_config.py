@@ -300,6 +300,32 @@ def test_direct_model_accepts_qwen3_coder_native_tool_profile_at_32k() -> None:
     assert result.stdout.strip().endswith("qwen3-coder-native-profile-accepted")
 
 
+def test_direct_model_accepts_devstral_native_compatibility_profile_at_32k() -> None:
+    result = _run_in_mini_environment(
+        """
+        from cmpilot.integrations.miniswe.vllm_text_model import VllmTextModelConfig
+
+        tekken = '839c48629ff570bd664586800aa3ee17ee628f56efc7fd8e145cc01467a1c188'
+        config = VllmTextModelConfig(
+            model_name='devstral-small-2507',
+            base_url='http://127.0.0.1:18000/v1',
+            tokenizer_path='/tmp/not-opened-during-config-validation',
+            tokenizer_json_sha256=tekken,
+            tokenizer_config_sha256=tekken,
+            context_limit=32768,
+            temperature=0.15,
+            native_tool_calls=True,
+        )
+        assert config.context_limit == 32768
+        assert config.native_tool_calls is True
+        print('devstral-native-profile-accepted')
+        """
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip().endswith("devstral-native-profile-accepted")
+
+
 def test_direct_model_accepts_pinned_qwen3_coder_next_tokenizer() -> None:
     result = _run_in_mini_environment(
         """

@@ -171,6 +171,12 @@ class RunConfig:
     top_k: int | None = None
     repetition_penalty: float | None = None
     native_tool_calls: bool = False
+    tokenizer_kind: str = "qwen"
+    tokenizer_tekken_sha256: str | None = None
+    adapter_kind: str = "qwen"
+    quantization: str | None = "model-configured-fp8"
+    dtype: str | None = None
+    tool_call_parser: str = "qwen3_coder"
 
 
 def canonical(value: Any) -> bytes:
@@ -832,6 +838,11 @@ def validate_model_profile(
     top_k: int | None = None,
     repetition_penalty: float | None = None,
     native_tool_calls: bool = False,
+    tokenizer_kind: str = "qwen",
+    tokenizer_tekken_sha256: str | None = None,
+    quantization: str | None = "model-configured-fp8",
+    dtype: str | None = None,
+    tool_call_parser: str = "qwen3_coder",
 ) -> dict[str, Any]:
     path = project_root / model_profile_path
     value = load_json(path)
@@ -859,12 +870,22 @@ def validate_model_profile(
             "host": "127.0.0.1",
             "max_model_length": context_limit,
             "max_num_sequences": 2,
-            "quantization": "model-configured-fp8",
+            "quantization": quantization,
             "tensor_parallel_size": 2,
+            **({"dtype": dtype} if dtype is not None else {}),
+            **(
+                {
+                    "config_format": "mistral",
+                    "load_format": "mistral",
+                    "tokenizer_mode": "mistral",
+                }
+                if tokenizer_kind == "mistral"
+                else {}
+            ),
             **(
                 {
                     "enable_auto_tool_choice": True,
-                    "tool_call_parser": "qwen3_coder",
+                    "tool_call_parser": tool_call_parser,
                 }
                 if native_tool_calls
                 else {}
@@ -877,13 +898,48 @@ def validate_model_profile(
         if value.get(field) != expected_value:
             raise Qwen3Final13Error(f"RunPod model profile changed: {field}")
     serialization = value.get("serialization", {})
-    if (
-        serialization.get("tokenizer_json_sha256") != tokenizer_json_sha256
-        or serialization.get("tokenizer_config_sha256")
-        != tokenizer_config_sha256
-    ):
-        raise Qwen3Final13Error("RunPod profile tokenizer identity changed")
+    if tokenizer_kind == "mistral":
+        if (
+            not tokenizer_tekken_sha256
+            or serialization.get("tekken_sha256") != tokenizer_tekken_sha256
+        ):
+            raise Qwen3Final13Error("RunPod profile Tekken tokenizer identity changed")
+    elif tokenizer_kind == "qwen":
+        if (
+            serialization.get("tokenizer_json_sha256") != tokenizer_json_sha256
+            or serialization.get("tokenizer_config_sha256")
+            != tokenizer_config_sha256
+        ):
+            raise Qwen3Final13Error("RunPod profile tokenizer identity changed")
+    else:
+        raise Qwen3Final13Error(f"unsupported tokenizer kind: {tokenizer_kind}")
     return {"path": str(path), "sha256": sha256_file(path), "status": "PASS"}
+
+
+def _exact_token_counter(
+    tokenizer_path: Path,
+    *,
+    tokenizer_kind: str,
+    tokenizer_json_sha256: str,
+    tokenizer_config_sha256: str,
+    tokenizer_tekken_sha256: str | None,
+) -> Any:
+    if tokenizer_kind == "qwen":
+        return ExactQwenChatTokenCounter(
+            tokenizer_path,
+            expected_tokenizer_json_sha256=tokenizer_json_sha256,
+            expected_tokenizer_config_sha256=tokenizer_config_sha256,
+        )
+    if tokenizer_kind == "mistral" and tokenizer_tekken_sha256:
+        from .devstral_native_serialization import (
+            ExactMistralNativeChatTokenCounter,
+        )
+
+        return ExactMistralNativeChatTokenCounter(
+            tokenizer_path,
+            expected_tekken_sha256=tokenizer_tekken_sha256,
+        )
+    raise Qwen3Final13Error(f"unsupported tokenizer configuration: {tokenizer_kind}")
 
 
 def validate_initial_context_budgets(
@@ -898,12 +954,16 @@ def validate_initial_context_budgets(
     context_limit: int = 4096,
     completion_limit: int = 512,
     native_tool_calls: bool = False,
+    tokenizer_kind: str = "qwen",
+    tokenizer_tekken_sha256: str | None = None,
 ) -> dict[str, Any]:
     """Count every initial runtime prompt with the pinned Qwen3 chat template."""
-    counter = ExactQwenChatTokenCounter(
+    counter = _exact_token_counter(
         tokenizer_path,
-        expected_tokenizer_json_sha256=tokenizer_json_sha256,
-        expected_tokenizer_config_sha256=tokenizer_config_sha256,
+        tokenizer_kind=tokenizer_kind,
+        tokenizer_json_sha256=tokenizer_json_sha256,
+        tokenizer_config_sha256=tokenizer_config_sha256,
+        tokenizer_tekken_sha256=tokenizer_tekken_sha256,
     )
     observations: list[tuple[int, FrozenCell]] = []
     for cell in qwen3_cells(
@@ -981,13 +1041,20 @@ def preflight(config: RunConfig, *, check_endpoint: bool = True) -> dict[str, An
         checks["frozen_inputs"] = False
         diagnostics["frozen_inputs"] = str(error)
     try:
-        diagnostics["tokenizer"] = validate_tokenizer(
+        counter = _exact_token_counter(
             config.tokenizer_path,
-            expected_tokenizer_json_sha256=config.tokenizer_json_sha256,
-            expected_tokenizer_config_sha256=config.tokenizer_config_sha256,
+            tokenizer_kind=config.tokenizer_kind,
+            tokenizer_json_sha256=config.tokenizer_json_sha256,
+            tokenizer_config_sha256=config.tokenizer_config_sha256,
+            tokenizer_tekken_sha256=config.tokenizer_tekken_sha256,
         )
+        diagnostics["tokenizer"] = {
+            "identity": counter.identity,
+            "path": str(config.tokenizer_path.resolve(strict=True)),
+            "status": "PASS",
+        }
         checks["tokenizer"] = True
-    except (OSError, Qwen3Final13Error) as error:
+    except (OSError, ValueError, RuntimeError) as error:
         checks["tokenizer"] = False
         diagnostics["tokenizer"] = str(error)
     try:
@@ -1006,6 +1073,11 @@ def preflight(config: RunConfig, *, check_endpoint: bool = True) -> dict[str, An
             top_k=config.top_k,
             repetition_penalty=config.repetition_penalty,
             native_tool_calls=config.native_tool_calls,
+            tokenizer_kind=config.tokenizer_kind,
+            tokenizer_tekken_sha256=config.tokenizer_tekken_sha256,
+            quantization=config.quantization,
+            dtype=config.dtype,
+            tool_call_parser=config.tool_call_parser,
         )
         checks["model_profile"] = True
     except (OSError, Qwen3Final13Error) as error:
@@ -1023,6 +1095,8 @@ def preflight(config: RunConfig, *, check_endpoint: bool = True) -> dict[str, An
             context_limit=config.context_limit,
             completion_limit=config.completion_limit,
             native_tool_calls=config.native_tool_calls,
+            tokenizer_kind=config.tokenizer_kind,
+            tokenizer_tekken_sha256=config.tokenizer_tekken_sha256,
         )
         checks["initial_context_budgets"] = True
     except (OSError, ValueError, RuntimeError) as error:
@@ -1042,6 +1116,7 @@ def preflight(config: RunConfig, *, check_endpoint: bool = True) -> dict[str, An
         config.model.strip()
         and config.agent_timeout_seconds > 0
         and config.base_url.strip()
+        and config.adapter_kind in {"qwen", "devstral_native"}
     )
     diagnostics["model_substitution"] = {
         "frozen_source_model_key": config.source_model_key,
@@ -1280,6 +1355,18 @@ def _select_cell(config: RunConfig, selector: int | str) -> FrozenCell:
     return matches[0]
 
 
+def _write_agent_adapter(config: RunConfig, path: Path) -> dict[str, str]:
+    if config.adapter_kind == "qwen":
+        return write_qualification_adapter(path)
+    if config.adapter_kind == "devstral_native":
+        from .devstral_native_mini_swe_adapter import (
+            write_devstral_native_production_adapter,
+        )
+
+        return write_devstral_native_production_adapter(path)
+    raise Qwen3Final13Error(f"unsupported agent adapter kind: {config.adapter_kind}")
+
+
 def run_cell(
     config: RunConfig,
     selector: int | str,
@@ -1358,7 +1445,7 @@ def run_cell(
         expected_protected = capture_protected_path_state(working_copy, policy)
 
         adapter_path = attempt / "mini_swe_adapter.py"
-        adapter_record = write_qualification_adapter(adapter_path)
+        adapter_record = _write_agent_adapter(config, adapter_path)
         _write_json(attempt / "mini-swe-adapter.json", adapter_record)
         public_runner = write_public_test_runner(
             config,
@@ -1517,7 +1604,7 @@ def run_canary(config: RunConfig) -> dict[str, Any]:
             )
 
         adapter_path = attempt / "mini_swe_adapter.py"
-        adapter_record = write_qualification_adapter(adapter_path)
+        adapter_record = _write_agent_adapter(config, adapter_path)
         _write_json(attempt / "mini-swe-adapter.json", adapter_record)
         public_runner = write_public_test_runner(
             config,
@@ -1733,6 +1820,11 @@ def runtime_identity(config: RunConfig) -> dict[str, Any]:
         },
         "context_limit": config.context_limit,
         "native_tool_calls": config.native_tool_calls,
+        "tokenizer_kind": config.tokenizer_kind,
+        "adapter_kind": config.adapter_kind,
+        "dtype": config.dtype,
+        "quantization": config.quantization,
+        "tool_call_parser": config.tool_call_parser,
         "tokenizer_path": str(config.tokenizer_path),
         "v3_dependency_path": (
             str(config.v3_dependency_path)

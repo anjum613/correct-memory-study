@@ -141,6 +141,14 @@ class VllmTextModelConfig(BaseModel):
                 "19564a48c4f71a2a1b937cce34c737a1e662b171c5f5d7edf641a15cd896f07d",
                 "fc76878832c668e3f0f8be66e6239a475b9093d2fe5cef97c242369779e6c6e6",
             ): frozenset({4096, 32768}),
+            # mistralai/Devstral-Small-2507, revision
+            # bd165ab26cebbcc2eea2c4ecbfc07f3ac42b3c39. The outer Devstral
+            # adapter interprets both compatibility fields as the pinned
+            # tekken.json identity and replaces the Qwen token counter.
+            (
+                "839c48629ff570bd664586800aa3ee17ee628f56efc7fd8e145cc01467a1c188",
+                "839c48629ff570bd664586800aa3ee17ee628f56efc7fd8e145cc01467a1c188",
+            ): frozenset({32768}),
         }
         identity = (
             self.tokenizer_json_sha256,
