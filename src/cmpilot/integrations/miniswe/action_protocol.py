@@ -25,13 +25,20 @@ BASH_TOOL_SPEC: dict[str, Any] = {
     "type": "function",
     "function": {
         "name": "bash",
-        "description": "Execute a bash command",
+        "description": (
+            "Execute a shell action in the current repository root. /testbed does "
+            "not exist. Use relative paths and run tests only with run_public_tests."
+        ),
         "parameters": {
             "type": "object",
             "properties": {
                 "command": {
                     "type": "string",
-                    "description": "The bash command to execute",
+                    "description": (
+                        "Repository-local shell action. Prefer one focused inspection, "
+                        "a quoted cat heredoc or sed -i edit, run_public_tests, or the "
+                        "required submission command."
+                    ),
                 }
             },
             "required": ["command"],
@@ -72,16 +79,19 @@ NATIVE_TOOL_SYSTEM_TEMPLATE = """You are a coding agent that can interact with a
 
 Call the bash tool for every action; do not emit fenced command blocks. Use one tool call
 at a time, but combine closely related inspection operations in one shell command when
-that conserves turns. Inspect the relevant implementation and public tests, edit the
-writable service promptly, run the public tests, and submit. Do not merely describe the
-next action in prose.
+that conserves turns. The shell already starts in the repository root: never use
+`/testbed`, other absolute paths, parent paths, or `/tmp`. Inspect the relevant
+implementation and public tests together, edit the writable service promptly, run the
+public tests with `run_public_tests` only, and submit. Do not invoke pytest or public-test
+Python files directly. Do not merely describe the next action in prose.
 """
 
 NATIVE_TOOL_INSTANCE_TEMPLATE = """Please solve this issue: {{task}}
 
 Use the provided bash tool to inspect, edit, and test the working repository. Work
 efficiently: read the relevant service and public tests together where practical, make
-the smallest correct edit, run `run_public_tests`, and fix any failure.
+the smallest correct edit, run `run_public_tests`, and fix any failure. Use relative
+paths from the current directory; `/testbed` does not exist.
 
 Finish only by calling the bash tool with
 `echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT` as its entire command.

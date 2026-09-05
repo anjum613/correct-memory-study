@@ -25,7 +25,7 @@ except ImportError:
     )
 
 
-POLICY_VERSION = "calculator-capability-policy-v3"
+POLICY_VERSION = "calculator-capability-policy-v4"
 ACTION_POLICY_VIOLATION = "ACTION_POLICY_VIOLATION"
 REPEATED_POLICY_VIOLATION = "REPEATED_POLICY_VIOLATION"
 PACKAGE_MANAGEMENT_PROHIBITED = "PACKAGE_MANAGEMENT_PROHIBITED"
@@ -51,6 +51,18 @@ Choose one different inspection, edit, build, or test command, then wait for its
 """
 INTERACTIVE_EDITOR_RECOVERY_PROMPT = """Interactive editors are not permitted in this non-interactive task.
 Use an authorized noninteractive repository editing method. Tests are read-only.
+"""
+REPOSITORY_BOUNDARY_RECOVERY_PROMPT = """The shell already starts in the working repository root.
+Use repository-relative paths only. Do not use /testbed, /tmp, another absolute path,
+or a parent path. Inspect with relative paths and run tests with `run_public_tests`.
+"""
+INDIRECTION_RECOVERY_PROMPT = """Use a direct repository command rather than an opaque interpreter or shell indirection.
+For a whole-file edit, use a quoted `cat > writable/path << 'EOF'` heredoc; `sed -i`
+and `perl -i` are also available. Run tests with `run_public_tests`.
+"""
+PROTECTED_PATH_RECOVERY_PROMPT = """Only the task's writable service file may be changed.
+Public tests may be read, but run them through `run_public_tests` rather than invoking
+their Python files directly.
 """
 
 _CONTROL_OPERATORS = frozenset({";", "&&", "||", "|", "|&"})
@@ -122,6 +134,20 @@ _ASSIGNMENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=.*", re.DOTALL)
 _PYTHON_EXECUTABLE = re.compile(r"python(?:\d+(?:\.\d+)*)?")
 _PIP_EXECUTABLE = re.compile(r"pip(?:\d+(?:\.\d+)*)?")
 _DYNAMIC_EXECUTABLE_CHARACTERS = frozenset("$`*?[]{}")
+_QUOTED_CAT_HEREDOC_PATTERNS = (
+    re.compile(
+        r"\Acat\s+>\s*(?P<target>(?:\./)?[A-Za-z0-9_./-]+)\s+"
+        r"<<\s*(?P<quote>['\"])(?P<delimiter>[A-Za-z_][A-Za-z0-9_]*)"
+        r"(?P=quote)\s*\n(?P<body>.*)\n(?P=delimiter)\s*\Z",
+        re.DOTALL,
+    ),
+    re.compile(
+        r"\Acat\s+<<\s*(?P<quote>['\"])(?P<delimiter>[A-Za-z_][A-Za-z0-9_]*)"
+        r"(?P=quote)\s+>\s*(?P<target>(?:\./)?[A-Za-z0-9_./-]+)\s*\n"
+        r"(?P<body>.*)\n(?P=delimiter)\s*\Z",
+        re.DOTALL,
+    ),
+)
 
 
 @dataclass(frozen=True)
@@ -439,6 +465,22 @@ def _target_is_protected(target: str, task_policy: TaskFilePolicy) -> bool:
         return True
 
 
+def _quoted_cat_heredoc_decision(
+    command: str,
+    task_policy: TaskFilePolicy,
+) -> AuthorizationDecision | None:
+    """Authorize a literal whole-file edit without interpreting its body as shell."""
+    for pattern in _QUOTED_CAT_HEREDOC_PATTERNS:
+        match = pattern.fullmatch(command)
+        if match is None:
+            continue
+        target = match.group("target")
+        if not _target_is_allowed(target, task_policy):
+            return _protected_write_rejection(command, "cat-heredoc-target")
+        return _allowed(command)
+    return None
+
+
 def _literal_path_candidate(token: str) -> str | None:
     if not token or token in {"-", "/dev/null"}:
         return None
@@ -683,7 +725,10 @@ def _protected_path_write_rule(
                 module = clean[index + 1].casefold()
                 break
         safe_test_invocation = module in {"pytest", "unittest"}
-        direct_test_execution = clean and clean[0].endswith("test_calculator.py")
+        direct_test_execution = bool(clean) and any(
+            clean[0] == path or clean[0].endswith("/" + path)
+            for path in task_policy.readable_protected_paths
+        )
         if not safe_test_invocation and not direct_test_execution:
             return "python-explicit-protected-target"
 
@@ -854,6 +899,9 @@ def authorize_command(
         return _unsafe(original, "empty-command")
     if _depth > 8:
         return _unsafe(original, "excessive-recursive-shell-depth")
+    heredoc_decision = _quoted_cat_heredoc_decision(normalized, task_policy)
+    if heredoc_decision is not None:
+        return heredoc_decision
     tokens, token_error = _tokenize(normalized)
     if tokens is None:
         return _unsafe(original, token_error or "shell-tokenization-failed")
@@ -892,6 +940,12 @@ def render_policy_recovery_prompt(reason: str) -> str:
     """Return parser-inert recovery guidance without echoing rejected content."""
     if reason == INTERACTIVE_EDITOR_PROHIBITED:
         return INTERACTIVE_EDITOR_RECOVERY_PROMPT
+    if reason == INACCESSIBLE_PATH_ACCESS_ATTEMPT:
+        return REPOSITORY_BOUNDARY_RECOVERY_PROMPT
+    if reason == UNSAFE_COMMAND_INDIRECTION:
+        return INDIRECTION_RECOVERY_PROMPT
+    if reason == PROTECTED_PATH_WRITE_ATTEMPT:
+        return PROTECTED_PATH_RECOVERY_PROMPT
     if not re.fullmatch(r"[A-Z_]+", reason):
         reason = ACTION_POLICY_VIOLATION
     return POLICY_RECOVERY_PROMPT + f"\nAuthorization reason: {reason}."
@@ -920,6 +974,7 @@ def policy_specification() -> dict[str, Any]:
             "limitation": "shlex is not a complete Bash parser",
             "opaque_constructs_fail_closed": True,
             "literal_shell_c_payloads_recursively_inspected": True,
+            "quoted_cat_heredoc_writes_checked_against_task_policy": True,
         },
         "task_file_policy": calculator_task_policy().as_dict(),
         "rules": {

@@ -83,4 +83,13 @@ common=(
 if [[ "${CMPILOT_SKIP_CANARY:-0}" != "1" ]]; then
   "$mini_python" scripts/run_qwen3_coder_next_final13.py canary "${common[@]}"
 fi
+if [[ -n "${CMPILOT_PILOT_INDEX:-}" ]]; then
+  if [[ ! "$CMPILOT_PILOT_INDEX" =~ ^[0-9]+$ ]]; then
+    printf 'CMPILOT_PILOT_INDEX must be a nonnegative integer.\n' >&2
+    exit 2
+  fi
+  "$mini_python" scripts/run_qwen3_coder_next_final13.py cell \
+    "${common[@]}" --index "$CMPILOT_PILOT_INDEX"
+  exit 0
+fi
 "$mini_python" scripts/run_qwen3_coder_next_final13.py batch "${common[@]}" --workers "$workers"

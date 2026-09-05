@@ -241,11 +241,16 @@ def test_job_25642_editor_fixture_is_now_policy_rejected() -> None:
 def test_policy_specification_is_versioned_and_records_shlex_limitations() -> None:
     specification = policy_specification()
 
-    assert specification["policy_version"] == "calculator-capability-policy-v3"
+    assert specification["policy_version"] == "calculator-capability-policy-v4"
     assert specification["default"] == "allow_repository_work"
     assert specification["complete_action_rejected_on_any_violation"] is True
     assert specification["shell_analysis"]["tokenizer"] == "python-shlex"
     assert specification["shell_analysis"]["opaque_constructs_fail_closed"] is True
+    assert (
+        specification["shell_analysis"]
+        ["quoted_cat_heredoc_writes_checked_against_task_policy"]
+        is True
+    )
     assert set(specification["categories"]) == {
         "allowed_repository_work",
         "prohibited_environment_mutation",
@@ -267,6 +272,35 @@ def test_policy_recovery_has_no_production_parser_match_or_workaround() -> None:
     assert "existing repository tools and dependencies" in recovery
     assert "pip install" not in recovery
     assert "workaround" not in recovery.casefold()
+
+
+def test_quoted_cat_heredoc_can_replace_only_the_writable_file() -> None:
+    writable = """cat > calculator.py << 'EOF'
+def add(a, b):
+    return a + b
+EOF"""
+    protected = """cat > test_calculator.py << 'EOF'
+assert False
+EOF"""
+    unquoted = """cat > calculator.py << EOF
+$(touch test_calculator.py)
+EOF"""
+
+    assert authorize_command(writable).authorized is True
+    assert authorize_command(protected).reason == "PROTECTED_PATH_WRITE_ATTEMPT"
+    assert authorize_command(unquoted).reason == UNSAFE_COMMAND_INDIRECTION
+
+
+def test_native_recovery_explains_repository_root_and_supported_test_runner() -> None:
+    boundary = render_policy_recovery_prompt("INACCESSIBLE_PATH_ACCESS_ATTEMPT")
+    indirection = render_policy_recovery_prompt(UNSAFE_COMMAND_INDIRECTION)
+
+    assert "/testbed" in boundary
+    assert "repository root" in boundary
+    assert "run_public_tests" in boundary
+    assert "cat > writable/path" in indirection
+    assert production_parser_match_count(boundary) == 0
+    assert production_parser_match_count(indirection) == 0
 
 
 def test_same_policy_violation_twice_terminates_and_valid_action_resets() -> None:
@@ -294,7 +328,7 @@ def test_job_25487_command_is_explicitly_classified() -> None:
         "command": "pip install pytest",
         "event": "ACTION_POLICY_VIOLATION",
         "matched_rule": "python-pip-package-management",
-        "policy_version": "calculator-capability-policy-v3",
+        "policy_version": "calculator-capability-policy-v4",
         "reason": "PACKAGE_MANAGEMENT_PROHIBITED",
     }
 
