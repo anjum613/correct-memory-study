@@ -16,7 +16,8 @@ if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
     'Run inside a RunPod vLLM Pod with 2x L40S and /workspace persistent storage.' \
     'The server binds to 127.0.0.1:8000 by default for SSH port forwarding.' \
     '' \
-    'Optional: VLLM_HOST, VLLM_PORT, RUNPOD_WORKSPACE, HF_TOKEN.'
+    'Optional: VLLM_HOST, VLLM_PORT, RUNPOD_WORKSPACE, HF_TOKEN.' \
+    'NCCL GPU P2P and InfiniBand transports default off for RunPod L40S pods.'
   exit 0
 fi
 if [[ $# -ne 0 ]]; then
@@ -44,6 +45,11 @@ fi
 export HF_HOME="$workspace/huggingface"
 export HUGGINGFACE_HUB_CACHE="$HF_HOME/hub"
 export VLLM_CACHE_ROOT="$workspace/vllm-cache"
+# The tested RunPod 2x L40S host advertises CUDA peer access but hangs on the
+# first NCCL P2P collective. Shared-memory transport passes the same two-rank
+# collective and is sufficient for this single-node tensor-parallel service.
+export NCCL_P2P_DISABLE="${NCCL_P2P_DISABLE:-1}"
+export NCCL_IB_DISABLE="${NCCL_IB_DISABLE:-1}"
 mkdir -p "$HUGGINGFACE_HUB_CACHE" "$VLLM_CACHE_ROOT" "$workspace/logs"
 
 version_file="$workspace/logs/qwen3-vllm-runtime.txt"
@@ -66,4 +72,5 @@ exec vllm serve "$model" \
   --max-num-seqs 2 \
   --gpu-memory-utilization 0.90 \
   --generation-config vllm \
+  --disable-custom-all-reduce \
   --download-dir "$HUGGINGFACE_HUB_CACHE"
