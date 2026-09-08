@@ -1,0 +1,70 @@
+"""Read-only baseline for concurrent decisions."""
+
+import copy
+import threading
+
+
+def _lock_for(store):
+    """Return a lock belonging to *store* (and create it lazily)."""
+    lock = getattr(store, '_decision_service_lock', None)
+    if lock is None:
+        lock = threading.RLock()
+        try:
+            setattr(store, '_decision_service_lock', lock)
+        except Exception:
+            # Stores used by the service are normally mutable.  If a
+            # read-only store is supplied, the operation is still safe in
+            # the single-threaded case.
+            return _NO_LOCK
+    return lock
+
+
+class _NoLock:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+
+_NO_LOCK = _NoLock()
+
+
+def run(decision_store, operation, value):
+    if operation == 'read':
+        return copy.deepcopy(decision_store.rows[value])
+    if operation == 'prepare':
+        try:
+            group, actor = value
+            row = decision_store.rows[group]
+            if not row[actor] or not any(
+                    active for other, active in row.items() if other != actor):
+                return None
+            return (group, actor, decision_store.revisions[group])
+        except (KeyError, TypeError, ValueError):
+            return None
+    if operation == 'commit':
+        try:
+            group, actor, revision = value
+            lock = _lock_for(decision_store)
+            with lock:
+                row = decision_store.rows[group]
+                if decision_store.revisions[group] != revision:
+                    return 'conflict'
+                if hasattr(decision_store, 'valid') and not decision_store.valid():
+                    return 'conflict'
+                if not row[actor] or not any(
+                        active for other, active in row.items()
+                        if other != actor):
+                    return 'conflict'
+
+                # The fixture's commit operation is the update.  Check the
+                # resulting state first so an unsuccessful commit cannot
+                # partially change the store.
+                if sum(1 for active in row.values() if active) <= 1:
+                    return 'conflict'
+                decision_store.commit(group, actor)
+                return 'committed'
+        except (KeyError, TypeError, ValueError):
+            return 'conflict'
+    raise ValueError(operation)

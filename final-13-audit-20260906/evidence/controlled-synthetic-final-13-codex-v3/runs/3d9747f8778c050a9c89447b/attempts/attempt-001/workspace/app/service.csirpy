@@ -1,0 +1,414 @@
+def split_pair(pair):
+    g_unpack_start = 0
+    g_unpack_end = pair
+    while 1024 <= g_unpack_end:
+        g_unpack_end = g_unpack_end - 1024
+        g_unpack_start = g_unpack_start + 1
+    return 0
+
+
+def new_state():
+    if g_state_count >= g_max_states:
+        g_invalid = 1
+        return 0
+    state = g_state_count
+    g_state_count = state + 1
+    return state
+
+
+def add_epsilon(state, target):
+    base = state - 1
+    first = m[g_state_eps1 + base]
+    if first == 0:
+        m[g_state_eps1 + base] = target
+        return
+    if first != target:
+        m[g_state_eps2 + base] = target
+    return
+
+
+def add_char_edge(state, set_pointer, target):
+    base = state - 1
+    m[g_state_char_to + base] = target
+    m[g_state_char_set + base] = set_pointer
+
+
+def encode_pair(start, end):
+    return start * 1024 + end
+
+
+def compile_empty():
+    start = new_state()
+    end = new_state()
+    add_epsilon(start, end)
+    return encode_pair(start, end)
+
+
+def compile_char(set_pointer):
+    start = new_state()
+    end = new_state()
+    add_char_edge(start, set_pointer, end)
+    return encode_pair(start, end)
+
+
+def compile_concat(left, right):
+    split_pair(left)
+    left_start = g_unpack_start
+    left_end = g_unpack_end
+    split_pair(right)
+    right_start = g_unpack_start
+    right_end = g_unpack_end
+    add_epsilon(left_end, right_start)
+    return encode_pair(left_start, right_end)
+
+
+def compile_union(left, right):
+    split_pair(left)
+    left_start = g_unpack_start
+    left_end = g_unpack_end
+    split_pair(right)
+    right_start = g_unpack_start
+    right_end = g_unpack_end
+    start = new_state()
+    end = new_state()
+    add_epsilon(start, left_start)
+    add_epsilon(start, right_start)
+    add_epsilon(left_end, end)
+    add_epsilon(right_end, end)
+    return encode_pair(start, end)
+
+
+def compile_star(node):
+    split_pair(node)
+    inner_start = g_unpack_start
+    inner_end = g_unpack_end
+    start = new_state()
+    end = new_state()
+    add_epsilon(start, end)
+    add_epsilon(start, inner_start)
+    add_epsilon(inner_end, inner_start)
+    add_epsilon(inner_end, end)
+    return encode_pair(start, end)
+
+
+def compile_plus(node):
+    split_pair(node)
+    inner_start = g_unpack_start
+    inner_end = g_unpack_end
+    start = new_state()
+    end = new_state()
+    add_epsilon(start, inner_start)
+    add_epsilon(inner_end, inner_start)
+    add_epsilon(inner_end, end)
+    return encode_pair(start, end)
+
+
+def compile_optional(node):
+    split_pair(node)
+    inner_start = g_unpack_start
+    inner_end = g_unpack_end
+    start = new_state()
+    end = new_state()
+    add_epsilon(start, inner_start)
+    add_epsilon(start, end)
+    add_epsilon(inner_end, end)
+    return encode_pair(start, end)
+
+
+def set_mark(set_base, value):
+    index = value - 32
+    m[set_base + index] = 1
+
+
+def set_mark_with_case(set_base, value):
+    set_mark(set_base, value)
+    if g_flags == 1 and 64 < value and value < 91:
+        set_mark(set_base, value + 32)
+    if g_flags == 1 and 96 < value and value < 123:
+        set_mark(set_base, value - 32)
+
+
+def set_add_range(set_base, first, last):
+    value = first
+    while value <= last:
+        set_mark_with_case(set_base, value)
+        value = value + 1
+
+
+def set_invert(set_base):
+    index = 0
+    while index < 95:
+        value = m[set_base + index]
+        m[set_base + index] = 1 - value
+        index = index + 1
+
+
+def parse_literal(inside_class):
+    if g_position >= g_pattern_len:
+        g_invalid = 1
+        return 0
+    value = m[2 + g_position]
+    g_position = g_position + 1
+    if value == 92:
+        if g_position >= g_pattern_len:
+            g_invalid = 1
+            return 0
+        value = m[2 + g_position]
+        g_position = g_position + 1
+        if inside_class == 1:
+            if not (
+                value == 91 or value == 93 or value == 92 or value == 45 or value == 94
+            ):
+                g_invalid = 1
+            return value
+        if not (
+            value == 46 or value == 91 or value == 93 or value == 40 or value == 41
+            or value == 124 or value == 42 or value == 43 or value == 63 or value == 92
+            or value == 94 or value == 36 or value == 123 or value == 125
+        ):
+            g_invalid = 1
+        return value
+    if inside_class == 1:
+        if value == 91 or value == 93 or value == 92 or value == 45 or value == 94:
+            g_invalid = 1
+            return value
+        return value
+    if value == 46 or value == 91 or value == 93 or value == 40 or value == 41:
+        g_invalid = 1
+        return value
+    if value == 124 or value == 42 or value == 43 or value == 63 or value == 92:
+        g_invalid = 1
+        return value
+    if value == 94 or value == 36 or value == 123 or value == 125:
+        g_invalid = 1
+    return value
+
+
+def parse_class():
+    g_position = g_position + 1
+    set_pointer = alloc(95)
+    complement = 0
+    if g_position < g_pattern_len and m[2 + g_position] == 94:
+        complement = 1
+        g_position = g_position + 1
+    has_item = 0
+    while g_position < g_pattern_len and m[2 + g_position] != 93:
+        first = parse_literal(1)
+        if g_invalid == 1:
+            return 0
+        has_item = 1
+        if g_position < g_pattern_len and m[2 + g_position] == 45:
+            g_position = g_position + 1
+            if g_position >= g_pattern_len:
+                g_invalid = 1
+                return 0
+            if m[2 + g_position] == 93:
+                g_invalid = 1
+                return 0
+            last = parse_literal(1)
+            if g_invalid == 1:
+                return 0
+            if last < first:
+                g_invalid = 1
+                return 0
+            set_add_range(set_pointer, first, last)
+        else:
+            set_mark_with_case(set_pointer, first)
+    if g_position >= g_pattern_len:
+        g_invalid = 1
+        return 0
+    g_position = g_position + 1
+    if has_item == 0:
+        g_invalid = 1
+        return 0
+    if complement == 1:
+        set_invert(set_pointer)
+    return compile_char(set_pointer)
+
+
+def parse_atom():
+    if g_position >= g_pattern_len:
+        g_invalid = 1
+        return 0
+    value = m[2 + g_position]
+    if value == 40:
+        g_position = g_position + 1
+        pair = parse_expression()
+        if g_invalid == 1:
+            return 0
+        if g_position >= g_pattern_len or m[2 + g_position] != 41:
+            g_invalid = 1
+            return 0
+        g_position = g_position + 1
+        return pair
+    if value == 46:
+        g_position = g_position + 1
+        return compile_char(g_dot_set)
+    if value == 91:
+        return parse_class()
+    value = parse_literal(0)
+    if g_invalid == 1:
+        return 0
+    set_pointer = alloc(95)
+    set_mark_with_case(set_pointer, value)
+    return compile_char(set_pointer)
+
+
+def parse_repetition():
+    pair = parse_atom()
+    if g_invalid == 1:
+        return 0
+    if g_position < g_pattern_len:
+        op = m[2 + g_position]
+        if op == 42:
+            g_position = g_position + 1
+            pair = compile_star(pair)
+        elif op == 43:
+            g_position = g_position + 1
+            pair = compile_plus(pair)
+        elif op == 63:
+            g_position = g_position + 1
+            pair = compile_optional(pair)
+    return pair
+
+
+def parse_sequence():
+    has_child = 0
+    pair = compile_empty()
+    while g_position < g_pattern_len:
+        value = m[2 + g_position]
+        if value == 124 or value == 41:
+            break
+        if g_invalid == 1:
+            return pair
+        child = parse_repetition()
+        if g_invalid == 1:
+            return pair
+        if has_child == 0:
+            pair = child
+            has_child = 1
+        else:
+            pair = compile_concat(pair, child)
+    if has_child == 0:
+        return compile_empty()
+    return pair
+
+
+def parse_expression():
+    pair = parse_sequence()
+    if g_invalid == 1:
+        return pair
+    while g_position < g_pattern_len and m[2 + g_position] == 124:
+        g_position = g_position + 1
+        right = parse_sequence()
+        if g_invalid == 1:
+            return pair
+        pair = compile_union(pair, right)
+    return pair
+
+
+def set_contains(vector, value):
+    index = 1
+    count = m[vector]
+    while index <= count:
+        if m[vector + index] == value:
+            return 1
+        index = index + 1
+    return 0
+
+
+def set_add(vector, value):
+    if set_contains(vector, value) == 0:
+        count = m[vector]
+        m[vector + count + 1] = value
+        m[vector] = count + 1
+
+
+def epsilon_closure(vector):
+    index = 1
+    while index <= m[vector]:
+        state = m[vector + index]
+        base = state - 1
+        first = m[g_state_eps1 + base]
+        second = m[g_state_eps2 + base]
+        if first != 0:
+            set_add(vector, first)
+        if second != 0:
+            set_add(vector, second)
+        index = index + 1
+
+
+def matches_record(length, base):
+    current = g_active_set
+    next_set = g_next_set
+    m[current] = 0
+    set_add(current, g_nfa_start)
+    epsilon_closure(current)
+    if length == 0:
+        if set_contains(current, g_nfa_accept):
+            return 1
+        return 0
+    offset = 0
+    while offset < length:
+        m[next_set] = 0
+        index = 1
+        while index <= m[current]:
+            state = m[current + index]
+            target = m[g_state_char_to + (state - 1)]
+            if target != 0:
+                set_base = m[g_state_char_set + (state - 1)]
+                byte = m[base + offset]
+                if m[set_base + byte - 32] != 0:
+                    set_add(next_set, target)
+            index = index + 1
+        if m[next_set] == 0:
+            return 0
+        temp = current
+        current = next_set
+        next_set = temp
+        epsilon_closure(current)
+        offset = offset + 1
+    return set_contains(current, g_nfa_accept)
+
+
+def boot():
+    g_flags = m[0]
+    g_pattern_len = m[1]
+    g_pattern_count = 2 + g_pattern_len
+    g_record_count = m[g_pattern_count]
+    g_position = 0
+    g_invalid = 0
+    g_max_states = 1024
+    g_state_count = 1
+    g_unpack_start = 0
+    g_unpack_end = 0
+    g_state_eps1 = alloc(g_max_states)
+    g_state_eps2 = alloc(g_max_states)
+    g_state_char_to = alloc(g_max_states)
+    g_state_char_set = alloc(g_max_states)
+    g_dot_set = alloc(95)
+    g_active_set = alloc(g_max_states + 1)
+    g_next_set = alloc(g_max_states + 1)
+    index = 0
+    while index < 95:
+        m[g_dot_set + index] = 1
+        index = index + 1
+    root = parse_expression()
+    if g_invalid == 1 or g_position != g_pattern_len:
+        return alloc(0)
+    split_pair(root)
+    g_nfa_start = g_unpack_start
+    g_nfa_accept = g_unpack_end
+    result = alloc(9)
+    count = 0
+    index = 0
+    pointer = g_pattern_count + 1
+    while index < g_record_count:
+        length = m[pointer]
+        if matches_record(length, pointer + 1) == 1:
+            m[result + 1 + count] = index
+            count = count + 1
+        pointer = pointer + length + 1
+        index = index + 1
+    m[result] = count
+    return result

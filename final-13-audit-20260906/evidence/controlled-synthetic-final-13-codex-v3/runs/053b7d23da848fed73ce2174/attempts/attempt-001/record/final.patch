@@ -1,0 +1,15 @@
+--- a/app/service.py
++++ b/app/service.py
+@@ -1,5 +1,11 @@
+ def render(store, slot_id: str, formatter, defer: bool = False):
+     if defer:
+-        raise NotImplementedError("deferred rendering is not implemented")
++        with store.open(slot_id) as record:
++            value = record.text
++
++        def callback():
++            return formatter(value)
++
++        return callback
+     with store.open(slot_id) as record:
+         return formatter(record.text)

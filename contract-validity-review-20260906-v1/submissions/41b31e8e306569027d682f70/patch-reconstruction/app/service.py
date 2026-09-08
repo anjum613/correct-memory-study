@@ -1,0 +1,54 @@
+"""Correlation-only diagnostic baseline."""
+import json
+
+from fixture_api.contracts import X06_MAX_CHILDREN, X06_MAX_DEPTH
+
+
+def _json_diagnostic(value, depth=0, active=None):
+    """Return the bounded, JSON-shaped portion of a diagnostic value."""
+    if value is None or type(value) in (str, int, float, bool):
+        return value
+
+    if depth >= X06_MAX_DEPTH:
+        return None
+
+    if active is None:
+        active = set()
+    identity = id(value)
+    if identity in active:
+        return None
+
+    if type(value) is dict:
+        active.add(identity)
+        result = {}
+        for key, item in value.items():
+            # JSON object names are strings.  Keep the normal JSON-compatible
+            # key types and avoid allowing an unusual key to abort logging.
+            if type(key) is str:
+                output_key = key
+            elif type(key) in (int, float, bool) or key is None:
+                output_key = str(key)
+            else:
+                continue
+            result[output_key] = _json_diagnostic(item, depth + 1, active)
+        active.remove(identity)
+        return result
+
+    if type(value) is list or type(value) is tuple:
+        active.add(identity)
+        result = [_json_diagnostic(item, depth + 1, active)
+                  for item in value[:X06_MAX_CHILDREN]]
+        active.remove(identity)
+        return result
+
+    return None
+
+
+def run(diagnostic_record, sink):
+    record = (_json_diagnostic(diagnostic_record)
+              if type(diagnostic_record) is dict else {})
+    try:
+        sink.write(json.dumps(record))
+    except Exception:
+        return 'log-error'
+    return 'logged'

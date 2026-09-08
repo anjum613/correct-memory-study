@@ -1,0 +1,588 @@
+def state_address(state_id):
+    return g_state_base + state_id * 4
+
+
+def state_kind(state_id):
+    return m[state_address(state_id)]
+
+
+def state_out1(state_id):
+    return m[state_address(state_id) + 1]
+
+
+def state_out2(state_id):
+    return m[state_address(state_id) + 2]
+
+
+def state_data(state_id):
+    return m[state_address(state_id) + 3]
+
+
+def state_set_kind(state_id, value):
+    m[state_address(state_id)] = value
+
+
+def state_set_out1(state_id, value):
+    m[state_address(state_id) + 1] = value
+
+
+def state_set_out2(state_id, value):
+    m[state_address(state_id) + 2] = value
+
+
+def state_set_data(state_id, value):
+    m[state_address(state_id) + 3] = value
+
+
+def allocate_state(kind):
+    count = g_state_count
+    if count >= g_state_cap:
+        g_invalid = 1
+        return -1
+    g_state_count = count + 1
+    state_set_kind(count, kind)
+    state_set_out1(count, -1)
+    state_set_out2(count, -1)
+    state_set_data(count, -1)
+    return count
+
+
+def allocate_frag(start_state, end_state):
+    count = g_frag_count
+    if count >= g_frag_cap:
+        g_invalid = 1
+        return -1
+    g_frag_count = count + 1
+    address = g_frag_base + count * 2
+    m[address] = start_state
+    m[address + 1] = end_state
+    return address
+
+
+def allocate_interval(start, end, head):
+    count = g_interval_count
+    if count >= g_interval_cap:
+        g_invalid = 1
+        return -1
+    g_interval_count = count + 1
+    address = g_interval_base + count * 3
+    m[address] = start
+    m[address + 1] = end
+    m[address + 2] = head
+    return address
+
+
+def is_reserved_outside(value):
+    return value == 46 or value == 91 or value == 93 or value == 40 or value == 41 or value == 124 or value == 42 or value == 43 or value == 63 or value == 92 or value == 94 or value == 36 or value == 123 or value == 125
+
+
+def is_reserved_class(value):
+    return value == 91 or value == 93 or value == 92 or value == 45 or value == 94
+
+
+def is_printable(value):
+    return 32 <= value and value <= 126
+
+
+def is_ascii_letter(byte):
+    return (65 <= byte and byte <= 90) or (97 <= byte and byte <= 122)
+
+
+def parse_character(in_class):
+    if g_pat_pos >= g_pat_len:
+        g_invalid = 1
+        return 0
+    value = m[g_pat_base + g_pat_pos]
+    g_pat_pos = g_pat_pos + 1
+    if value == 92:
+        if g_pat_pos >= g_pat_len:
+            g_invalid = 1
+            return 0
+        value = m[g_pat_base + g_pat_pos]
+        g_pat_pos = g_pat_pos + 1
+        if in_class == 1:
+            if is_reserved_class(value) == 0:
+                g_invalid = 1
+        else:
+            if is_reserved_outside(value) == 0:
+                g_invalid = 1
+        return value
+    if is_printable(value) == 0:
+        g_invalid = 1
+    if in_class == 1:
+        if is_reserved_class(value) == 1:
+            g_invalid = 1
+    else:
+        if is_reserved_outside(value) == 1:
+            g_invalid = 1
+    return value
+
+
+def parse_class():
+    complement = 0
+    if g_pat_pos < g_pat_len:
+        if m[g_pat_base + g_pat_pos] == 94:
+            complement = 1
+            g_pat_pos = g_pat_pos + 1
+    head = -1
+    count = 0
+    while g_pat_pos < g_pat_len:
+        if m[g_pat_base + g_pat_pos] == 93:
+            break
+        first = parse_character(1)
+        if g_invalid == 1:
+            return -1
+        if g_pat_pos < g_pat_len and m[g_pat_base + g_pat_pos] == 45:
+            g_pat_pos = g_pat_pos + 1
+            second = parse_character(1)
+            if g_invalid == 1:
+                return -1
+            if second < first:
+                g_invalid = 1
+                return -1
+            head = allocate_interval(first, second, head)
+        else:
+            head = allocate_interval(first, first, head)
+        if g_invalid == 1:
+            return -1
+        count = count + 1
+    if count == 0:
+        g_invalid = 1
+        return -1
+    if g_pat_pos >= g_pat_len:
+        g_invalid = 1
+        return -1
+    if m[g_pat_base + g_pat_pos] != 93:
+        g_invalid = 1
+        return -1
+    g_pat_pos = g_pat_pos + 1
+    return build_charset_frag(head, complement)
+
+
+def build_empty_frag():
+    start = allocate_state(0)
+    if g_invalid == 1:
+        return -1
+    end = allocate_state(0)
+    if g_invalid == 1:
+        return -1
+    state_set_out1(start, end)
+    return allocate_frag(start, end)
+
+
+def build_dot_frag():
+    start = allocate_state(2)
+    if g_invalid == 1:
+        return -1
+    end = allocate_state(0)
+    if g_invalid == 1:
+        return -1
+    state_set_out1(start, end)
+    return allocate_frag(start, end)
+
+
+def build_char_frag(value):
+    head = allocate_interval(value, value, -1)
+    if g_invalid == 1:
+        return -1
+    start = allocate_state(1)
+    if g_invalid == 1:
+        return -1
+    end = allocate_state(0)
+    if g_invalid == 1:
+        return -1
+    state_set_out1(start, end)
+    state_set_out2(start, 0)
+    state_set_data(start, head)
+    return allocate_frag(start, end)
+
+
+def build_charset_frag(head, complement):
+    start = allocate_state(1)
+    if g_invalid == 1:
+        return -1
+    end = allocate_state(0)
+    if g_invalid == 1:
+        return -1
+    state_set_out1(start, end)
+    state_set_out2(start, complement)
+    state_set_data(start, head)
+    return allocate_frag(start, end)
+
+
+def concat_frag(left, right):
+    if g_invalid == 1:
+        return -1
+    end_left = m[left + 1]
+    state_set_out1(end_left, m[right])
+    return allocate_frag(m[left], m[right + 1])
+
+
+def union_frag(left, right):
+    if g_invalid == 1:
+        return -1
+    split = allocate_state(0)
+    if g_invalid == 1:
+        return -1
+    end = allocate_state(0)
+    if g_invalid == 1:
+        return -1
+    state_set_out1(split, m[left])
+    state_set_out2(split, m[right])
+    state_set_out1(m[left + 1], end)
+    state_set_out1(m[right + 1], end)
+    return allocate_frag(split, end)
+
+
+def star_frag(child):
+    if g_invalid == 1:
+        return -1
+    split = allocate_state(0)
+    if g_invalid == 1:
+        return -1
+    end = allocate_state(0)
+    if g_invalid == 1:
+        return -1
+    state_set_out1(split, end)
+    state_set_out2(split, m[child])
+    state_set_out1(m[child + 1], split)
+    return allocate_frag(split, end)
+
+
+def plus_frag(child):
+    if g_invalid == 1:
+        return -1
+    start = allocate_state(0)
+    if g_invalid == 1:
+        return -1
+    end = allocate_state(0)
+    if g_invalid == 1:
+        return -1
+    repeat = allocate_state(0)
+    if g_invalid == 1:
+        return -1
+    state_set_out1(start, m[child])
+    state_set_out1(repeat, m[child])
+    state_set_out2(repeat, end)
+    state_set_out1(m[child + 1], repeat)
+    return allocate_frag(start, end)
+
+
+def optional_frag(child):
+    if g_invalid == 1:
+        return -1
+    start = allocate_state(0)
+    if g_invalid == 1:
+        return -1
+    end = allocate_state(0)
+    if g_invalid == 1:
+        return -1
+    state_set_out1(start, m[child])
+    state_set_out2(start, end)
+    state_set_out1(m[child + 1], end)
+    return allocate_frag(start, end)
+
+
+def parse_atom():
+    if g_invalid == 1:
+        return -1
+    if g_pat_pos >= g_pat_len:
+        g_invalid = 1
+        return -1
+    current = m[g_pat_base + g_pat_pos]
+    if current == 40:
+        g_pat_pos = g_pat_pos + 1
+        frag = parse_expression(41)
+        if g_invalid == 1:
+            return -1
+        if g_pat_pos >= g_pat_len:
+            g_invalid = 1
+            return -1
+        if m[g_pat_base + g_pat_pos] != 41:
+            g_invalid = 1
+            return -1
+        g_pat_pos = g_pat_pos + 1
+        return frag
+    if current == 46:
+        g_pat_pos = g_pat_pos + 1
+        return build_dot_frag()
+    if current == 91:
+        g_pat_pos = g_pat_pos + 1
+        return parse_class()
+    value = parse_character(0)
+    if g_invalid == 1:
+        return -1
+    return build_char_frag(value)
+
+
+def parse_repetition():
+    frag = parse_atom()
+    if g_invalid == 1:
+        return -1
+    if g_pat_pos >= g_pat_len:
+        return frag
+    current = m[g_pat_base + g_pat_pos]
+    if current == 42:
+        g_pat_pos = g_pat_pos + 1
+        return star_frag(frag)
+    if current == 43:
+        g_pat_pos = g_pat_pos + 1
+        return plus_frag(frag)
+    if current == 63:
+        g_pat_pos = g_pat_pos + 1
+        return optional_frag(frag)
+    return frag
+
+
+def parse_sequence(stop_char):
+    if g_invalid == 1:
+        return -1
+    if g_pat_pos >= g_pat_len:
+        return build_empty_frag()
+    current = m[g_pat_base + g_pat_pos]
+    if current == 124 or (stop_char != -1 and current == stop_char):
+        return build_empty_frag()
+    first = 1
+    result = -1
+    while g_pat_pos < g_pat_len:
+        current = m[g_pat_base + g_pat_pos]
+        if current == 124 or (stop_char != -1 and current == stop_char):
+            break
+        frag = parse_repetition()
+        if g_invalid == 1:
+            return -1
+        if first == 1:
+            result = frag
+            first = 0
+        else:
+            result = concat_frag(result, frag)
+        if g_invalid == 1:
+            return -1
+    if first == 1:
+        return build_empty_frag()
+    return result
+
+
+def parse_expression(stop_char):
+    if g_invalid == 1:
+        return -1
+    left = parse_sequence(stop_char)
+    if g_invalid == 1:
+        return -1
+    while g_pat_pos < g_pat_len:
+        if m[g_pat_base + g_pat_pos] != 124:
+            break
+        g_pat_pos = g_pat_pos + 1
+        right = parse_sequence(stop_char)
+        if g_invalid == 1:
+            return -1
+        left = union_frag(left, right)
+        if g_invalid == 1:
+            return -1
+    return left
+
+
+def clear_region(base, count):
+    index = 0
+    while index < count:
+        m[base + index] = 0
+        index = index + 1
+
+
+def interval_match(byte, head):
+    ptr = head
+    while ptr >= 0:
+        start = m[ptr]
+        end = m[ptr + 1]
+        if start <= byte and byte <= end:
+            return 1
+        ptr = m[ptr + 2]
+    return 0
+
+
+def state_char_match(state_id, byte):
+    kind = state_kind(state_id)
+    if kind == 0:
+        return 0
+    if kind == 2:
+        return 1
+    head = state_data(state_id)
+    complement = state_out2(state_id)
+    matched = interval_match(byte, head)
+    if g_flags == 1 and matched == 0:
+        if 65 <= byte and byte <= 90:
+            matched = interval_match(byte + 32, head)
+        if matched == 0 and 97 <= byte and byte <= 122:
+            matched = interval_match(byte - 32, head)
+    if complement == 1:
+        if matched == 0:
+            return 1
+        return 0
+    return matched
+
+
+def apply_closure(mark_base, queue_base, queue_count):
+    top = queue_count
+    while top != 0:
+        top = top - 1
+        state_id = m[queue_base + top]
+        if state_kind(state_id) == 0:
+            first = state_out1(state_id)
+            if first >= 0:
+                mark_address = mark_base + first
+                if m[mark_address] == 0:
+                    m[mark_address] = 1
+                    m[queue_base + top] = first
+                    top = top + 1
+            second = state_out2(state_id)
+            if second >= 0:
+                mark_address = mark_base + second
+                if m[mark_address] == 0:
+                    m[mark_address] = 1
+                    m[queue_base + top] = second
+                    top = top + 1
+
+
+def match_record(rec_start, rec_len, start_state, accept_state):
+    if g_invalid == 1:
+        return 0
+    state_count = g_state_count
+    current_mark = g_mark_a
+    next_mark = g_mark_b
+    queue = g_queue
+    clear_region(current_mark, state_count)
+    clear_region(next_mark, state_count)
+    m[current_mark + start_state] = 1
+    m[queue] = start_state
+    apply_closure(current_mark, queue, 1)
+    index = 0
+    byte_pos = rec_start
+    while index < rec_len:
+        clear_region(next_mark, state_count)
+        top = 0
+        state_id = 0
+        byte = m[byte_pos]
+        while state_id < state_count:
+            if m[current_mark + state_id] == 1:
+                kind = state_kind(state_id)
+                if kind != 0:
+                    if state_char_match(state_id, byte) == 1:
+                        target = state_out1(state_id)
+                        if target >= 0:
+                            mark_address = next_mark + target
+                            if m[mark_address] == 0:
+                                m[mark_address] = 1
+                                m[queue + top] = target
+                                top = top + 1
+            state_id = state_id + 1
+        if top == 0:
+            return 0
+        apply_closure(next_mark, queue, top)
+        temp = current_mark
+        current_mark = next_mark
+        next_mark = temp
+        index = index + 1
+        byte_pos = byte_pos + 1
+    if m[current_mark + accept_state] == 1:
+        return 1
+    return 0
+
+
+def parse_pattern():
+    g_pat_pos = 0
+    root = parse_expression(-1)
+    if g_invalid == 0:
+        if g_pat_pos != g_pat_len:
+            g_invalid = 1
+    return root
+
+
+def boot():
+    output = alloc(9)
+    m[output] = 0
+    g_invalid = 0
+    g_flags = 0
+    g_pat_base = 2
+    g_pat_len = m[1]
+    if g_pat_len < 0 or g_pat_len > 64:
+        g_invalid = 1
+
+    pattern_pos = 0
+    while pattern_pos < g_pat_len and g_invalid == 0:
+        value = m[g_pat_base + pattern_pos]
+        if is_printable(value) == 0:
+            g_invalid = 1
+        pattern_pos = pattern_pos + 1
+
+    record_count = 0
+    if g_invalid == 0:
+        record_count_pos = 2 + g_pat_len
+        record_count = m[record_count_pos]
+        if record_count < 0 or record_count > 8:
+            g_invalid = 1
+
+    if g_invalid == 0:
+        if m[0] == 1:
+            g_flags = 1
+        elif m[0] == 0:
+            g_flags = 0
+        else:
+            g_invalid = 1
+
+    if g_invalid == 0:
+        record_pos = 2 + g_pat_len + 1
+        record_index = 0
+        while record_index < record_count:
+            rec_len = m[record_pos]
+            if rec_len < 0 or rec_len > 64:
+                g_invalid = 1
+                break
+            byte_index = 0
+            while byte_index < rec_len and g_invalid == 0:
+                value = m[record_pos + 1 + byte_index]
+                if is_printable(value) == 0:
+                    g_invalid = 1
+                byte_index = byte_index + 1
+            record_pos = record_pos + 1 + rec_len
+            record_index = record_index + 1
+
+    if g_invalid == 1:
+        m[output] = -1
+        return output
+
+    g_state_cap = 1024
+    g_interval_cap = 2048
+    g_frag_cap = 1024
+    g_state_base = alloc(g_state_cap * 4)
+    g_interval_base = alloc(g_interval_cap * 3)
+    g_frag_base = alloc(g_frag_cap * 2)
+    g_mark_a = alloc(g_state_cap)
+    g_mark_b = alloc(g_state_cap)
+    g_queue = alloc(g_state_cap)
+    g_state_count = 0
+    g_interval_count = 0
+    g_frag_count = 0
+
+    root = parse_pattern()
+    if g_invalid == 1:
+        m[output] = -1
+        return output
+
+    start_state = m[root]
+    accept_state = m[root + 1]
+    if g_state_count == 0:
+        m[output] = -1
+        return output
+
+    record_pos = 2 + g_pat_len + 1
+    selected = 0
+    record_index = 0
+    while record_index < record_count:
+        rec_len = m[record_pos]
+        if match_record(record_pos + 1, rec_len, start_state, accept_state) == 1:
+            m[output + 1 + selected] = record_index
+            selected = selected + 1
+        record_pos = record_pos + rec_len + 1
+        record_index = record_index + 1
+    m[output] = selected
+    return output

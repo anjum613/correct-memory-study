@@ -1,0 +1,470 @@
+--- a/app/service.csirpy
++++ b/app/service.csirpy
+@@ -1,4 +1,466 @@
++NODE_EMPTY = 0
++NODE_CHAR = 1
++NODE_CAT = 2
++NODE_UNION = 3
++NODE_STAR = 4
++NODE_PLUS = 5
++NODE_OPTIONAL = 6
++CHARSET_STRIDE = 66
++
++STATE_NODE_BASE = 0
++STATE_NODE_COUNT = 1
++STATE_PARSE_POS = 2
++STATE_PATTERN_LEN = 3
++STATE_FLAGS = 4
++STATE_INVALID = 5
++STATE_ALL_SET = 6
++STATE_PATTERN_BASE = 7
++STATE_ROOT = 8
++STATE_RECORD_BASE = 9
++STATE_RECORD_LEN = 10
++STATE_MATCH_CACHE = 11
++STATE_CACHE_SIZE = 12
++
++
++def set_empty():
++    base = alloc(1)
++    m[base] = 0
++    return base
++
++
++def set_singleton(value):
++    base = alloc(2)
++    m[base] = 1
++    m[base + 1] = value
++    return base
++
++
++def set_copy(source):
++    count = m[source]
++    target = alloc(count + 1)
++    m[target] = count
++    index = 0
++    while index < count:
++        m[target + 1 + index] = m[source + 1 + index]
++        index = index + 1
++    return target
++
++
++def set_contains(base, value):
++    index = 0
++    while index < m[base]:
++        if m[base + 1 + index] == value:
++            return 1
++        index = index + 1
++    return 0
++
++
++def set_add(base, value):
++    count = m[base]
++    index = 0
++    exists = 0
++    while index < count:
++        if m[base + 1 + index] == value:
++            exists = 1
++        index = index + 1
++    if exists == 0:
++        m[base + 1 + count] = value
++        m[base] = count + 1
++
++
++def set_union_into(target, source):
++    index = 0
++    while index < m[source]:
++        candidate = m[source + 1 + index]
++        if set_contains(target, candidate) == 0:
++            set_add(target, candidate)
++        index = index + 1
++
++
++def mark_invalid(state):
++    m[state + STATE_INVALID] = 1
++
++
++def is_invalid(state):
++    return m[state + STATE_INVALID]
++
++
++def is_reserved(byte):
++    return byte == 46 or byte == 91 or byte == 93 or byte == 40 or byte == 41 or byte == 124 or byte == 42 or byte == 43 or byte == 63 or byte == 92 or byte == 94 or byte == 36 or byte == 123 or byte == 125
++
++
++def is_class_reserved(byte):
++    return byte == 91 or byte == 93 or byte == 92 or byte == 45 or byte == 94
++
++
++def add_case_set(base, value, state):
++    set_add(base, value)
++    if m[state + STATE_FLAGS] == 1:
++        if 65 <= value and value <= 90:
++            set_add(base, value + 32)
++        if 97 <= value and value <= 122:
++            set_add(base, value - 32)
++
++
++def new_node(state, node_type, first, second):
++    node_id = m[state + STATE_NODE_COUNT]
++    node_base = m[state + STATE_NODE_BASE] + node_id * 4
++    m[node_base] = node_type
++    m[node_base + 1] = first
++    m[node_base + 2] = second
++    m[node_base + 3] = 0
++    m[state + STATE_NODE_COUNT] = node_id + 1
++    return node_id
++
++
++def parse_character(state, in_class):
++    if m[state + STATE_PARSE_POS] >= m[state + STATE_PATTERN_LEN]:
++        mark_invalid(state)
++        return 0
++    position = m[state + STATE_PATTERN_BASE] + m[state + STATE_PARSE_POS]
++    value = m[position]
++    m[state + STATE_PARSE_POS] = m[state + STATE_PARSE_POS] + 1
++    if value == 92:
++        if m[state + STATE_PARSE_POS] >= m[state + STATE_PATTERN_LEN]:
++            mark_invalid(state)
++            return 0
++        value = m[m[state + STATE_PATTERN_BASE] + m[state + STATE_PARSE_POS]]
++        m[state + STATE_PARSE_POS] = m[state + STATE_PARSE_POS] + 1
++        if in_class == 1:
++            if is_class_reserved(value) == 0:
++                mark_invalid(state)
++                return 0
++        else:
++            if is_reserved(value) == 0:
++                mark_invalid(state)
++                return 0
++        return value
++    if in_class == 1:
++        if is_class_reserved(value):
++            mark_invalid(state)
++            return 0
++    else:
++        if is_reserved(value):
++            mark_invalid(state)
++            return 0
++    return value
++
++
++def parse_character_class(state):
++    m[state + STATE_PARSE_POS] = m[state + STATE_PARSE_POS] + 1
++    complement = 0
++    if m[state + STATE_PARSE_POS] < m[state + STATE_PATTERN_LEN]:
++        if m[m[state + STATE_PATTERN_BASE] + m[state + STATE_PARSE_POS]] == 94:
++            complement = 1
++            m[state + STATE_PARSE_POS] = m[state + STATE_PARSE_POS] + 1
++    members = alloc(96)
++    m[members] = 0
++    while m[state + STATE_PARSE_POS] < m[state + STATE_PATTERN_LEN] and m[m[state + STATE_PATTERN_BASE] + m[state + STATE_PARSE_POS]] != 93:
++        first = parse_character(state, 1)
++        if is_invalid(state):
++            return 0
++        if m[state + STATE_PARSE_POS] < m[state + STATE_PATTERN_LEN] and m[m[state + STATE_PATTERN_BASE] + m[state + STATE_PARSE_POS]] == 45:
++            m[state + STATE_PARSE_POS] = m[state + STATE_PARSE_POS] + 1
++            if m[state + STATE_PARSE_POS] >= m[state + STATE_PATTERN_LEN] or m[m[state + STATE_PATTERN_BASE] + m[state + STATE_PARSE_POS]] == 93:
++                mark_invalid(state)
++                return 0
++            last = parse_character(state, 1)
++            if is_invalid(state):
++                return 0
++            if last < first:
++                mark_invalid(state)
++                return 0
++            value = first
++            while value <= last:
++                add_case_set(members, value, state)
++                value = value + 1
++        else:
++            add_case_set(members, first, state)
++    if m[state + STATE_PARSE_POS] >= m[state + STATE_PATTERN_LEN] or m[m[state + STATE_PATTERN_BASE] + m[state + STATE_PARSE_POS]] != 93:
++        mark_invalid(state)
++        return 0
++    m[state + STATE_PARSE_POS] = m[state + STATE_PARSE_POS] + 1
++    if m[members] == 0:
++        mark_invalid(state)
++        return 0
++    if complement == 1:
++        charset = alloc(96)
++        m[charset] = 0
++        value = 32
++        while value <= 126:
++            if set_contains(members, value) == 0:
++                set_add(charset, value)
++            value = value + 1
++        return new_node(state, NODE_CHAR, charset, 0)
++    charset = alloc(1 + m[members])
++    m[charset] = m[members]
++    index = 0
++    while index < m[members]:
++        m[charset + 1 + index] = m[members + 1 + index]
++        index = index + 1
++    return new_node(state, NODE_CHAR, charset, 0)
++
++
++def parse_atom(state):
++    if m[state + STATE_PARSE_POS] >= m[state + STATE_PATTERN_LEN]:
++        mark_invalid(state)
++        return 0
++    character = m[m[state + STATE_PATTERN_BASE] + m[state + STATE_PARSE_POS]]
++    if character == 40:
++        m[state + STATE_PARSE_POS] = m[state + STATE_PARSE_POS] + 1
++        node = parse_expression(state)
++        if m[state + STATE_PARSE_POS] >= m[state + STATE_PATTERN_LEN] or m[m[state + STATE_PATTERN_BASE] + m[state + STATE_PARSE_POS]] != 41:
++            mark_invalid(state)
++            return 0
++        m[state + STATE_PARSE_POS] = m[state + STATE_PARSE_POS] + 1
++        return node
++    if character == 46:
++        m[state + STATE_PARSE_POS] = m[state + STATE_PARSE_POS] + 1
++        return new_node(state, NODE_CHAR, m[state + STATE_ALL_SET], 0)
++    if character == 91:
++        return parse_character_class(state)
++    value = parse_character(state, 0)
++    if is_invalid(state):
++        return 0
++    charset = alloc(3)
++    m[charset] = 0
++    add_case_set(charset, value, state)
++    return new_node(state, NODE_CHAR, charset, 0)
++
++
++def parse_repetition(state):
++    node = parse_atom(state)
++    if is_invalid(state):
++        return 0
++    if m[state + STATE_PARSE_POS] >= m[state + STATE_PATTERN_LEN]:
++        return node
++    operator = m[m[state + STATE_PATTERN_BASE] + m[state + STATE_PARSE_POS]]
++    if operator == 63:
++        m[state + STATE_PARSE_POS] = m[state + STATE_PARSE_POS] + 1
++        return new_node(state, NODE_OPTIONAL, node, 0)
++    if operator == 42:
++        m[state + STATE_PARSE_POS] = m[state + STATE_PARSE_POS] + 1
++        return new_node(state, NODE_STAR, node, 0)
++    if operator == 43:
++        m[state + STATE_PARSE_POS] = m[state + STATE_PARSE_POS] + 1
++        return new_node(state, NODE_PLUS, node, 0)
++    return node
++
++
++def parse_sequence(state):
++    if m[state + STATE_PARSE_POS] >= m[state + STATE_PATTERN_LEN]:
++        return NODE_EMPTY
++    current = m[m[state + STATE_PATTERN_BASE] + m[state + STATE_PARSE_POS]]
++    if current == 124 or current == 41:
++        return NODE_EMPTY
++    node = parse_repetition(state)
++    while is_invalid(state) == 0 and m[state + STATE_PARSE_POS] < m[state + STATE_PATTERN_LEN]:
++        current = m[m[state + STATE_PATTERN_BASE] + m[state + STATE_PARSE_POS]]
++        if current == 124 or current == 41:
++            break
++        next_node = parse_repetition(state)
++        node = new_node(state, NODE_CAT, node, next_node)
++        if is_invalid(state):
++            return NODE_EMPTY
++    return node
++
++
++def parse_expression(state):
++    node = parse_sequence(state)
++    while is_invalid(state) == 0 and m[state + STATE_PARSE_POS] < m[state + STATE_PATTERN_LEN] and m[m[state + STATE_PATTERN_BASE] + m[state + STATE_PARSE_POS]] == 124:
++        m[state + STATE_PARSE_POS] = m[state + STATE_PARSE_POS] + 1
++        node = new_node(state, NODE_UNION, node, parse_sequence(state))
++    return node
++
++
++def parse_pattern(state):
++    m[state + STATE_PARSE_POS] = 0
++    node = parse_expression(state)
++    if is_invalid(state) == 0 and m[state + STATE_PARSE_POS] != m[state + STATE_PATTERN_LEN]:
++        mark_invalid(state)
++    return node
++
++
++def match_set(state, node, pos):
++    if pos > m[state + STATE_RECORD_LEN]:
++        return set_empty()
++    cache_cell = m[state + STATE_MATCH_CACHE] + node * CHARSET_STRIDE + pos
++    cached = m[cache_cell]
++    if cached != 0:
++        return cached
++    node_base = m[state + STATE_NODE_BASE] + node * 4
++    kind = m[node_base]
++    result = set_empty()
++    if kind == NODE_EMPTY:
++        if pos <= m[state + STATE_RECORD_LEN]:
++            result = set_singleton(pos)
++    elif kind == NODE_CHAR:
++        if pos < m[state + STATE_RECORD_LEN]:
++            value = m[m[state + STATE_RECORD_BASE] + 1 + pos]
++            if set_contains(m[node_base + 1], value):
++                result = set_singleton(pos + 1)
++    elif kind == NODE_CAT:
++        left = m[node_base + 1]
++        right = m[node_base + 2]
++        left_set = match_set(state, left, pos)
++        result = set_empty()
++        index = 0
++        while index < m[left_set]:
++            next_pos = m[left_set + 1 + index]
++            if next_pos <= m[state + STATE_RECORD_LEN]:
++                right_set = match_set(state, right, next_pos)
++                set_union_into(result, right_set)
++            index = index + 1
++    elif kind == NODE_UNION:
++        left_set = match_set(state, m[node_base + 1], pos)
++        right_set = match_set(state, m[node_base + 2], pos)
++        result = set_copy(left_set)
++        set_union_into(result, right_set)
++    elif kind == NODE_OPTIONAL:
++        result = set_singleton(pos)
++        child_set = match_set(state, m[node_base + 1], pos)
++        set_union_into(result, child_set)
++    elif kind == NODE_STAR:
++        child = m[node_base + 1]
++        result = set_singleton(pos)
++        frontier = set_singleton(pos)
++        while m[frontier] > 0:
++            next_frontier = set_empty()
++            index = 0
++            while index < m[frontier]:
++                start = m[frontier + 1 + index]
++                child_set = match_set(state, child, start)
++                inner = 0
++                while inner < m[child_set]:
++                    end = m[child_set + 1 + inner]
++                    if end > start and set_contains(result, end) == 0:
++                        set_add(result, end)
++                        set_add(next_frontier, end)
++                    inner = inner + 1
++                index = index + 1
++            frontier = next_frontier
++    else:
++        child = m[node_base + 1]
++        child_set = match_set(state, child, pos)
++        result = set_copy(child_set)
++        frontier = set_copy(result)
++        while m[frontier] > 0:
++            next_frontier = set_empty()
++            index = 0
++            while index < m[frontier]:
++                start = m[frontier + 1 + index]
++                child_set2 = match_set(state, child, start)
++                inner = 0
++                while inner < m[child_set2]:
++                    end = m[child_set2 + 1 + inner]
++                    if end > start and set_contains(result, end) == 0:
++                        set_add(result, end)
++                        set_add(next_frontier, end)
++                    inner = inner + 1
++                index = index + 1
++            frontier = next_frontier
++    m[cache_cell] = result
++    return result
++
++
++def validate_inputs_and_parse(state):
++    if m[state + STATE_FLAGS] != 0 and m[state + STATE_FLAGS] != 1:
++        mark_invalid(state)
++    if m[state + STATE_PATTERN_LEN] > 64:
++        mark_invalid(state)
++    if is_invalid(state) == 0:
++        index = 0
++        while index < m[state + STATE_PATTERN_LEN]:
++            value = m[m[state + STATE_PATTERN_BASE] + index]
++            if value < 32 or value > 126:
++                mark_invalid(state)
++            index = index + 1
++    if is_invalid(state) == 0:
++        record_count = m[m[state + STATE_PATTERN_BASE] + m[state + STATE_PATTERN_LEN]]
++        if record_count > 8:
++            mark_invalid(state)
++        cursor = m[state + STATE_PATTERN_BASE] + m[state + STATE_PATTERN_LEN] + 1
++        index = 0
++        while index < record_count:
++            record_len = m[cursor]
++            if record_len > 64:
++                mark_invalid(state)
++            byte_index = 0
++            while byte_index < record_len:
++                byte = m[cursor + 1 + byte_index]
++                if byte < 32 or byte > 126:
++                    mark_invalid(state)
++                byte_index = byte_index + 1
++            cursor = cursor + 1 + record_len
++            index = index + 1
++    if is_invalid(state) == 0:
++        root = parse_pattern(state)
++        if is_invalid(state):
++            return 0
++        if m[state + STATE_PARSE_POS] != m[state + STATE_PATTERN_LEN]:
++            mark_invalid(state)
++            return 0
++        m[state + STATE_ROOT] = root
++        return root
++    return 0
++
++
+ def boot():
+-    output = alloc(1)
++    state = alloc(13)
++    m[state + STATE_NODE_BASE] = alloc(4096)
++    m[state + STATE_NODE_COUNT] = 1
++    m[state + STATE_PARSE_POS] = 0
++    m[state + STATE_PATTERN_LEN] = m[1]
++    m[state + STATE_PATTERN_BASE] = 2
++    m[state + STATE_FLAGS] = m[0]
++    m[state + STATE_INVALID] = 0
++    m[state + STATE_ROOT] = 0
++    m[state + STATE_RECORD_BASE] = 0
++    m[state + STATE_RECORD_LEN] = 0
++    m[state + STATE_MATCH_CACHE] = 0
++    m[state + STATE_CACHE_SIZE] = 0
++    node_base = m[state + STATE_NODE_BASE]
++    m[node_base] = NODE_EMPTY
++    m[node_base + 1] = 0
++    m[node_base + 2] = 0
++    m[node_base + 3] = 0
++    all_set = alloc(96)
++    m[all_set] = 95
++    i = 0
++    while i < 95:
++        m[all_set + 1 + i] = 32 + i
++        i = i + 1
++    m[state + STATE_ALL_SET] = all_set
++
++    root = validate_inputs_and_parse(state)
++    if is_invalid(state):
++        return alloc(-1)
++
++    output = alloc(9)
+     m[output] = 0
++    record_count = m[m[state + STATE_PATTERN_BASE] + m[state + STATE_PATTERN_LEN]]
++    if record_count > 8:
++        return alloc(-1)
++
++    cache_capacity = m[state + STATE_NODE_COUNT] * CHARSET_STRIDE
++    m[state + STATE_MATCH_CACHE] = alloc(cache_capacity)
++    m[state + STATE_CACHE_SIZE] = cache_capacity
++    cursor = m[state + STATE_PATTERN_BASE] + m[state + STATE_PATTERN_LEN] + 1
++    record_index = 0
++    selected = 0
++    while record_index < record_count:
++        m[state + STATE_RECORD_BASE] = cursor
++        m[state + STATE_RECORD_LEN] = m[cursor]
++        cache_i = 0
++        while cache_i < cache_capacity:
++            m[m[state + STATE_MATCH_CACHE] + cache_i] = 0
++            cache_i = cache_i + 1
++        matches = match_set(state, root, 0)
++        if set_contains(matches, m[state + STATE_RECORD_LEN]):
++            m[output + 1 + selected] = record_index
++            m[output] = selected + 1
++            selected = selected + 1
++        cursor = cursor + 1 + m[state + STATE_RECORD_LEN]
++        record_index = record_index + 1
++
+     return output

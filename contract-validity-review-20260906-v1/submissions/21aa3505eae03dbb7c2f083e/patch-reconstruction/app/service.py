@@ -1,0 +1,61 @@
+"""Serialize diagnostic records without discarding their useful context."""
+import json
+
+from fixture_api.contracts import X06_MAX_CHILDREN, X06_MAX_DEPTH
+
+
+_SCALAR_TYPES = (str, int, float, bool)
+
+
+def _public_value(value, depth=0, active=None, child_items=False):
+    """Return a JSON-compatible, bounded copy of a diagnostic value.
+
+    Diagnostic data is often assembled while handling another failure.  This
+    function deliberately does not let a malformed value (or a recursive
+    object) prevent the rest of that diagnostic from being written.
+    """
+    if value is None or type(value) in _SCALAR_TYPES:
+        return value
+
+    if depth >= X06_MAX_DEPTH:
+        return None
+
+    if active is None:
+        active = set()
+    value_id = id(value)
+    if value_id in active:
+        return None
+
+    if type(value) is dict:
+        active.add(value_id)
+        try:
+            # JSON object names are strings.  Ignoring other key types avoids
+            # silently changing their names during json.dumps.
+            return {
+                key: _public_value(item, depth + 1, active, key == 'children')
+                for key, item in value.items()
+                if type(key) is str
+            }
+        finally:
+            active.remove(value_id)
+
+    if type(value) in (list, tuple):
+        active.add(value_id)
+        try:
+            items = value[:X06_MAX_CHILDREN] if child_items else value
+            return [_public_value(item, depth + 1, active) for item in items]
+        finally:
+            active.remove(value_id)
+
+    # Keep the output shape useful and JSON serializable even when an
+    # exception object or another implementation detail slips into a record.
+    return None
+
+
+def run(diagnostic_record, sink):
+    record = _public_value(diagnostic_record) if type(diagnostic_record) is dict else {}
+    try:
+        sink.write(json.dumps(record))
+    except Exception:
+        return 'log-error'
+    return 'logged'

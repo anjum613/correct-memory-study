@@ -1,0 +1,43 @@
+"""Optimistic, per-decision-group coordination for concurrent decisions."""
+
+import copy
+
+
+def run(decision_store, operation, value):
+    if operation == 'read':
+        return copy.deepcopy(decision_store.rows[value])
+    if operation == 'prepare':
+        group, actor = value
+
+        # A prepared decision is tied to the version of the invariant it
+        # observed.  Groups have independent invariants, so preparing a
+        # decision in one group must not unnecessarily block another group.
+        if group not in decision_store.rows:
+            return None
+        row = decision_store.rows[group]
+        if actor not in row or not row[actor]:
+            return None
+        if not any(active for other, active in row.items() if other != actor):
+            return None
+        return (group, actor, decision_store.revisions[group])
+    if operation == 'commit':
+        try:
+            group, actor, revision = value
+            row = decision_store.rows[group]
+        except (KeyError, TypeError, ValueError):
+            return 'conflict'
+
+        # A changed revision means the decision's safety check was made
+        # against an obsolete view.  Recheck the condition too: this keeps a
+        # token safe even if a store implementation changes state without a
+        # usable matching revision.
+        if decision_store.revisions.get(group) != revision:
+            return 'conflict'
+        if actor not in row or not row[actor]:
+            return 'conflict'
+        if not any(active for other, active in row.items() if other != actor):
+            return 'conflict'
+
+        decision_store.commit(group, actor)
+        return 'committed'
+    raise ValueError(operation)

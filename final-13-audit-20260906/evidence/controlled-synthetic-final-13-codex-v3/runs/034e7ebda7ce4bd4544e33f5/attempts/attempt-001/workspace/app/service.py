@@ -1,0 +1,35 @@
+"""Stage content, hand it to the consumer, and clean up the staging entry."""
+
+
+def run(workspace, content_bytes, fault=None):
+    if content_bytes == b'':
+        return ('ok', b'')
+
+    identity = None
+    try:
+        # Keep the staged object private to the producer until the handoff.
+        if fault == 'create':
+            return ('error', 'create failed')
+        identity = workspace.create({'producer'}, content_bytes)
+
+        if fault == 'write':
+            return ('error', 'write failed')
+
+        # The consumer is granted access deliberately, rather than inheriting
+        # the workspace's default readers.
+        if fault == 'handoff':
+            return ('error', 'handoff failed')
+        workspace.permissions(identity, {'consumer'})
+
+        content = workspace.read(identity, 'consumer', fault=fault)
+        if content is None:
+            return ('error', 'read failed')
+        return ('ok', content)
+    except BaseException as error:
+        return ('error', str(error))
+    finally:
+        if identity is not None:
+            try:
+                workspace.remove(identity)
+            except BaseException:
+                pass

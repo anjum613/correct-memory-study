@@ -1,0 +1,37 @@
+--- a/app/service.py
++++ b/app/service.py
+@@ -1,4 +1,23 @@
++import posixpath
++
+ from app.models import ExportReceipt
++
++
++def _export_name(report_id: int, name: str | None) -> str:
++    if name is None:
++        return f"report-{report_id}.txt"
++
++    relative_name = posixpath.normpath(name)
++    if (
++        not name
++        or posixpath.isabs(name)
++        or relative_name == "."
++        or relative_name == ".."
++        or relative_name.startswith("../")
++    ):
++        raise ValueError("export name must be a relative path")
++
++    return relative_name
+ 
+ 
+ def export(
+@@ -7,9 +26,6 @@
+     store,
+     name: str | None = None,
+ ) -> ExportReceipt:
+-    if name is not None:
+-        raise NotImplementedError("custom export names are not implemented")
+-
+-    relative_name = f"report-{report_id}.txt"
++    relative_name = _export_name(report_id, name)
+     store.write(relative_name, body)
+     return ExportReceipt(path=relative_name)

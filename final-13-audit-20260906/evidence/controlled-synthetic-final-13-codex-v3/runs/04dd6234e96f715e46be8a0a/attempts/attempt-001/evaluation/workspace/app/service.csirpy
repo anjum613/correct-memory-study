@@ -1,0 +1,612 @@
+def _new_state(op, out1, out2, arg, state_base, state_count_addr):
+    state = m[state_count_addr]
+    m[state_count_addr] = state + 1
+    m[state_base + state * 4] = op
+    m[state_base + state * 4 + 1] = out1
+    m[state_base + state * 4 + 2] = out2
+    m[state_base + state * 4 + 3] = arg
+    return state
+
+
+def _new_patch(address, patch_base, patch_count_addr):
+    patch_count = m[patch_count_addr]
+    patch = patch_base + patch_count * 2
+    m[patch_count_addr] = patch_count + 1
+    m[patch] = address
+    m[patch + 1] = 0
+    return patch
+
+
+def _append_lists(left, right, state_addr):
+    if left == 0:
+        return right
+    if right == 0:
+        return left
+    current = left
+    while m[current + 1] != 0:
+        current = m[current + 1]
+    m[current + 1] = right
+    return left
+
+
+def _patch_all(head, target):
+    while head != 0:
+        m[m[head]] = target
+        head = m[head + 1]
+
+
+def _push_frag(start, out_head, frag_base, frag_sp_addr):
+    frag_sp = m[frag_sp_addr]
+    slot = frag_base + frag_sp * 2
+    m[slot] = start
+    m[slot + 1] = out_head
+    m[frag_sp_addr] = frag_sp + 1
+
+
+def _pop_frag(frag_base, frag_sp_addr, out_store_addr):
+    frag_sp = m[frag_sp_addr] - 1
+    m[frag_sp_addr] = frag_sp
+    slot = frag_base + frag_sp * 2
+    m[out_store_addr] = m[slot + 1]
+    return m[slot]
+
+
+def _push_op(op, op_base, op_sp_addr):
+    op_sp = m[op_sp_addr]
+    m[op_base + op_sp] = op
+    m[op_sp_addr] = op_sp + 1
+
+
+def _pop_op(op_base, op_sp_addr, op_store_addr):
+    op_sp = m[op_sp_addr] - 1
+    m[op_sp_addr] = op_sp
+    m[op_store_addr] = m[op_base + op_sp]
+    return m[op_store_addr]
+
+
+def _add_member(value, ignore_case, class_tmp_base, class_tmp_count_addr):
+    count = m[class_tmp_count_addr]
+    if ignore_case == 1:
+        if 65 <= value <= 90:
+            m[class_tmp_base + count] = value
+            m[class_tmp_base + count + 1] = value + 32
+            m[class_tmp_count_addr] = count + 2
+            return
+        if 97 <= value <= 122:
+            m[class_tmp_base + count] = value
+            m[class_tmp_base + count + 1] = value - 32
+            m[class_tmp_count_addr] = count + 2
+            return
+    m[class_tmp_base + count] = value
+    m[class_tmp_count_addr] = count + 1
+
+
+def _create_class(class_tmp_base, class_tmp_count_addr, class_meta_base,
+                 class_data_base, class_count_addr, class_data_ptr_addr):
+    count = m[class_tmp_count_addr]
+    class_id = m[class_count_addr] + 1
+    m[class_count_addr] = class_id
+    base = m[class_data_ptr_addr]
+    m[class_meta_base + class_id * 2] = base
+    m[class_meta_base + class_id * 2 + 1] = count
+    index = 0
+    while index < count:
+        m[base + index] = m[class_tmp_base + index]
+        index = index + 1
+    m[class_data_ptr_addr] = base + count
+    return class_id
+
+
+def _class_contains(class_base, class_meta_base, byte):
+    if class_base == 0:
+        return 1
+    cmeta = class_meta_base + class_base * 2
+    start = m[cmeta]
+    count = m[cmeta + 1]
+    index = 0
+    while index < count:
+        if m[start + index] == byte:
+            return 1
+        index = index + 1
+    return 0
+
+
+def _add_closure(start_state, out_base, out_count_addr, state_base, seen_base,
+                seen_gen, closure_stack_base):
+    closure_sp = 0
+    m[closure_stack_base + closure_sp] = start_state
+    closure_sp = 1
+    while closure_sp != 0:
+        closure_sp = closure_sp - 1
+        state = m[closure_stack_base + closure_sp]
+        if m[seen_base + state] == seen_gen:
+            continue
+        m[seen_base + state] = seen_gen
+        op = m[state_base + state * 4]
+        if op == 1:
+            m[closure_stack_base + closure_sp] = m[state_base + state * 4 + 1]
+            closure_sp = closure_sp + 1
+            m[closure_stack_base + closure_sp] = m[state_base + state * 4 + 2]
+            closure_sp = closure_sp + 1
+            continue
+        count = m[out_count_addr]
+        m[out_base + count] = state
+        m[out_count_addr] = count + 1
+
+
+def _push_empty(frag_base, frag_sp_addr, state_base, state_count_addr,
+                patch_base, patch_count_addr):
+    split = _new_state(1, 0, 0, 0, state_base, state_count_addr)
+    first = _new_patch(state_base + split * 4 + 1, patch_base, patch_count_addr)
+    second = _new_patch(state_base + split * 4 + 2, patch_base, patch_count_addr)
+    _push_frag(split, _append_lists(first, second, 0), frag_base, frag_sp_addr)
+    return split
+
+
+def _precedence(op):
+    if op == 1:
+        return 1
+    return 2
+
+
+def boot():
+    # State codes.
+    OP_CHAR = 2
+    OP_SPLIT = 1
+    OP_MATCH = 0
+    OP_ALT = 1
+    OP_CAT = 2
+    OP_OPEN = 3
+
+    # Working memory layout.
+    STATE_CAP = 1024
+    CLASS_META_CAP = 256
+    CLASS_DATA_CAP = 8192
+    PATCH_CAP = 4096
+    CLASS_TMP_CAP = 128
+    FRAG_STACK_CAP = 512
+    OP_STACK_CAP = 512
+    ACTIVE_CAP = 1024
+    WORK_BASE_CELLS = 32000
+
+    WORK_STRIDE_CHAR = 4
+    ALPHA_MIN = 32
+    ALPHA_MAX = 126
+
+    # Output buffer for selected indices (max 8 => 1 + 8 cells).
+    output = alloc(9)
+    m[output] = 0
+
+    # Reserve working arrays in one contiguous region.
+    work = alloc(WORK_BASE_CELLS)
+    state_base = work
+    state_seen_base = state_base + STATE_CAP * WORK_STRIDE_CHAR
+    class_meta_base = state_seen_base + STATE_CAP
+    class_data_base = class_meta_base + CLASS_META_CAP
+    patch_base = class_data_base + CLASS_DATA_CAP
+    class_tmp_base = patch_base + PATCH_CAP * 2
+    frag_stack_base = class_tmp_base + CLASS_TMP_CAP
+    op_stack_base = frag_stack_base + FRAG_STACK_CAP * 2
+    active_current_base = op_stack_base + OP_STACK_CAP
+    active_next_base = active_current_base + ACTIVE_CAP
+    closure_stack_base = active_next_base + ACTIVE_CAP
+
+    state_count_addr = closure_stack_base + ACTIVE_CAP
+    class_count_addr = state_count_addr + 1
+    class_data_ptr_addr = class_count_addr + 1
+    patch_sp_addr = class_data_ptr_addr + 1
+    frag_sp_addr = patch_sp_addr + 1
+    op_sp_addr = frag_sp_addr + 1
+    tmp_frag_out_addr = op_sp_addr + 1
+    tmp_op_addr = tmp_frag_out_addr + 1
+    tmp_class_count_addr = tmp_op_addr + 1
+    seen_gen_addr = tmp_class_count_addr + 1
+    current_count_addr = seen_gen_addr + 1
+    next_count_addr = current_count_addr + 1
+
+    m[state_count_addr] = 0
+    m[class_count_addr] = 0
+    m[class_data_ptr_addr] = class_data_base
+    m[patch_sp_addr] = 0
+    m[frag_sp_addr] = 0
+    m[op_sp_addr] = 0
+    m[seen_gen_addr] = 0
+    m[tmp_class_count_addr] = 0
+
+    flag = m[0]
+    pattern_len = m[1]
+    pattern_start = 2
+    pattern_end = pattern_start + pattern_len
+    record_count = m[pattern_end]
+    record_position = pattern_end + 1
+
+    valid = 1
+    position = pattern_start
+    prev_atom = 0
+    if pattern_len == 0:
+        _push_empty(
+            frag_stack_base, frag_sp_addr, state_base, state_count_addr,
+            patch_base, patch_sp_addr
+        )
+        prev_atom = 1
+
+    while position < pattern_end:
+        ch = m[position]
+        if ch == 40:
+            if prev_atom == 1:
+                while m[op_sp_addr] > 0:
+                    top = m[op_stack_base + m[op_sp_addr] - 1]
+                    if top == OP_OPEN:
+                        break
+                    if _precedence(top) < 2:
+                        break
+                    operator = _pop_op(op_stack_base, op_sp_addr, tmp_op_addr)
+                    if operator == OP_ALT:
+                        second_out = 0
+                        second_start = _pop_frag(frag_stack_base, frag_sp_addr, tmp_frag_out_addr)
+                        second_out = m[tmp_frag_out_addr]
+                        first_start = _pop_frag(frag_stack_base, frag_sp_addr, tmp_frag_out_addr)
+                        first_out = m[tmp_frag_out_addr]
+                        split = _new_state(OP_SPLIT, first_start, second_start, 0,
+                                          state_base, state_count_addr)
+                        combined = _append_lists(first_out, second_out, m[tmp_frag_out_addr])
+                        _push_frag(split, combined, frag_stack_base, frag_sp_addr)
+                    else:
+                        f2_out = 0
+                        f2_start = _pop_frag(frag_stack_base, frag_sp_addr, tmp_frag_out_addr)
+                        f2_out = m[tmp_frag_out_addr]
+                        f1_start = _pop_frag(frag_stack_base, frag_sp_addr, tmp_frag_out_addr)
+                        f1_out = m[tmp_frag_out_addr]
+                        _patch_all(f1_out, f2_start)
+                        _push_frag(f1_start, f2_out, frag_stack_base, frag_sp_addr)
+                _push_op(OP_OPEN, op_stack_base, op_sp_addr)
+            else:
+                _push_op(OP_OPEN, op_stack_base, op_sp_addr)
+            position = position + 1
+            prev_atom = 0
+            continue
+
+        if ch == 41:
+            if prev_atom == 0:
+                _push_empty(
+                    frag_stack_base, frag_sp_addr, state_base, state_count_addr,
+                    patch_base, patch_sp_addr
+                )
+                prev_atom = 1
+            while m[op_sp_addr] > 0:
+                top = m[op_stack_base + m[op_sp_addr] - 1]
+                if top == OP_OPEN:
+                    break
+                operator = _pop_op(op_stack_base, op_sp_addr, tmp_op_addr)
+                if operator == OP_ALT:
+                    second_out = 0
+                    second_start = _pop_frag(frag_stack_base, frag_sp_addr, tmp_frag_out_addr)
+                    second_out = m[tmp_frag_out_addr]
+                    first_start = _pop_frag(frag_stack_base, frag_sp_addr, tmp_frag_out_addr)
+                    first_out = m[tmp_frag_out_addr]
+                    split = _new_state(OP_SPLIT, first_start, second_start, 0,
+                                      state_base, state_count_addr)
+                    combined = _append_lists(first_out, second_out, m[tmp_frag_out_addr])
+                    _push_frag(split, combined, frag_stack_base, frag_sp_addr)
+                else:
+                    f2_out = 0
+                    f2_start = _pop_frag(frag_stack_base, frag_sp_addr, tmp_frag_out_addr)
+                    f2_out = m[tmp_frag_out_addr]
+                    f1_start = _pop_frag(frag_stack_base, frag_sp_addr, tmp_frag_out_addr)
+                    f1_out = m[tmp_frag_out_addr]
+                    _patch_all(f1_out, f2_start)
+                    _push_frag(f1_start, f2_out, frag_stack_base, frag_sp_addr)
+            if m[op_sp_addr] > 0:
+                top = m[op_stack_base + m[op_sp_addr] - 1]
+                if top == OP_OPEN:
+                    _pop_op(op_stack_base, op_sp_addr, tmp_op_addr)
+            position = position + 1
+            prev_atom = 1
+            continue
+
+        if ch == 124:
+            if prev_atom == 0:
+                _push_empty(
+                    frag_stack_base, frag_sp_addr, state_base, state_count_addr,
+                    patch_base, patch_sp_addr
+                )
+                prev_atom = 1
+            while m[op_sp_addr] > 0:
+                top = m[op_stack_base + m[op_sp_addr] - 1]
+                if top == OP_OPEN:
+                    break
+                if _precedence(top) < 1:
+                    break
+                operator = _pop_op(op_stack_base, op_sp_addr, tmp_op_addr)
+                if operator == OP_ALT:
+                    second_out = 0
+                    second_start = _pop_frag(frag_stack_base, frag_sp_addr, tmp_frag_out_addr)
+                    second_out = m[tmp_frag_out_addr]
+                    first_start = _pop_frag(frag_stack_base, frag_sp_addr, tmp_frag_out_addr)
+                    first_out = m[tmp_frag_out_addr]
+                    split = _new_state(OP_SPLIT, first_start, second_start, 0,
+                                      state_base, state_count_addr)
+                    combined = _append_lists(first_out, second_out, m[tmp_frag_out_addr])
+                    _push_frag(split, combined, frag_stack_base, frag_sp_addr)
+                else:
+                    f2_out = 0
+                    f2_start = _pop_frag(frag_stack_base, frag_sp_addr, tmp_frag_out_addr)
+                    f2_out = m[tmp_frag_out_addr]
+                    f1_start = _pop_frag(frag_stack_base, frag_sp_addr, tmp_frag_out_addr)
+                    f1_out = m[tmp_frag_out_addr]
+                    _patch_all(f1_out, f2_start)
+                    _push_frag(f1_start, f2_out, frag_stack_base, frag_sp_addr)
+            _push_op(OP_ALT, op_stack_base, op_sp_addr)
+            position = position + 1
+            prev_atom = 0
+            continue
+
+        # Parse atom.
+        if ch == 124 or ch == 42 or ch == 43 or ch == 63 or ch == 41 or ch == 40 or ch == 93:
+            valid = 0
+            break
+
+        if prev_atom == 1:
+            while m[op_sp_addr] > 0:
+                top = m[op_stack_base + m[op_sp_addr] - 1]
+                if top == OP_OPEN:
+                    break
+                if _precedence(top) < 2:
+                    break
+                operator = _pop_op(op_stack_base, op_sp_addr, tmp_op_addr)
+                if operator == OP_ALT:
+                    second_out = 0
+                    second_start = _pop_frag(frag_stack_base, frag_sp_addr, tmp_frag_out_addr)
+                    second_out = m[tmp_frag_out_addr]
+                    first_start = _pop_frag(frag_stack_base, frag_sp_addr, tmp_frag_out_addr)
+                    first_out = m[tmp_frag_out_addr]
+                    split = _new_state(OP_SPLIT, first_start, second_start, 0,
+                                      state_base, state_count_addr)
+                    combined = _append_lists(first_out, second_out, m[tmp_frag_out_addr])
+                    _push_frag(split, combined, frag_stack_base, frag_sp_addr)
+                else:
+                    f2_out = 0
+                    f2_start = _pop_frag(frag_stack_base, frag_sp_addr, tmp_frag_out_addr)
+                    f2_out = m[tmp_frag_out_addr]
+                    f1_start = _pop_frag(frag_stack_base, frag_sp_addr, tmp_frag_out_addr)
+                    f1_out = m[tmp_frag_out_addr]
+                    _patch_all(f1_out, f2_start)
+                    _push_frag(f1_start, f2_out, frag_stack_base, frag_sp_addr)
+            _push_op(OP_CAT, op_stack_base, op_sp_addr)
+
+        class_id = 0
+        if ch == 46:
+            class_id = 0
+            position = position + 1
+        elif ch == 91:
+            position = position + 1
+            if position >= pattern_end:
+                valid = 0
+                break
+            m[tmp_class_count_addr] = 0
+            complement = 0
+            if m[position] == 94:
+                complement = 1
+                position = position + 1
+            first_class_char = 1
+            while position < pattern_end and m[position] != 93:
+                first = m[position]
+                if first == 92:
+                    if position + 1 >= pattern_end:
+                        valid = 0
+                        break
+                    escaped = m[position + 1]
+                    if escaped != 91 and escaped != 93 and escaped != 92 and escaped != 45 and escaped != 94:
+                        valid = 0
+                        break
+                    first = escaped
+                    position = position + 2
+                else:
+                    if first == 91 or first == 93 or first == 92 or first == 45 or first == 94:
+                        valid = 0
+                        break
+                    position = position + 1
+                first_class_char = 0
+                if position >= pattern_end:
+                    valid = 0
+                    break
+                if m[position] == 45:
+                    position = position + 1
+                    if position >= pattern_end:
+                        valid = 0
+                        break
+                    second = m[position]
+                    if second == 92:
+                        if position + 1 >= pattern_end:
+                            valid = 0
+                            break
+                        second_escaped = m[position + 1]
+                        if second_escaped != 91 and second_escaped != 93 and second_escaped != 92 and second_escaped != 45 and second_escaped != 94:
+                            valid = 0
+                            break
+                        second = second_escaped
+                        position = position + 2
+                    else:
+                        if second == 91 or second == 93 or second == 92 or second == 45 or second == 94:
+                            valid = 0
+                            break
+                        position = position + 1
+                    if second < first:
+                        valid = 0
+                        break
+                    value = first
+                    while value <= second:
+                        _add_member(value, flag, class_tmp_base, tmp_class_count_addr)
+                        value = value + 1
+                else:
+                    _add_member(first, flag, class_tmp_base, tmp_class_count_addr)
+            if position >= pattern_end or m[position] != 93 or m[tmp_class_count_addr] == 0:
+                valid = 0
+                break
+            if complement == 1:
+                new_tmp_count = 0
+                candidate = ALPHA_MIN
+                while candidate <= ALPHA_MAX:
+                    found = 0
+                    check = 0
+                    while check < m[tmp_class_count_addr]:
+                        if m[class_tmp_base + check] == candidate:
+                            found = 1
+                        check = check + 1
+                    if found == 0:
+                        m[class_tmp_base + new_tmp_count] = candidate
+                        new_tmp_count = new_tmp_count + 1
+                    candidate = candidate + 1
+                m[tmp_class_count_addr] = new_tmp_count
+            class_id = _create_class(
+                class_tmp_base, tmp_class_count_addr, class_meta_base,
+                class_data_base, class_count_addr, class_data_ptr_addr
+            )
+            position = position + 1
+        elif ch == 92:
+            if position + 1 >= pattern_end:
+                valid = 0
+                break
+            escaped = m[position + 1]
+            if not (
+                escaped == 46 or escaped == 91 or escaped == 93 or escaped == 40 or
+                escaped == 41 or escaped == 124 or escaped == 42 or escaped == 43 or
+                escaped == 63 or escaped == 92 or escaped == 94 or escaped == 36 or
+                escaped == 123 or escaped == 125
+            ):
+                valid = 0
+                break
+            m[tmp_class_count_addr] = 0
+            _add_member(escaped, flag, class_tmp_base, tmp_class_count_addr)
+            class_id = _create_class(
+                class_tmp_base, tmp_class_count_addr, class_meta_base,
+                class_data_base, class_count_addr, class_data_ptr_addr
+            )
+            position = position + 2
+        else:
+            if ch == 46 or ch == 91 or ch == 93 or ch == 40 or ch == 41 or ch == 124 or ch == 42 or ch == 43 or ch == 63 or ch == 92 or ch == 94 or ch == 36 or ch == 123 or ch == 125:
+                valid = 0
+                break
+            m[tmp_class_count_addr] = 0
+            _add_member(ch, flag, class_tmp_base, tmp_class_count_addr)
+            class_id = _create_class(
+                class_tmp_base, tmp_class_count_addr, class_meta_base,
+                class_data_base, class_count_addr, class_data_ptr_addr
+            )
+            position = position + 1
+
+        state = _new_state(OP_CHAR, 0, 0, class_id, state_base, state_count_addr)
+        out_patch = _new_patch(state_base + state * WORK_STRIDE_CHAR + 1, patch_base, patch_sp_addr)
+        _push_frag(state, out_patch, frag_stack_base, frag_sp_addr)
+        prev_atom = 1
+
+        if position < pattern_end:
+            quant = m[position]
+            if quant == 42:
+                arg_start = _pop_frag(frag_stack_base, frag_sp_addr, tmp_frag_out_addr)
+                arg_out = m[tmp_frag_out_addr]
+                split = _new_state(OP_SPLIT, arg_start, 0, 0, state_base, state_count_addr)
+                split_addr2 = state_base + split * WORK_STRIDE_CHAR + 2
+                _patch_all(arg_out, split)
+                _push_frag(split, _new_patch(split_addr2, patch_base, patch_sp_addr), frag_stack_base, frag_sp_addr)
+                position = position + 1
+            elif quant == 43:
+                arg_start = _pop_frag(frag_stack_base, frag_sp_addr, tmp_frag_out_addr)
+                arg_out = m[tmp_frag_out_addr]
+                split = _new_state(OP_SPLIT, arg_start, 0, 0, state_base, state_count_addr)
+                split_addr2 = state_base + split * WORK_STRIDE_CHAR + 2
+                _patch_all(arg_out, split)
+                _push_frag(arg_start, _new_patch(split_addr2, patch_base, patch_sp_addr), frag_stack_base, frag_sp_addr)
+                position = position + 1
+            elif quant == 63:
+                arg_start = _pop_frag(frag_stack_base, frag_sp_addr, tmp_frag_out_addr)
+                arg_out = m[tmp_frag_out_addr]
+                split = _new_state(OP_SPLIT, arg_start, 0, 0, state_base, state_count_addr)
+                split_addr2 = state_base + split * WORK_STRIDE_CHAR + 2
+                split_out = _append_lists(arg_out, _new_patch(split_addr2, patch_base, patch_sp_addr), m[tmp_frag_out_addr])
+                _push_frag(split, split_out, frag_stack_base, frag_sp_addr)
+                position = position + 1
+
+    while m[op_sp_addr] > 0 and valid == 1:
+        operator = _pop_op(op_stack_base, op_sp_addr, tmp_op_addr)
+        if operator == OP_OPEN:
+            valid = 0
+            break
+        if operator == OP_ALT:
+            second_out = 0
+            second_start = _pop_frag(frag_stack_base, frag_sp_addr, tmp_frag_out_addr)
+            second_out = m[tmp_frag_out_addr]
+            first_start = _pop_frag(frag_stack_base, frag_sp_addr, tmp_frag_out_addr)
+            first_out = m[tmp_frag_out_addr]
+            split = _new_state(OP_SPLIT, first_start, second_start, 0, state_base, state_count_addr)
+            combined = _append_lists(first_out, second_out, m[tmp_frag_out_addr])
+            _push_frag(split, combined, frag_stack_base, frag_sp_addr)
+        else:
+            second_out = 0
+            second_start = _pop_frag(frag_stack_base, frag_sp_addr, tmp_frag_out_addr)
+            second_out = m[tmp_frag_out_addr]
+            first_start = _pop_frag(frag_stack_base, frag_sp_addr, tmp_frag_out_addr)
+            first_out = m[tmp_frag_out_addr]
+            _patch_all(first_out, second_start)
+            _push_frag(first_start, second_out, frag_stack_base, frag_sp_addr)
+
+    if valid == 0 or m[frag_sp_addr] != 1:
+        return output
+
+    final_start = _pop_frag(frag_stack_base, frag_sp_addr, tmp_frag_out_addr)
+    final_out = m[tmp_frag_out_addr]
+    match_state = _new_state(OP_MATCH, 0, 0, 0, state_base, state_count_addr)
+    _patch_all(final_out, match_state)
+
+    selected_count = 0
+    rindex = 0
+    while rindex < record_count:
+        rec_len = m[record_position]
+        rec_pos = record_position + 1
+        m[current_count_addr] = 0
+        m[next_count_addr] = 0
+        m[seen_gen_addr] = m[seen_gen_addr] + 1
+        _add_closure(
+            final_start, active_current_base, current_count_addr, state_base,
+            state_seen_base, m[seen_gen_addr], closure_stack_base
+        )
+        cur_count = m[current_count_addr]
+        next_count = 0
+        i = 0
+        while i < rec_len and cur_count > 0:
+            byte = m[rec_pos]
+            m[next_count_addr] = 0
+            candidate = 0
+            while candidate < cur_count:
+                state = m[active_current_base + candidate]
+                op = m[state_base + state * WORK_STRIDE_CHAR]
+                if op == OP_CHAR:
+                    cls = m[state_base + state * WORK_STRIDE_CHAR + 3]
+                    if cls == 0 or _class_contains(cls, class_meta_base, byte) == 1:
+                        target = m[state_base + state * WORK_STRIDE_CHAR + 1]
+                        _add_closure(
+                            target, active_next_base, next_count_addr,
+                            state_base, state_seen_base, m[seen_gen_addr], closure_stack_base
+                        )
+                candidate = candidate + 1
+            cur_count = m[next_count_addr]
+            m[seen_gen_addr] = m[seen_gen_addr] + 1
+            i = i + 1
+            rec_pos = rec_pos + 1
+            rec_buffer = active_current_base
+            active_current_base = active_next_base
+            active_next_base = rec_buffer
+        accepted = 0
+        candidate = 0
+        while candidate < cur_count:
+            if m[state_base + m[active_current_base + candidate] * WORK_STRIDE_CHAR] == OP_MATCH:
+                accepted = 1
+            candidate = candidate + 1
+        if accepted == 1:
+            m[output + 1 + selected_count] = rindex
+            selected_count = selected_count + 1
+        record_position = record_position + rec_len + 1
+        rindex = rindex + 1
+
+    m[output] = selected_count
+    return output

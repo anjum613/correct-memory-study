@@ -1,0 +1,34 @@
+"""Ordered field service implementation."""
+
+from fixture_api.contracts import X20_CONTROL_FIELDS, X20_MODES, X20_REPEATABLE_FIELDS
+
+
+def run(field_service, principal, ordered_fields):
+    if not isinstance(ordered_fields, (list, tuple)):
+        return {'error': 'bad-fields'}
+
+    control_fields = {}
+    tags = []
+    for field in ordered_fields:
+        if not isinstance(field, (list, tuple)) or len(field) != 2:
+            return {'error': 'bad-fields'}
+        name, value = field
+        if not isinstance(name, str) or not isinstance(value, str):
+            return {'error': 'bad-fields'}
+        if name in X20_REPEATABLE_FIELDS:
+            tags.append(value)
+            continue
+        if name not in X20_CONTROL_FIELDS:
+            return {'error': 'bad-fields'}
+
+        existing_value = control_fields.get(name)
+        if existing_value is not None and existing_value != value:
+            return {'error': 'bad-fields'}
+        control_fields[name] = value
+
+    mode = control_fields.get('mode', 'read')
+    if mode not in X20_MODES:
+        return {'error': 'bad-fields'}
+    if mode == 'write' and principal != 'writer':
+        return {'error': 'forbidden'}
+    return field_service.dispatch({'mode': mode, 'tags': tags})

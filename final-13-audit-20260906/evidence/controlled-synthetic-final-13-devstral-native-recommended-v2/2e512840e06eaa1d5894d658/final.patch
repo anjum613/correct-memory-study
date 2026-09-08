@@ -1,0 +1,59 @@
+diff --git a/app/service.csirpy b/app/service.csirpy
+index 1411066..c0be59a 100644
+--- a/app/service.csirpy
++++ b/app/service.csirpy
+@@ -1,4 +1,53 @@
+ def boot():
++    # Get input parameters
++    flag = m[0]
++    pattern_len = m[1]
++    pattern_start = 2
++    record_count = m[pattern_start + pattern_len + 1]
++    record_start = pattern_start + pattern_len + 2
++    
++    # Allocate space for selected records
+     output = alloc(1)
+-    m[output] = 0
++    m[output] = 0  # Initialize output length to 0
++    
++    # Process each record
++    i = 0
++    while i < record_count:
++        record_len = m[record_start + i * 2]
++        record_data = record_start + i * 2 + 1
++        
++        # Check if the record matches the pattern exactly
++        match = 1  # Use 1 for True, 0 for False
++        j = 0
++        if record_len == pattern_len:
++            while j < record_len and match:
++                if m[record_data + j] != m[pattern_start + j]:
++                    match = 0
++                j = j + 1
++        else:
++            match = 0
++            
++        if match:
++            # Add to selected records
++            selected_count = m[output]
++            # Allocate space for the new selected index
++            if selected_count == 0:
++                selected_base = output + 1
++                m[output] = 1
++                m[selected_base] = i
++            else:
++                # Find the right position to maintain order
++                pos = selected_base
++                while pos < selected_base + selected_count and m[pos] < i:
++                    pos = pos + 1
++                # Make space for the new record index
++                j = selected_count
++                while j > pos:
++                    m[selected_base + j] = m[selected_base + j - 1]
++                    j = j - 1
++                m[selected_base + pos] = i
++                m[output] = m[output] + 1
++        
++        i = i + 1
++    
+     return output

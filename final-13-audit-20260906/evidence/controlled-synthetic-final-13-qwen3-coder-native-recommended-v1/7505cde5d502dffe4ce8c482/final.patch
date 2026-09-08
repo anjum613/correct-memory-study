@@ -1,0 +1,47 @@
+diff --git a/app/service.py b/app/service.py
+index c2ffb5a..68d074a 100644
+--- a/app/service.py
++++ b/app/service.py
+@@ -4,4 +4,41 @@
+ def run(workspace, content_bytes, fault=None):
+     if content_bytes == b'':
+         return ('ok', b'')
+-    return ('error', 'staging unavailable')
++    
++    # Create a staged file in the workspace
++    identity = workspace.create(['producer', 'consumer'], content_bytes)
++    
++    # Handle potential faults during staging
++    if fault == 'create':
++        workspace.remove(identity)
++        return ('error', 'staging unavailable')
++    
++    # Simulate handoff to consumer
++    if fault == 'handoff':
++        workspace.remove(identity)
++        return ('error', 'staging unavailable')
++    
++    # Handle write fault
++    if fault == 'write':
++        workspace.remove(identity)
++        return ('error', 'staging unavailable')
++        
++    # Handle read fault  
++    if fault == 'read':
++        workspace.remove(identity)
++        return ('error', 'staging unavailable')
++        
++    # If we get here, staging succeeded
++    # The content should be accessible to consumer
++    try:
++        content = workspace.read(identity, 'consumer')
++        if content != content_bytes:
++            workspace.remove(identity)
++            return ('error', 'staging unavailable')
++    except OSError:
++        workspace.remove(identity)
++        return ('error', 'staging unavailable')
++        
++    # Success case - clean up the file since we've verified it worked
++    workspace.remove(identity)
++    return ('ok', content_bytes)

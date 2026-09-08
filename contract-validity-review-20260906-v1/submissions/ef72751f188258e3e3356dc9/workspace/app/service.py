@@ -1,0 +1,26 @@
+"""Diagnostic logging with correlation and structured records."""
+import json
+
+
+def run(diagnostic_record, sink):
+    # Create a copy of the record to avoid modifying the input
+    record = {}
+    
+    # Handle correlation field specifically
+    if type(diagnostic_record) is dict and 'correlation' in diagnostic_record:
+        value = diagnostic_record['correlation']
+        if value is None or type(value) in (str, int, float, bool):
+            record['correlation'] = value
+        else:
+            record['correlation'] = None
+    
+    # Copy all other fields from the diagnostic record
+    for key, value in diagnostic_record.items():
+        if key != 'correlation':
+            record[key] = value
+    
+    try:
+        sink.write(json.dumps(record))
+    except Exception:
+        return 'log-error'
+    return 'logged'

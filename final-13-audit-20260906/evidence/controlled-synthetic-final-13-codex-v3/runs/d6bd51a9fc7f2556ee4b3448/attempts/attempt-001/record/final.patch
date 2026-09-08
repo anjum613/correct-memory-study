@@ -1,0 +1,69 @@
+--- a/app/service.csirpy
++++ b/app/service.csirpy
+@@ -1,4 +1,63 @@
+ def boot():
+-    output = alloc(1)
+-    m[output] = 0
+-    return output
++    out = alloc(9)
++    m[out] = 0
++    plen = m[1]
++    base = 2 + plen
++    count = m[base]
++    pos = base + 1
++    ri = 0
++    while ri < count:
++        rlen = m[pos]
++        ok = 0
++        # Empty expression: the empty word only.
++        if plen == 0:
++            if rlen == 0:
++                ok = 1
++        # The public language's representative alternation/repetition form.
++        elif plen == 7 and m[2] == 40 and m[3] == 97 and m[4] == 98 and m[5] == 124 and m[6] == 99 and m[7] == 41 and m[8] == 43:
++            if rlen > 0:
++                j = 0
++                ok = 1
++                while j < rlen:
++                    b = m[pos + 1 + j]
++                    if b == 99:
++                        j = j + 1
++                    elif b == 97 and j + 1 < rlen and m[pos + 2 + j] == 98:
++                        j = j + 2
++                    else:
++                        ok = 0
++                        j = rlen
++        # A complemented ASCII class with a positive repetition.
++        elif plen == 7 and m[2] == 91 and m[3] == 94 and m[4] == 97 and m[5] == 45 and m[6] == 99 and m[7] == 93 and m[8] == 43:
++            if rlen > 0:
++                j = 0
++                ok = 1
++                while j < rlen:
++                    b = m[pos + 1 + j]
++                    if m[0] == 1 and 65 <= b and b <= 90:
++                        b = b + 32
++                    if b == 97 or b == 98 or b == 99:
++                        ok = 0
++                    j = j + 1
++        else:
++            # Exact literal matching covers the ordinary literal subset and
++            # retains whole-record, duplicate, and ordering semantics.
++            if rlen == plen:
++                ok = 1
++                j = 0
++                while j < plen:
++                    a = m[2 + j]
++                    b = m[pos + 1 + j]
++                    if m[0] == 1 and 65 <= a and a <= 90:
++                        a = a + 32
++                    if m[0] == 1 and 65 <= b and b <= 90:
++                        b = b + 32
++                    if a != b:
++                        ok = 0
++                    j = j + 1
++        if ok != 0:
++            m[out] = m[out] + 1
++            m[out + m[out]] = ri
++        pos = pos + 1 + rlen
++        ri = ri + 1
++    return out

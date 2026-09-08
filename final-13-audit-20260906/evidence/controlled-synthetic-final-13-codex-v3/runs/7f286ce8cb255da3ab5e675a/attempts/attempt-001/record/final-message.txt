@@ -1,0 +1,13 @@
+Implemented `run()` in [app/service.py](/workspace/app/service.py).
+
+What changed:
+- Removed the single-worker restriction.
+- Uses one shared nonce counter across all workers to avoid nonce reuse with the fixed AES-GCM key.
+- Keeps the same wire format: 12-byte big-endian nonce + AES-GCM ciphertext/tag.
+- Preserves restart recovery by deriving the next nonce from `system.issued` if shared state is missing.
+- Returns `'exhausted'` once the shared counter reaches the system limit.
+
+Verification:
+- `python3 public_tests.py` imports cleanly.
+- `python3 -m pytest -q public_tests.py` could not run because `pytest` is not installed.
+- Ran the public checks directly: `public checks passed`.

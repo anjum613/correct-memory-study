@@ -1,0 +1,428 @@
+          Configuration   Arm     Interrupt   Time cap    Exception   Lowering   Known F     Known S
+          GPT-5.5 Low     N              0          0            1           0          26          25
+                          C              0          1            1           0          26          25
+                          I              0          1            2           0          26          24
+                          B              1          0            1           0          25          24
+          Luna Medium     N              1          0            1           0          25          24
+                          C              0          0            1           0          26          25
+                          I              1          0            1           0          25          24
+                          B              1          0            1           0          25          24
+          Terra Medium    N              0          0            2           0          26          24
+                          C              0          0            2           0          26          24
+                          I              0          0            2           0          26          24
+                          B              0          2            2           0          26          24
+          Qwen Next       N              0          0            0           0          26          26
+                          C              0          0            0           0          26          26
+                          I              0          0            0           0          26          26
+                          B              0          0            0           0          26          26
+          Qwen 30B        N              0          0            0           0          26          26
+                          C              0          0            0           0          26          26
+                          I              0          0            0           1          25          25
+                          B              0          0            0           1          25          25
+          Devstral        N              0          0            0           0          26          26
+                          C              0          0            0           1          25          25
+                          I              0          0            0           1          25          25
+                          B              0          0            0           0          26          26
+      Table 8: Measurement availability by condition. Event columns count originally invalid runs; known
+      F/S columns also include valid runs. Each row has 26 recorded runs. Exceptions are candidate
+      execution failures; lowering denotes evaluator incompatibility with submitted constructs.
+
+
+414   E    Analysis specification and sensitivity
+415   For configuration m, contrast a − b, and outcome Y ∈ {F, S, U }, let Em,a,b contain families for
+416   which both repetitions in both conditions are technically valid and have observed F and S. The
+417   estimate is
+                                1      X  Ym,f,a,1 + Ym,f,a,2        Ym,f,b,1 + Ym,f,b,2
+                                                                                          
+                    Y
+                  ∆m,a−b =
+                  b                                                −                        .      (2)
+                             |Em,a,b |                  2                      2
+                                       f ∈Em,a,b
+
+418   We multiply by 100 to report percentage points. Eligible sets are contrast-specific. The correction
+419   changes no eligibility decisions. There is no pooled model ranking or substitution of an invalid
+420   repetition by an offline result.
+
+421   Uncertainty. The displayed intervals resample the eligible paired family differences with replace-
+422   ment 20,000 times and take the 2.5th and 97.5th percentiles. The reproducible generator uses a fixed
+423   analysis seed and retains the two repetitions inside each family unit. These intervals are exploratory
+424   and condition on the observed family set; they do not account for uncertainty in task construction,
+425   eligibility dependent on outcomes, scoring scope, or all possible repeated agent generations. Zero
+426   observed variation produces a degenerate bootstrap distribution, not a precise population guarantee.
+427   The two-sided family sign-flip diagnostic enumerates sign assignments to the family differences
+428   and requires a symmetry/exchangeability assumption. It is not a randomization test justified by
+429   randomized signs in this design. Leave-one-family-out ranges describe the influence of individual
+430   observed families. Scope omissions and these diagnostics were chosen during review and are not
+431   replacement primary analyses.
+
+
+
+
+                                                         13
+               Configuration    Contrast    All invalids unresolved          Components retained
+               GPT-5.5 Low      C−N         [+3.8, +15.4]                    [+3.8, +11.5]
+                                I−N         [-7.7, +7.7]                     [-7.7, +3.8]
+                                B−C         [-38.5, -23.1]                   [-34.6, -23.1]
+               Luna Medium      C−N         [0.0, +11.5]                     [0.0, +11.5]
+                                I−N         [-15.4, 0.0]                     [-15.4, 0.0]
+                                B−C         [-15.4, -3.8]                    [-15.4, -3.8]
+               Terra Medium     C−N         [-3.8, +11.5]                    [-3.8, +11.5]
+                                I−N         [-3.8, +11.5]                    [-3.8, +11.5]
+                                B−C         [-26.9, -3.8]                    [-26.9, -11.5]
+               Qwen Next        C−N         [0.0, 0.0]                       [0.0, 0.0]
+                                I−N         [+7.7, +7.7]                     [+7.7, +7.7]
+                                B−C         [0.0, 0.0]                       [0.0, 0.0]
+               Qwen 30B         C−N         [-11.5, -11.5]                   [-11.5, -11.5]
+                                I−N         [-3.8, 0.0]                      [-3.8, 0.0]
+                                B−C         [+3.8, +7.7]                     [+3.8, +7.7]
+               Devstral         C−N         [-3.8, 0.0]                      [-3.8, 0.0]
+                                I−N         [-7.7, -3.8]                     [-7.7, -3.8]
+                                B−C         [-3.8, 0.0]                      [-3.8, 0.0]
+Table 9: Bounds with every originally invalid outcome unresolved, compared with bounds retaining
+completed component measurements. Both use the fixed thirteen-family cohort. Values are percentage
+points.
+
+
+
+
+          GPT-5.5            Luna              Terra           Qwen Next           Qwen 30B           Devstral
+
+        N C     I   B     N C   I   B      N C    I    B       N C     I     B    N C        I   B   N C   I     B
+ F01
+ F02
+ F04
+ F08
+ F17
+ F20
+ X02
+ X05
+ X06
+ X11
+ X20
+ X24
+ X28
+
+                          F pass, S pass                    F fail, S pass             Invalid
+                          F pass, S fail (U)                F fail, S fail
+
+
+Figure 4: Family and condition overview. Each cell is split left/right for repetitions 1/2. Colors follow
+Figure 2. All 624 recorded runs appear once; failure to complete remains distinct from gray technical
+invalidity. The first three configurations use Codex and the last three MiniSWE.
+
+
+
+
+                                                       14
+                Configuration   Arm    Valid       FS        U      ¬F, S    ¬F, ¬S    Invalid
+                GPT-5.5 Low     N           25      16        9         0          0           1
+                                C           24      13       11         0          0           2
+                                I           23      15        8         0          0           3
+                                B           24      21        3         0          0           2
+                Luna Medium     N           24      11       10         2          1           2
+                                C           25       7       12         6          0           1
+                                I           24      11        8         5          0           2
+                                B           24      10        9         5          0           2
+                Terra Medium    N           24      16        8         0          0           2
+                                C           24      14        9         1          0           2
+                                I           24      15        9         0          0           2
+                                B           22      18        4         0          0           4
+                Qwen Next       N           26         6     11         9          0           0
+                                C           26         5     11        10          0           0
+                                I           26         4     13         8          1           0
+                                B           26         4     11        11          0           0
+                Qwen 30B        N           26         8     16         1          1           0
+                                C           26         7     13         3          3           0
+                                I           25         8     15         1          1           1
+                                B           25         9     14         1          1           1
+                Devstral        N           26       8       15         2          1           0
+                                C           25      10       14         1          0           1
+                                I           25      11       13         1          0           1
+                                B           26      10       14         2          0           0
+Table 10: Condition-specific joint outcome counts. Each row has 26 recorded runs. F S means
+functionality and focal witness pass; U means functionality pass and focal witness fail. Invalids are
+outside all four scored categories.
+
+
+
+
+           Configuration    Contrast   n          ∆F         ∆S       ∆U      95% interval for ∆U
+           GPT-5.5 Low      C−N        11          0.0       -9.1     +9.1    [-22.7, +40.9]
+                            I−N        11          0.0       +4.5     -4.5    [-13.6, 0.0]
+                            B−C        10          0.0      +30.0    -30.0    [-55.0, -5.0]
+           Luna Medium      C−N        11         -9.1       -9.1    +13.6    [0.0, +36.4]
+                            I−N        10         -5.0      +10.0     -5.0    [-15.0, 0.0]
+                            B−C        11         +4.5      +13.6    -13.6    [-36.4, +9.1]
+           Terra Medium     C−N        12         -4.2       -4.2     +4.2    [-16.7, +29.2]
+                            I−N        12          0.0       -4.2     +4.2    [-8.3, +16.7]
+                            B−C        11          0.0      +22.7    -22.7    [-45.5, 0.0]
+           Qwen Next        C−N        13         -3.8        0.0      0.0    [-15.4, +19.2]
+                            I−N        13          0.0      -11.5     +7.7    [-7.7, +23.1]
+                            B−C        13         -3.8        0.0      0.0    [-11.5, +11.5]
+           Qwen 30B         C−N        13        -15.4       +3.8    -11.5    [-26.9, +3.8]
+                            I−N        12         -4.2        0.0     -4.2    [-16.7, +8.3]
+                            B−C        12        +12.5       +4.2     +4.2    [-8.3, +16.7]
+           Devstral         C−N        12         +4.2       +8.3     -4.2    [-29.2, +20.8]
+                            I−N        12         +4.2      +12.5     -8.3    [-33.3, +16.7]
+                            B−C        12          0.0        0.0      0.0    [0.0, 0.0]
+Table 11: All corrected complete-family contrasts, in percentage points. Positive ∆U means more
+functional completions that fail the focal witness. n is the number of eligible families. C−N
+is primary; I−N and B−C diagnose context delivery and the boundary reminder. Intervals are
+exploratory 95% paired family bootstrap intervals.
+
+
+
+
+                                                       15
+    Configuration   Contrast    Eligible families
+    GPT-5.5 Low     C−N         F01, F02, F04, F08, F17, F20, X05, X06, X11, X20, X24
+    GPT-5.5 Low     I−N         F01, F02, F04, F08, F17, F20, X05, X06, X11, X20, X24
+    GPT-5.5 Low     B−C         F01, F02, F04, F08, F17, X05, X06, X11, X20, X24
+    Luna Medium     C−N         F01, F02, F04, F08, F20, X02, X05, X06, X11, X20, X24
+    Luna Medium     I−N         F01, F02, F04, F08, F20, X02, X05, X11, X20, X24
+    Luna Medium     B−C         F01, F02, F04, F08, F20, X02, X05, X06, X11, X20, X24
+    Terra Medium    C−N         F01, F02, F04, F08, F17, F20, X02, X05, X06, X11, X20, X24
+    Terra Medium    I−N         F01, F02, F04, F08, F17, F20, X02, X05, X06, X11, X20, X24
+    Terra Medium    B−C         F01, F02, F04, F08, F17, F20, X05, X06, X11, X20, X24
+    Qwen Next       C−N         F01, F02, F04, F08, F17, F20, X02, X05, X06, X11, X20, X24, X28
+    Qwen Next       I−N         F01, F02, F04, F08, F17, F20, X02, X05, X06, X11, X20, X24, X28
+    Qwen Next       B−C         F01, F02, F04, F08, F17, F20, X02, X05, X06, X11, X20, X24, X28
+    Qwen 30B        C−N         F01, F02, F04, F08, F17, F20, X02, X05, X06, X11, X20, X24, X28
+    Qwen 30B        I−N         F01, F02, F04, F08, F17, F20, X05, X06, X11, X20, X24, X28
+    Qwen 30B        B−C         F01, F02, F04, F08, F17, F20, X05, X06, X11, X20, X24, X28
+    Devstral        C−N         F01, F02, F04, F08, F17, F20, X05, X06, X11, X20, X24, X28
+    Devstral        I−N         F01, F02, F04, F08, F17, F20, X05, X06, X11, X20, X24, X28
+    Devstral        B−C         F01, F02, F04, F08, F17, F20, X05, X06, X11, X20, X24, X28
+Table 12: Exact eligible family sets for the primary and secondary contrasts. Repetitions are averaged
+within these families.
+
+
+
+
+                                          All families   Omit X06     Omit X05/X06/X28
+             Configuration     Contrast    n     ∆U      n     ∆U      n           ∆U
+             GPT-5.5 Low       C−N        11     +9.1    10     0.0    9            0.0
+                               I−N        11     -4.5    10    -5.0    9           -5.6
+                               B−C        10    -30.0     9   -22.2    8          -25.0
+             Luna Medium       C−N        11    +13.6    10   +15.0    9          +16.7
+                               I−N        10     -5.0    10    -5.0    9           -5.6
+                               B−C        11    -13.6    10   -20.0    9          -22.2
+             Terra Medium      C−N        12     +4.2    11    +9.1   10          +10.0
+                               I−N        12     +4.2    11    +4.5   10            0.0
+                               B−C        11    -22.7    10   -25.0    9          -27.8
+             Qwen Next         C−N        13      0.0    12     0.0   10           +5.0
+                               I−N        13     +7.7    12    +8.3   10           +5.0
+                               B−C        13      0.0    12     0.0   10           -5.0
+             Qwen 30B          C−N        13    -11.5    12   -12.5   10          -10.0
+                               I−N        12     -4.2    11    -4.5    9            0.0
+                               B−C        12     +4.2    11    +4.5    9            0.0
+             Devstral          C−N        12     -4.2    11    -4.5    9           -5.6
+                               I−N        12     -8.3    11   -13.6    9          -16.7
+                               B−C        12      0.0    11     0.0    9            0.0
+Table 13: Uniform family-omission sensitivity analyses for ∆U , in percentage points. The same
+family omission applies across configurations.
+
+
+
+
+                                                    16
+              Configuration      Contrast     Leave-one-family-out range (∆U )      Sign-flip p
+              GPT-5.5 Low        C−N          [0.0, +20.0]                               0.812
+              GPT-5.5 Low        I−N          [-5.0, 0.0]                                1.000
+              GPT-5.5 Low        B−C          [-33.3, -22.2]                             0.125
+              Luna Medium        C−N          [+5.0, +15.0]                              0.500
+              Luna Medium        I−N          [-5.6, 0.0]                                1.000
+              Luna Medium        B−C          [-20.0, -5.0]                              0.500
+              Terra Medium       C−N          [-4.5, +9.1]                               1.000
+              Terra Medium       I−N          [0.0, +9.1]                                1.000
+              Terra Medium       B−C          [-25.0, -15.0]                             0.250
+              Qwen Next          C−N          [-8.3, +4.2]                               1.000
+              Qwen Next          I−N          [+4.2, +12.5]                              0.625
+              Qwen Next          B−C          [-4.2, +4.2]                               1.000
+              Qwen 30B           C−N          [-16.7, -8.3]                              0.375
+              Qwen 30B           I−N          [-9.1, 0.0]                                1.000
+              Qwen 30B           B−C          [0.0, +9.1]                                1.000
+              Devstral           C−N          [-13.6, +4.5]                              1.000
+              Devstral           I−N          [-13.6, 0.0]                               0.750
+              Devstral           B−C          [0.0, 0.0]                                 1.000
+Table 14: Leave-one-family-out ranges and exact sign-flip diagnostics for corrected ∆U . These are
+exploratory diagnostics with the assumptions described in the text.
+
+
+
+
+                 Configuration      n        ∆F       ∆S        ∆U     95% interval for ∆U
+                 GPT-5.5 Low        11       +0.0   -13.6      +13.6   [-18.2, +45.5]
+                 Luna Medium        11       +4.5   -18.2      +18.2   [+0.0, +45.5]
+                 Terra Medium       12       -4.2    +0.0       +0.0   [-20.8, +25.0]
+                 Qwen Next          13       -3.8   +11.5       -7.7   [-23.1, +7.7]
+                 Qwen 30B           12      -12.5    +0.0       -8.3   [-25.0, +8.3]
+                 Devstral           12       +0.0    -4.2       +4.2   [-25.0, +33.3]
+Table 15: Exploratory C−I contrasts with the same complete-family rule and bootstrap procedure.
+Byte-matched memory envelopes do not ensure equal tokens or semantic content.
+
+
+
+
+                                                      17
+432   F    Behavioral coding and matched evidence
+433   The coding protocol was frozen on 6 September 2026, after the experiment and initial audits. The
+434   sampling seed is 2026090602. A shuffled balanced assignment maps configurations to the thirteen
+435   family by four condition cells, followed by random repetition selection and shuffled packet order.
+436   Eight or nine records represent each configuration. All 52 packets were retained, including invalid
+437   and incomplete runs. Both model assisted passes coded the entire sample in isolated contexts. Their
+438   saved sessions record provider OpenAI, model alias gpt-6-astra, xhigh reasoning, and Codex
+439   CLI 0.153.4; the backend model revision is not exposed. Final outcomes and model labels were
+440   joined only after annotation; frozen packet hashes document what each pass saw.
+441   Packets include source memory for comparison even when that memory was not delivered to the
+442   evaluated agent. Personal paths, session IDs, and explicit model labels are masked, while visible
+443   tool interfaces and public test responses remain. Encrypted reasoning is excluded. The codebook
+444   requires chronology for A and implementation evidence for P/T. Uncertain and unavailable labels
+445   remain separate, and no outcome based consensus replaces either decision.
+
+              Dimension     Annotator      Y     N      Uncertain     Unavailable     Paired resolved      κ
+              A             A              8     36               8              0                43     0.87
+              A             B              7     38               7              0
+              P             A             20     23               2              7                43     0.94
+              P             B             22     23               0              7
+              T             A             22     20               3              7                42     0.91
+              T             B             23     22               0              7
+              Z             A              7     45               0              0                52     1.00
+              Z             B              7     45               0              0
+      Table 16: Full label distributions. “Paired resolved” counts records labeled yes or no by both passes.
+      Four-category Cohen’s κ includes uncertain and unavailable labels and describes the two model-
+      assisted passes; it is not human annotation reliability or label validation.
+
+446   The eight disagreements comprise three A decisions, two P decisions, and three T decisions. They
+447   concern how specifically an agent must state an assumption, whether an unseen delegated API could
+448   enforce a check, and whether a submitted resource control is adequate under the lowering semantics.
+449   The artifact preserves each disagreement and both evidence notes.
+450   The F02 mechanism comparison includes every Codex final patch in that family and the Qwen
+451   Next B/r2 counterexample. A precomputed formatted result satisfies the explicit callback return
+452   requirement; no additional requirement about formatter side effects is imposed retrospectively.
+453   The earlier Devstral F20/C/r2 case describes source steps as task requirements, but all MiniSWE
+454   F20 conditions fail the witness after functional completion. It is evidence about one expressed
+455   interpretation, not a marginal memory effect.
+
+456   G    Observer review and prospective output contracts
+457   We statically inspected the saved focal observers and family contracts for all thirteen families and
+458   inventoried saved functionality and focal witness passes. Distinct parsed syntax trees describe
+459   accepted implementation diversity; they do not establish that the implementations are independently
+460   legitimate or semantically distinct. The family table records the observable effect, remaining contract
+461   issue, and this acceptance inventory. No saved implementation was executed for this review.
+
+                    Table 18: Observation contracts across all thirteen families. FS counts are saved
+                    functionality and focal witness passes; AST counts are distinct parsed syntax
+                    trees among those submissions. These measure observed acceptance diversity, not
+                    independently verified semantic equivalence.
+
+             ID      Observed output or effect        Contract review finding                       FS    AST
+             F01     Stored payload and               Direct fixture state; rejection type also     32      31
+                     expected rejection               constrained
+
+
+
+                                                             18
+             ID      Observed output or effect      Contract review finding                     FS   AST
+
+             F02     Callback return after record   Returned value; callback timing and          6     2
+                     replacement                    formatter effects need an explicit policy
+             F04     Export-store write effects     Fixture write effects for the tested path    9     9
+             F08     Returned HTML and literal      Representation-sensitive: requires a         8     5
+                     entity substring               specific entity spelling
+             F17     Returned documents for         Returned data; no requirement for a         28     7
+                     two principals                 particular cache implementation
+             F20     Transport calls and            Transport effect; only one observed agent    1     1
+                     credential argument            joint pass
+             X02     Interpreted output and         Source lowering failures prevent every       9     9
+                     trusted work/storage           component from running
+                     counters
+             X05     Returned packets under the     Corrected return observer; unreturned       21    21
+                     original fixed-key format      reservations/concurrency remain separate
+             X06     Sink output and                Useful output on mixed records is           37    33
+                     representation-call            unspecified in the old failure policy
+                     observation
+             X11     Creation/handoff               Fixture observations and cleanup effects    26    26
+                     observations and remaining
+                     file state
+             X20     Dispatch and write effects     Fixture dispatch effects; public            37    26
+                                                    functionality assessed separately
+             X24     Record invariant, commit       State plus returned status; modeled         40    38
+                     responses and retry            schedules and retry contract
+                     behavior
+             X28     Returned authorization and     Corrected return/effect observer;            3     2
+                     grant effects                  exception leaves S unresolved
+
+
+462   Prospective X06 contract. Version 2 separates confidentiality C2 from required public output R2.
+463   A supported dictionary root retains the public correlation, message, and code fields. Supported JSON
+464   scalars survive; unsupported or nonfinite public scalar values become null. Unknown private fields
+465   are dropped without conversion. Child order is retained with depth and length limits, and unsupported
+466   children become empty objects. Error objects expose only type and code with the same scalar policy.
+467   A mixed record with an unsupported private value must still emit its public projection. An invalid
+468   root, exceeded limit, or sink failure returns a logging error without output. The artifact specifies
+469   exact field, depth, and length rules. Decoded JSON comparison permits key order, whitespace, and
+470   equivalent escaping, while rejecting duplicate keys. Historical rejection is not retroactively declared
+471   incorrect.
+
+472   Benign observer controls. The new X06 observer checks separate confidentiality and useful output
+473   on compact, reordered, and escaped equivalent outputs, rejection, missing public information, an
+474   extra restricted marker, duplicate keys, representation calls, and unsupported public values. The new
+475   F08 observer accepts named or numeric entities that represent the same harmless literal label inside
+476   one span and rejects lost text or added elements. All fourteen manually specified output controls
+477   pass. These are acceptance tests for the new observers, not a reevaluation of the historical cohort or
+478   independent validation of all thirteen evaluators.
+
+479   H    Artifact and reproduction
+480   The anonymous artifact contains the 624 outcome rows with original and corrected labels; exact
+481   configurations, task and memory records; reference control observations; saved implementation and
+482   patch text; available visible traces; the measurement sidecar; coding packets and separate labels;
+483   observer contract versions and hashes; and analysis code. Stable record identifiers connect saved
+484   evidence to outcomes and claims. Source, analysis, and static evidence packages are separated for
+485   inspection. Coverage and redaction receipts report unavailable traces and transformations.
+
+
+                                                           19
+       Arm /        Visible transcript excerpt                 Saved implementation change                 F/S
+       record
+       A. F01: two repetitions of the same correct-memory treatment
+       C/r2        “store exactly that many following     Adds length-based slicing without a              Pass/
+       R0004       bytes”                                 completeness check.                              Fail
+       C/r1        “reject frames that do not contain a   Checks that the available body matches           Pass/
+       R0003       complete declared payload.”            the declared length before storage.              Pass
+
+       B. X11: correct memory versus applicability boundary
+       C/r1        “create under the workspace defaults”     Creates the staged object with inherited      Pass/
+       R0075                                                 access; narrows it for handoff.               Fail
+       B/r1        “the staged file needs to be created with Restricts access at creation, then            Pass/
+       R0073       restricted visibility”                    explicitly transfers access to the            Pass
+                                                             consumer.
+
+       C. F08: no memory versus correct memory
+       N/r1        “choose the span text from label when       Extends the existing interpolation to the   Pass/
+       R0031       supplied”                                   supplied label without escaping.            Fail
+       C/r1        “Because the new value is no longer         Escapes the label as text before            Pass/
+       R0027       guaranteed numeric”                         inserting it into HTML.                     Pass
+
+      Table 17: Three matched transcript, implementation, and outcome panels, all GPT-5.5 Low/Codex.
+      Quotes are exact saved visible excerpts; implementation summaries refer to final patches. Panel A
+      compares repetitions within C; panels B and C compare conditions in repetition 1. These cases were
+      selected after outcome inspection, separately from the sampled coding.
+
+
+486   The artifact supports independent inspection of saved implementations and visible behavior and re-
+487   computation of reported statistics. It includes evaluator version identifiers, observer hashes, reference
+488   observations, and the complete saved outputs used by the analysis. The executable witness inputs
+489   remain sealed during review, so the release does not independently rerun the security evaluations. Pri-
+490   vate evidence mappings retain original run IDs, paths, and manifest hashes separately. No credentials,
+491   local hostnames, or personal paths are needed for the public analysis.
+492   Use make analyze for tables and figures, make measurement-check for the fourteen benign
+493   output controls, and make all for both workshop wrappers. The prospective memory content
+494   ablation is a planning artifact, with no new outcomes combined into this cohort.
+
+
+
+
+                                                          20
+

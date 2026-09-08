@@ -1,0 +1,288 @@
+def is_letter(c):
+    return (65 <= c and c <= 90) or (97 <= c and c <= 122)
+
+def mate(c):
+    if 65 <= c and c <= 90:
+        return c + 32
+    if 97 <= c and c <= 122:
+        return c - 32
+    return c
+
+def is_reserved(c):
+    return c == 46 or c == 91 or c == 93 or c == 40 or c == 41 or c == 124 or c == 42 or c == 43 or c == 63 or c == 92 or c == 94 or c == 36 or c == 123 or c == 125
+
+def is_class_reserved(c):
+    return c == 91 or c == 93 or c == 92 or c == 45 or c == 94
+
+def emit(t, a, b, c):
+    m[g_type + g_nstates] = t
+    m[g_a + g_nstates] = a
+    m[g_b + g_nstates] = b
+    m[g_c + g_nstates] = c
+    m[g_d + g_nstates] = 0
+    g_nstates = g_nstates + 1
+    return g_nstates - 1
+
+def set_error():
+    g_error = 1
+    return 0
+
+def literal_char(in_class):
+    if g_pos >= g_plen:
+        return set_error()
+    c = m[2 + g_pos]
+    g_pos = g_pos + 1
+    if c == 92:
+        if g_pos >= g_plen:
+            return set_error()
+        c = m[2 + g_pos]
+        if in_class:
+            if not is_class_reserved(c):
+                return set_error()
+        else:
+            if not is_reserved(c):
+                return set_error()
+        g_pos = g_pos + 1
+        return c
+    if in_class:
+        if is_class_reserved(c):
+            return set_error()
+    else:
+        if is_reserved(c):
+            return set_error()
+    return c
+
+def patch(s, target):
+    t = m[g_type + s]
+    if t == 1 or t == 2 or t == 3:
+        m[g_d + s] = target
+    elif t == 4:
+        m[g_a + s] = target
+    return 0
+
+def parse_class():
+    start = g_pos
+    comp = 0
+    if g_pos < g_plen and m[2 + g_pos] == 94:
+        comp = 1
+        g_pos = g_pos + 1
+    count = 0
+    while g_pos < g_plen and m[2 + g_pos] != 93 and not g_error:
+        first = literal_char(1)
+        if g_error:
+            return 0
+        if g_pos < g_plen and m[2 + g_pos] == 45:
+            g_pos = g_pos + 1
+            last = literal_char(1)
+            if g_error or last < first:
+                return set_error()
+            count = count + 1
+        else:
+            count = count + 1
+    if count == 0 or g_pos >= g_plen or m[2 + g_pos] != 93:
+        return set_error()
+    end = g_pos
+    g_pos = g_pos + 1
+    s = emit(3, start, end, comp)
+    g_frag_end = s
+    return s
+
+def parse_atom():
+    if g_pos >= g_plen:
+        return set_error()
+    c = m[2 + g_pos]
+    if c == 40:
+        g_pos = g_pos + 1
+        s = parse_expr()
+        if g_error:
+            return 0
+        if g_pos >= g_plen or m[2 + g_pos] != 41:
+            return set_error()
+        g_pos = g_pos + 1
+        return s
+    if c == 46:
+        g_pos = g_pos + 1
+        s = emit(2, 0, 0, 0)
+        g_frag_end = s
+        return s
+    if c == 91:
+        g_pos = g_pos + 1
+        return parse_class()
+    c = literal_char(0)
+    if g_error:
+        return 0
+    s = emit(1, c, 0, 0)
+    g_frag_end = s
+    return s
+
+def parse_piece():
+    s = parse_atom()
+    if g_error:
+        return 0
+    if g_pos < g_plen:
+        q = m[2 + g_pos]
+        if q == 42:
+            g_pos = g_pos + 1
+            e = emit(4, 0, 0, 0)
+            sp = emit(5, s, e, 0)
+            patch(g_frag_end, sp)
+            g_frag_end = e
+            return sp
+        if q == 43:
+            g_pos = g_pos + 1
+            e = emit(4, 0, 0, 0)
+            sp = emit(5, s, e, 0)
+            patch(g_frag_end, sp)
+            g_frag_end = e
+            return s
+        if q == 63:
+            g_pos = g_pos + 1
+            e = emit(4, 0, 0, 0)
+            sp = emit(5, s, e, 0)
+            patch(g_frag_end, e)
+            g_frag_end = e
+            return sp
+    return s
+
+def parse_seq():
+    if g_pos >= g_plen or m[2 + g_pos] == 41 or m[2 + g_pos] == 124:
+        s = emit(4, 0, 0, 0)
+        g_frag_end = s
+        return s
+    first = parse_piece()
+    last = g_frag_end
+    while g_pos < g_plen and m[2 + g_pos] != 41 and m[2 + g_pos] != 124 and not g_error:
+        nxt = parse_piece()
+        patch(last, nxt)
+        last = g_frag_end
+    g_frag_end = last
+    return first
+
+def parse_expr():
+    left = parse_seq()
+    left_end = g_frag_end
+    while g_pos < g_plen and m[2 + g_pos] == 124 and not g_error:
+        g_pos = g_pos + 1
+        right = parse_seq()
+        right_end = g_frag_end
+        join = emit(4, 0, 0, 0)
+        sp = emit(5, left, right, 0)
+        patch(left_end, join)
+        patch(right_end, join)
+        left = sp
+        left_end = join
+    g_frag_end = left_end
+    return left
+
+def literal_at(p):
+    c = m[2 + p]
+    p = p + 1
+    if c == 92:
+        c = m[2 + p]
+        p = p + 1
+    g_scan_pos = p
+    return c
+
+def class_has(start, end, ch):
+    p = start
+    while p < end:
+        first = literal_at(p)
+        p = g_scan_pos
+        last = first
+        if p < end and m[2 + p] == 45:
+            p = p + 1
+            last = literal_at(p)
+            p = g_scan_pos
+        if first <= ch and ch <= last:
+            return 1
+        if g_flag and is_letter(ch):
+            mt = mate(ch)
+            if first <= mt and mt <= last:
+                return 1
+    return 0
+
+def char_ok(st, ch):
+    t = m[g_type + st]
+    if t == 2:
+        return 32 <= ch and ch <= 126
+    if t == 1:
+        c = m[g_a + st]
+        return ch == c or (g_flag and is_letter(c) and ch == mate(c))
+    present = class_has(m[g_a + st], m[g_b + st], ch)
+    if m[g_c + st]:
+        return not present
+    return present
+
+def accepts(st, pos):
+    idx = st * 65 + pos
+    v = m[g_memo + idx]
+    if v == 1:
+        return 1
+    if v == 2:
+        return 0
+    if v == 3:
+        return 0
+    m[g_memo + idx] = 3
+    t = m[g_type + st]
+    ans = 0
+    if t == 6:
+        ans = pos == g_rlen
+    elif t == 4:
+        ans = accepts(m[g_a + st], pos)
+    elif t == 5:
+        ans = accepts(m[g_b + st], pos)
+        if not ans:
+            ans = accepts(m[g_a + st], pos)
+    else:
+        if pos < g_rlen:
+            if char_ok(st, m[g_rbase + pos]):
+                ans = accepts(m[g_d + st], pos + 1)
+    if ans:
+        m[g_memo + idx] = 1
+    else:
+        m[g_memo + idx] = 2
+    return ans
+
+def clear_memo():
+    i = 0
+    while i < 39000:
+        m[g_memo + i] = 0
+        i = i + 1
+    return 0
+
+def boot():
+    g_flag = m[0]
+    g_plen = m[1]
+    g_pos = 0
+    g_error = 0
+    g_nstates = 0
+    g_scan_pos = 0
+    g_frag_end = 0
+    g_type = alloc(600)
+    g_a = alloc(600)
+    g_b = alloc(600)
+    g_c = alloc(600)
+    g_d = alloc(600)
+    g_memo = alloc(39000)
+    out = alloc(9)
+    m[out] = 0
+    start = parse_expr()
+    if g_error or g_pos != g_plen:
+        return out
+    accept = emit(6, 0, 0, 0)
+    patch(g_frag_end, accept)
+    rec_count_addr = 2 + g_plen
+    nrec = m[rec_count_addr]
+    rec_addr = rec_count_addr + 1
+    ri = 0
+    while ri < nrec:
+        g_rlen = m[rec_addr]
+        g_rbase = rec_addr + 1
+        clear_memo()
+        if accepts(start, 0):
+            olen = m[out]
+            m[out + 1 + olen] = ri
+            m[out] = olen + 1
+        rec_addr = rec_addr + 1 + g_rlen
+        ri = ri + 1
+    return out

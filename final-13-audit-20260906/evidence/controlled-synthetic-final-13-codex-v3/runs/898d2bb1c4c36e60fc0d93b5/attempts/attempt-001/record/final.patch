@@ -1,0 +1,341 @@
+--- a/app/service.csirpy
++++ b/app/service.csirpy
+@@ -1,4 +1,338 @@
++def eqcase(a, b):
++    if a == b:
++        return 1
++    if a >= 65 and a <= 90 and a + 32 == b:
++        return 1
++    if a >= 97 and a <= 122 and a - 32 == b:
++        return 1
++    return 0
++
++def reserved(c):
++    if c == 46 or c == 91 or c == 93 or c == 40 or c == 41:
++        return 1
++    if c == 124 or c == 42 or c == 43 or c == 63 or c == 92:
++        return 1
++    if c == 94 or c == 36 or c == 123 or c == 125:
++        return 1
++    return 0
++
++def classreserved(c):
++    if c == 91 or c == 93 or c == 92 or c == 45 or c == 94:
++        return 1
++    return 0
++
++def newnode(t, a, b, c):
++    n = g_nodes
++    g_nodes = g_nodes + 1
++    m[g_nt + n] = t
++    m[g_na + n] = a
++    m[g_nb + n] = b
++    m[g_nc + n] = c
++    m[g_nx + n] = 0
++    return n
++
++def linktail(head, node):
++    if head == 0:
++        return node
++    p = head
++    while m[g_nx + p] != 0:
++        p = m[g_nx + p]
++    m[g_nx + p] = node
++    return head
++
++def parse_char():
++    if g_pos >= g_plen:
++        g_valid = 0
++        return 0
++    c = m[g_pat + g_pos]
++    g_pos = g_pos + 1
++    if c == 92:
++        if g_pos >= g_plen:
++            g_valid = 0
++            return 0
++        c = m[g_pat + g_pos]
++        g_pos = g_pos + 1
++        if reserved(c) == 0:
++            g_valid = 0
++            return 0
++        return c
++    if reserved(c) != 0:
++        g_valid = 0
++        return 0
++    return c
++
++def parse_class_char():
++    if g_pos >= g_plen:
++        g_valid = 0
++        return 0
++    c = m[g_pat + g_pos]
++    g_pos = g_pos + 1
++    if c == 92:
++        if g_pos >= g_plen:
++            g_valid = 0
++            return 0
++        c = m[g_pat + g_pos]
++        g_pos = g_pos + 1
++        if classreserved(c) == 0:
++            g_valid = 0
++            return 0
++        return c
++    if classreserved(c) != 0:
++        g_valid = 0
++        return 0
++    return c
++
++def parse_expr():
++    left = parse_seq()
++    alts = left
++    had = 0
++    while g_valid != 0 and g_pos < g_plen and m[g_pat + g_pos] == 124:
++        had = 1
++        g_pos = g_pos + 1
++        right = parse_seq()
++        alts = linktail(alts, right)
++    if had != 0:
++        return newnode(6, alts, 0, 0)
++    return alts
++
++def parse_seq():
++    head = 0
++    while g_valid != 0 and g_pos < g_plen and m[g_pat + g_pos] != 41 and m[g_pat + g_pos] != 124:
++        a = parse_atom()
++        head = linktail(head, a)
++    if head == 0:
++        return newnode(0, 0, 0, 0)
++    if m[g_nx + head] != 0:
++        return newnode(5, head, 0, 0)
++    return head
++
++def parse_atom():
++    if g_pos >= g_plen:
++        g_valid = 0
++        return newnode(0, 0, 0, 0)
++    c = m[g_pat + g_pos]
++    if c == 40:
++        g_pos = g_pos + 1
++        n = parse_expr()
++        if g_pos >= g_plen or m[g_pat + g_pos] != 41:
++            g_valid = 0
++        else:
++            g_pos = g_pos + 1
++        return parse_suffix(n)
++    if c == 46:
++        g_pos = g_pos + 1
++        return parse_suffix(newnode(2, 0, 0, 0))
++    if c == 91:
++        g_pos = g_pos + 1
++        comp = 0
++        if g_pos < g_plen and m[g_pat + g_pos] == 94:
++            comp = 1
++            g_pos = g_pos + 1
++        start = g_pos
++        count = 0
++        finish = g_pos
++        while g_valid != 0 and g_pos < g_plen and m[g_pat + g_pos] != 93:
++            parse_class_char()
++            count = count + 1
++            if g_pos < g_plen and m[g_pat + g_pos] == 45:
++                g_pos = g_pos + 1
++                parse_class_char()
++                count = count + 1
++        if count == 0 or g_pos >= g_plen:
++            g_valid = 0
++        else:
++            finish = g_pos
++            g_pos = g_pos + 1
++        return parse_suffix(newnode(3, start, finish, comp))
++    return parse_suffix(newnode(1, parse_char(), 0, 0))
++
++def parse_suffix(n):
++    if g_pos < g_plen:
++        c = m[g_pat + g_pos]
++        if c == 42 or c == 43 or c == 63:
++            g_pos = g_pos + 1
++            if c == 42:
++                return newnode(7, n, 0, 0)
++            if c == 43:
++                return newnode(8, n, 0, 0)
++            return newnode(9, n, 0, 0)
++    return n
++
++def make_state(t, a, b, x):
++    s = g_states
++    g_states = g_states + 1
++    m[g_st + s] = t
++    m[g_s1 + s] = a
++    m[g_s2 + s] = b
++    m[g_sx + s] = x
++    return s
++
++def compile_list(n, exit):
++    if n == 0:
++        return exit
++    rest = compile_list(m[g_nx + n], exit)
++    return compile_node(n, rest)
++
++def compile_union(n, exit):
++    if m[g_nx + n] == 0:
++        return compile_node(n, exit)
++    first = compile_node(n, exit)
++    other = compile_union(m[g_nx + n], exit)
++    return make_state(0, first, other, 0)
++
++def compile_node(n, exit):
++    t = m[g_nt + n]
++    if t == 0:
++        return exit
++    if t == 1 or t == 2 or t == 3:
++        return make_state(1, exit, 0, n)
++    if t == 5:
++        return compile_list(m[g_na + n], exit)
++    if t == 6:
++        return compile_union(m[g_na + n], exit)
++    if t == 7:
++        q = make_state(0, 0, exit, 0)
++        child = compile_node(m[g_na + n], q)
++        m[g_s1 + q] = child
++        return q
++    if t == 8:
++        q = make_state(0, 0, exit, 0)
++        child = compile_node(m[g_na + n], q)
++        m[g_s1 + q] = child
++        return child
++    q = make_state(0, exit, 0, 0)
++    child = compile_node(m[g_na + n], exit)
++    m[g_s1 + q] = child
++    return q
++
++def class_has(n, byte):
++    p = m[g_na + n]
++    end = m[g_nb + n]
++    found = 0
++    while p < end:
++        g_pos = p
++        first = parse_class_char()
++        p = g_pos
++        last = first
++        if p < end and m[g_pat + p] == 45:
++            p = p + 1
++            g_pos = p
++            last = parse_class_char()
++            p = g_pos
++        if byte >= first and byte <= last:
++            found = 1
++        if g_flag != 0 and first >= 65 and first <= 90 and byte >= 97 and byte - 32 >= first and byte - 32 <= last:
++            found = 1
++        if g_flag != 0 and first >= 97 and first <= 122 and byte >= 65 and byte + 32 >= first and byte + 32 <= last:
++            found = 1
++    if m[g_nc + n] != 0:
++        if found == 0:
++            return 1
++        return 0
++    return found
++
++def state_matches(s, byte):
++    n = m[g_sx + s]
++    t = m[g_nt + n]
++    if t == 2:
++        return 1
++    if t == 1:
++        return eqcase(m[g_na + n], byte)
++    return class_has(n, byte)
++
++def add_closure(s, which):
++    if s >= g_states:
++        return
++    if m[g_seen + s] != 0:
++        return
++    m[g_seen + s] = 1
++    if m[g_st + s] == 0:
++        add_closure(m[g_s1 + s], which)
++        add_closure(m[g_s2 + s], which)
++    else:
++        if which == 0:
++            m[g_cur + s] = 1
++        else:
++            m[g_nxt + s] = 1
++
++def clear_seen():
++    i = 0
++    while i < g_states:
++        m[g_seen + i] = 0
++        i = i + 1
++
++def clear_set(base):
++    i = 0
++    while i < g_states:
++        m[base + i] = 0
++        i = i + 1
++
++def run_record(base, length, start, accept):
++    clear_set(g_cur)
++    clear_seen()
++    add_closure(start, 0)
++    p = 0
++    while p < length:
++        clear_set(g_nxt)
++        i = 0
++        while i < g_states:
++            if m[g_cur + i] != 0 and m[g_st + i] == 1 and state_matches(i, m[base + p]) != 0:
++                clear_seen()
++                add_closure(m[g_s1 + i], 1)
++            i = i + 1
++        i = 0
++        while i < g_states:
++            m[g_cur + i] = m[g_nxt + i]
++            i = i + 1
++        p = p + 1
++    return m[g_cur + accept]
++
+ def boot():
+     output = alloc(1)
++    g_pat = 2
++    g_plen = m[1]
++    g_flag = m[0]
++    g_pos = 0
++    g_valid = 1
++    g_nodes = 1
++    g_states = 0
++    g_nt = alloc(256)
++    g_na = alloc(256)
++    g_nb = alloc(256)
++    g_nc = alloc(256)
++    g_nx = alloc(256)
++    g_st = alloc(256)
++    g_s1 = alloc(256)
++    g_s2 = alloc(256)
++    g_sx = alloc(256)
++    g_seen = alloc(256)
++    g_cur = alloc(256)
++    g_nxt = alloc(256)
++    root = parse_expr()
++    if g_pos != g_plen:
++        g_valid = 0
++    if g_valid == 0:
++        m[output] = 0
++        return output
++    accept = make_state(2, 0, 0, 0)
++    start = compile_node(root, accept)
+     m[output] = 0
++    record_count = m[2 + g_plen]
++    records = 3 + g_plen
++    idx = 0
++    while idx < record_count:
++        length = m[records]
++        data = records + 1
++        if run_record(data, length, start, accept) != 0:
++            n = m[output]
++            q = alloc(n + 2)
++            m[q] = n + 1
++            j = 0
++            while j < n:
++                m[q + 1 + j] = m[output + 1 + j]
++                j = j + 1
++            m[q + 1 + n] = idx
++            output = q
++        records = data + length
++        idx = idx + 1
+     return output

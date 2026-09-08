@@ -1,0 +1,359 @@
+--- a/app/service.csirpy
++++ b/app/service.csirpy
+@@ -1,4 +1,355 @@
++def newnode(t, a, b):
++    n = g_next
++    m[g_st + n * 3] = t
++    m[g_st + n * 3 + 1] = a
++    m[g_st + n * 3 + 2] = b
++    g_next = g_next + 1
++    return n
++
++def put0(n, a):
++    m[g_st + n * 3 + 1] = a
++    return 0
++
++def put1(n, a):
++    m[g_st + n * 3 + 2] = a
++    return 0
++
++def fpush(a, b):
++    m[g_fs + g_ftop] = a
++    m[g_fe + g_ftop] = b
++    g_ftop = g_ftop + 1
++    return 0
++
++def fpop():
++    g_ftop = g_ftop - 1
++    g_xs = m[g_fs + g_ftop]
++    g_xe = m[g_fe + g_ftop]
++    return 0
++
++def opush(a):
++    m[g_ops + g_otop] = a
++    g_otop = g_otop + 1
++    return 0
++
++def setchar(n, c):
++    if c >= 32 and c <= 126:
++        m[g_sets + n * 95 + c - 32] = 1
++        if g_fold:
++            if c >= 65 and c <= 90:
++                m[g_sets + n * 95 + c] = 1
++            if c >= 97 and c <= 122:
++                m[g_sets + n * 95 + c - 64] = 1
++    return 0
++
++def makeempty():
++    g_ns = newnode(0, -1, -1)
++    g_ne = g_ns
++    return 0
++
++def makechar():
++    g_ns = newnode(1, -1, -1)
++    g_ne = g_ns
++    g_i = 0
++    while g_i < 95:
++        m[g_sets + g_ns * 95 + g_i] = 0
++        g_i = g_i + 1
++    return 0
++
++def reduce():
++    g_otop = g_otop - 1
++    g_op = m[g_ops + g_otop]
++    fpop()
++    g_bs = g_xs
++    g_be = g_xe
++    fpop()
++    g_as = g_xs
++    g_ae = g_xe
++    if g_op == 2:
++        put0(g_ae, g_bs)
++        fpush(g_as, g_be)
++    if g_op == 1:
++        g_z = newnode(0, -1, -1)
++        g_y = newnode(0, g_as, g_bs)
++        put0(g_ae, g_z)
++        put0(g_be, g_z)
++        fpush(g_y, g_z)
++    return 0
++
++def reducepriority(p):
++    g_more = 1
++    while g_more:
++        g_more = 0
++        if g_otop > 0:
++            g_op = m[g_ops + g_otop - 1]
++            if g_op != 3 and g_op >= p:
++                reduce()
++                g_more = 1
++    return 0
++
++def hasmark():
++    g_i = g_otop
++    g_mark = 0
++    while g_i > 0:
++        g_i = g_i - 1
++        if m[g_ops + g_i] == 3:
++            g_mark = 1
++            g_i = 0
++    return 0
++
++def classchar():
++    g_cok = 1
++    g_cv = -1
++    g_escaped = 0
++    if g_pos >= g_plen:
++        g_cok = 0
++    if g_pos < g_plen:
++        g_cv = m[2 + g_pos]
++        g_pos = g_pos + 1
++        if g_cv == 92:
++            g_escaped = 1
++            if g_pos >= g_plen:
++                g_cok = 0
++            if g_pos < g_plen:
++                g_cv = m[2 + g_pos]
++                g_pos = g_pos + 1
++                if g_cv != 91 and g_cv != 93 and g_cv != 92 and g_cv != 45 and g_cv != 94:
++                    g_cok = 0
++        if not g_escaped and (g_cv == 91 or g_cv == 93 or g_cv == 45 or g_cv == 94):
++            g_cok = 0
++    return 0
++
++def atom():
++    g_c = m[2 + g_pos]
++    if g_c == 46:
++        g_pos = g_pos + 1
++        makechar()
++        g_i = 32
++        while g_i <= 126:
++            setchar(g_ns, g_i)
++            g_i = g_i + 1
++    if g_c == 91:
++        g_pos = g_pos + 1
++        g_comp = 0
++        if g_pos < g_plen and m[2 + g_pos] == 94:
++            g_comp = 1
++            g_pos = g_pos + 1
++        makechar()
++        g_members = 0
++        while g_pos < g_plen and m[2 + g_pos] != 93:
++            classchar()
++            if not g_cok:
++                g_valid = 0
++            g_first = g_cv
++            if g_cok:
++                g_members = g_members + 1
++            g_range = 0
++            if g_pos < g_plen and m[2 + g_pos] == 45:
++                g_range = 1
++                g_pos = g_pos + 1
++                classchar()
++                if not g_cok or g_cv < g_first:
++                    g_valid = 0
++                if g_cok and g_cv >= g_first:
++                    g_i = g_first
++                    while g_i <= g_cv:
++                        setchar(g_ns, g_i)
++                        g_i = g_i + 1
++                    g_members = g_members + 1
++            if g_cok and not g_range:
++                setchar(g_ns, g_first)
++        if g_members == 0 or g_pos >= g_plen:
++            g_valid = 0
++        if g_pos < g_plen and m[2 + g_pos] == 93:
++            g_pos = g_pos + 1
++        if g_comp:
++            g_i = 0
++            while g_i < 95:
++                m[g_sets + g_ns * 95 + g_i] = not m[g_sets + g_ns * 95 + g_i]
++                g_i = g_i + 1
++    if g_c != 46 and g_c != 91:
++        makechar()
++        g_aesc = 0
++        if g_c == 92:
++            g_aesc = 1
++            g_pos = g_pos + 1
++            if g_pos >= g_plen:
++                g_valid = 0
++            if g_pos < g_plen:
++                g_c = m[2 + g_pos]
++                g_pos = g_pos + 1
++                if g_c != 46 and g_c != 91 and g_c != 93 and g_c != 40 and g_c != 41 and g_c != 124 and g_c != 42 and g_c != 43 and g_c != 63 and g_c != 92 and g_c != 94 and g_c != 36 and g_c != 123 and g_c != 125:
++                    g_valid = 0
++                setchar(g_ns, g_c)
++        if not g_aesc:
++            g_pos = g_pos + 1
++            if g_c == 46 or g_c == 91 or g_c == 93 or g_c == 40 or g_c == 41 or g_c == 124 or g_c == 42 or g_c == 43 or g_c == 63 or g_c == 92 or g_c == 94 or g_c == 36 or g_c == 123 or g_c == 125:
++                g_valid = 0
++            setchar(g_ns, g_c)
++    return 0
++
++def quantify(q):
++    fpop()
++    g_as = g_xs
++    g_ae = g_xe
++    if q == 42:
++        g_z = newnode(0, -1, -1)
++        g_y = newnode(0, g_as, g_z)
++        put0(g_ae, g_as)
++        put1(g_ae, g_z)
++        fpush(g_y, g_z)
++    if q == 43:
++        g_z = newnode(0, -1, -1)
++        put0(g_ae, g_as)
++        put1(g_ae, g_z)
++        fpush(g_as, g_z)
++    if q == 63:
++        g_z = newnode(0, -1, -1)
++        g_y = newnode(0, g_as, g_z)
++        put0(g_ae, g_z)
++        fpush(g_y, g_z)
++    return 0
++
++def closure():
++    g_sp = 0
++    g_i = 0
++    while g_i < g_next:
++        if m[g_cur + g_i]:
++            m[g_stack + g_sp] = g_i
++            g_sp = g_sp + 1
++        g_i = g_i + 1
++    while g_sp > 0:
++        g_sp = g_sp - 1
++        g_i = m[g_stack + g_sp]
++        if m[g_st + g_i * 3] == 0:
++            g_j = m[g_st + g_i * 3 + 1]
++            if g_j >= 0 and not m[g_cur + g_j]:
++                m[g_cur + g_j] = 1
++                m[g_stack + g_sp] = g_j
++                g_sp = g_sp + 1
++            g_j = m[g_st + g_i * 3 + 2]
++            if g_j >= 0 and not m[g_cur + g_j]:
++                m[g_cur + g_j] = 1
++                m[g_stack + g_sp] = g_j
++                g_sp = g_sp + 1
++    return 0
++
++def matches(a, n):
++    g_i = 0
++    while g_i < g_next:
++        m[g_cur + g_i] = 0
++        g_i = g_i + 1
++    m[g_cur + g_start] = 1
++    closure()
++    g_k = 0
++    while g_k < n:
++        g_i = 0
++        while g_i < g_next:
++            m[g_nxt + g_i] = 0
++            g_i = g_i + 1
++        g_c = m[a + g_k]
++        g_i = 0
++        while g_i < g_next:
++            if m[g_cur + g_i] and m[g_st + g_i * 3] == 1 and m[g_sets + g_i * 95 + g_c - 32]:
++                g_j = m[g_st + g_i * 3 + 1]
++                if g_j >= 0:
++                    m[g_nxt + g_j] = 1
++                g_j = m[g_st + g_i * 3 + 2]
++                if g_j >= 0:
++                    m[g_nxt + g_j] = 1
++            g_i = g_i + 1
++        g_tmp = g_cur
++        g_cur = g_nxt
++        g_nxt = g_tmp
++        closure()
++        g_k = g_k + 1
++    return m[g_cur + g_accept]
++
+ def boot():
+-    output = alloc(1)
++    g_fold = m[0]
++    g_plen = m[1]
++    g_pos = 0
++    g_valid = 1
++    g_next = 0
++    g_st = alloc(768)
++    g_sets = alloc(24320)
++    g_fs = alloc(128)
++    g_fe = alloc(128)
++    g_ops = alloc(128)
++    g_cur = alloc(256)
++    g_nxt = alloc(256)
++    g_stack = alloc(256)
++    g_ftop = 0
++    g_otop = 0
++    g_need = 1
++    while g_pos < g_plen:
++        g_c = m[2 + g_pos]
++        if g_c == 124:
++            if g_need:
++                makeempty()
++                fpush(g_ns, g_ne)
++            reducepriority(1)
++            opush(1)
++            g_pos = g_pos + 1
++            g_need = 1
++        if g_c == 41:
++            hasmark()
++            if not g_mark:
++                g_valid = 0
++                g_pos = g_pos + 1
++            if g_mark:
++                if g_need:
++                    makeempty()
++                    fpush(g_ns, g_ne)
++                reducepriority(1)
++                g_otop = g_otop - 1
++                g_pos = g_pos + 1
++                g_need = 0
++                if g_pos < g_plen and (m[2 + g_pos] == 42 or m[2 + g_pos] == 43 or m[2 + g_pos] == 63):
++                    quantify(m[2 + g_pos])
++                    g_pos = g_pos + 1
++        if g_c == 40:
++            if not g_need:
++                reducepriority(2)
++                opush(2)
++            opush(3)
++            g_pos = g_pos + 1
++            g_need = 1
++        if g_c != 124 and g_c != 41 and g_c != 40:
++            if not g_need:
++                reducepriority(2)
++                opush(2)
++            atom()
++            fpush(g_ns, g_ne)
++            g_need = 0
++            if g_pos < g_plen and (m[2 + g_pos] == 42 or m[2 + g_pos] == 43 or m[2 + g_pos] == 63):
++                quantify(m[2 + g_pos])
++                g_pos = g_pos + 1
++    if g_need:
++        makeempty()
++        fpush(g_ns, g_ne)
++    while g_otop > 0:
++        g_op = m[g_ops + g_otop - 1]
++        if g_op == 3:
++            g_valid = 0
++            g_otop = g_otop - 1
++        if g_op != 3:
++            reduce()
++    fpop()
++    g_start = g_xs
++    g_accept = newnode(2, -1, -1)
++    put0(g_xe, g_accept)
++    output = alloc(9)
+     m[output] = 0
++    g_rp = 2 + g_plen
++    g_count = m[g_rp]
++    g_rp = g_rp + 1
++    g_ri = 0
++    while g_ri < g_count:
++        g_rlen = m[g_rp]
++        g_rp = g_rp + 1
++        if g_valid and matches(g_rp, g_rlen):
++            m[output + 1 + m[output]] = g_ri
++            m[output] = m[output] + 1
++        g_rp = g_rp + g_rlen
++        g_ri = g_ri + 1
+     return output

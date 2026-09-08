@@ -1,0 +1,17 @@
+Implemented `boot()` (and the regex engine helpers it needs) in `[app/service.csirpy](/workspace/app/service.csirpy)`.
+
+- Added a full restricted-language parser for the declared grammar (`|`, concatenation, `()`, `?`, `*`, `+`, `.`, character classes, escapes, complements, ranges).
+- Added input validation for:
+  - flags (`NONE` / `ASCII_IGNORE_CASE` encoding),
+  - pattern length and byte bounds,
+  - record count/length/byte bounds,
+  - syntax errors outside the subset.
+- Built a node-based matcher with memoized recursive matching per `(node, position)` and exact-record membership checking.
+- Preserved subset semantics for:
+  - ASCII-ignore-case expansion (including inside classes and complements),
+  - empty matches (`EMPTY`, `OPTIONAL`, `STAR`/`PLUS` behavior),
+  - whole-record matching,
+  - ordered batch output with duplicate/subrecord-preserving behavior (stable index order).
+- Invalid subset syntax is rejected at runtime before matching (returns `alloc(-1)` path, yielding machine-level rejection rather than a false positive match).
+
+I did not run tests in this pass.

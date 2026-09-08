@@ -1,0 +1,78 @@
+"""Serialize diagnostic records for the runtime sink."""
+import json
+
+try:
+    from fixture_api.contracts import X06_MAX_CHILDREN, X06_MAX_DEPTH
+except ImportError:  # Keep the service usable with the compatibility runtime.
+    X06_MAX_CHILDREN = 8
+    X06_MAX_DEPTH = 4
+
+
+_SCALAR = (str, int, float, bool)
+
+
+def _scalar(value):
+    """Return a JSON-safe scalar, retaining the baseline's strict types."""
+    if value is None or type(value) in _SCALAR:
+        return value
+    return None
+
+
+def _error(value, depth=0, seen=None):
+    """Copy useful error details without allowing hostile objects or cycles."""
+    if seen is None:
+        seen = set()
+    if value is None or type(value) in _SCALAR:
+        return value
+    if depth >= X06_MAX_DEPTH or not isinstance(value, dict):
+        return None
+    identity = id(value)
+    if identity in seen:
+        return None
+    seen.add(identity)
+    result = {}
+    for key, item in value.items():
+        if not isinstance(key, str):
+            continue
+        copied = _error(item, depth + 1, seen)
+        if copied is not None or item is None:
+            result[key] = copied
+    seen.remove(identity)
+    return result
+
+
+def _record(value, depth=0):
+    if not isinstance(value, dict):
+        return {}
+
+    result = {}
+    if 'correlation' in value:
+        result['correlation'] = _scalar(value['correlation'])
+
+    for key in ('message', 'code'):
+        if key in value:
+            item = _scalar(value[key])
+            if item is not None or value[key] is None:
+                result[key] = item
+
+    if 'error' in value:
+        error = _error(value['error'])
+        if error is not None:
+            result['error'] = error
+
+    if depth < X06_MAX_DEPTH and isinstance(value.get('children'), list):
+        result['children'] = [
+            _record(child, depth + 1)
+            for child in value['children'][:X06_MAX_CHILDREN]
+            if isinstance(child, dict)
+        ]
+    return result
+
+
+def run(diagnostic_record, sink):
+    record = _record(diagnostic_record)
+    try:
+        sink.write(json.dumps(record))
+    except Exception:
+        return 'log-error'
+    return 'logged'

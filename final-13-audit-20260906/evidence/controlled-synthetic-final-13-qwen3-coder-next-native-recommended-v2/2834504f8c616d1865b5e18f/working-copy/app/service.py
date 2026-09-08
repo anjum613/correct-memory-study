@@ -1,0 +1,31 @@
+"""Read-only baseline for concurrent decisions."""
+
+import copy
+
+
+def run(decision_store, operation, value):
+    if operation == 'read':
+        return copy.deepcopy(decision_store.rows[value])
+    if operation == 'prepare':
+        group, actor = value
+        # Check if group and actor exist and actor is active
+        if group not in decision_store.rows or actor not in decision_store.rows[group]:
+            return None
+        if not decision_store.rows[group][actor]:
+            return None
+        # Check if no other actor is active in the same group
+        if not any((active for other, active in decision_store.rows[group].items() if other != actor)):
+            return None
+        return (group, actor, decision_store.revisions[group])
+    if operation == 'commit':
+        # value is the tuple from prepare: (group, actor, prepare_revision)
+        group, actor, prepare_revision = value
+        current_revision = decision_store.revisions[group]
+        if current_revision != prepare_revision:
+            return 'conflict'
+        # Perform the commit: set actor to False and increment revision
+        decision_store.rows[group][actor] = False
+        decision_store.revisions[group] += 1
+        decision_store.events.append(('commit', group, actor))
+        return 'committed'
+    raise ValueError(operation)

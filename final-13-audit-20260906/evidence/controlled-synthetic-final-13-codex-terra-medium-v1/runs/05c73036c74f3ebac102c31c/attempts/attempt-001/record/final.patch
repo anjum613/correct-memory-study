@@ -1,0 +1,306 @@
+--- a/app/service.csirpy
++++ b/app/service.csirpy
+@@ -1,4 +1,302 @@
++def state():
++    r = g_states
++    g_states = g_states + 1
++    m[g_type + r] = 0
++    m[g_out1 + r] = -1
++    m[g_out2 + r] = -1
++    return r
++
++def character(c):
++    s = state()
++    m[g_type + s] = 1
++    m[g_set + s * 95 + c - 32] = 1
++    if g_fold and c >= 65 and c <= 90:
++        m[g_set + s * 95 + c] = 1
++    if g_fold and c >= 97 and c <= 122:
++        m[g_set + s * 95 + c - 64] = 1
++    e = state()
++    m[g_out1 + s] = e
++    m[g_fs + g_fp] = s
++    m[g_fe + g_fp] = e
++    g_fp = g_fp + 1
++    return 0
++
++def any_character():
++    s = state()
++    m[g_type + s] = 1
++    i = 0
++    while i < 95:
++        m[g_set + s * 95 + i] = 1
++        i = i + 1
++    e = state()
++    m[g_out1 + s] = e
++    m[g_fs + g_fp] = s
++    m[g_fe + g_fp] = e
++    g_fp = g_fp + 1
++    return 0
++
++def empty_fragment():
++    s = state()
++    m[g_fs + g_fp] = s
++    m[g_fe + g_fp] = s
++    g_fp = g_fp + 1
++    return 0
++
++def concatenate():
++    b = g_fp - 1
++    a = g_fp - 2
++    m[g_out1 + m[g_fe + a]] = m[g_fs + b]
++    m[g_fe + a] = m[g_fe + b]
++    g_fp = g_fp - 1
++    return 0
++
++def alternate():
++    b = g_fp - 1
++    a = g_fp - 2
++    s = state()
++    e = state()
++    m[g_out1 + s] = m[g_fs + a]
++    m[g_out2 + s] = m[g_fs + b]
++    m[g_out1 + m[g_fe + a]] = e
++    m[g_out1 + m[g_fe + b]] = e
++    m[g_fs + a] = s
++    m[g_fe + a] = e
++    g_fp = g_fp - 1
++    return 0
++
++def quantify(q):
++    a = g_fp - 1
++    s = state()
++    e = state()
++    if q == 42:
++        m[g_out1 + s] = m[g_fs + a]
++        m[g_out2 + s] = e
++        m[g_out1 + m[g_fe + a]] = s
++        m[g_fs + a] = s
++        m[g_fe + a] = e
++    if q == 43:
++        m[g_out1 + s] = m[g_fs + a]
++        m[g_out2 + s] = e
++        m[g_out1 + m[g_fe + a]] = s
++        m[g_fe + a] = e
++    if q == 63:
++        m[g_out1 + s] = m[g_fs + a]
++        m[g_out2 + s] = e
++        m[g_out1 + m[g_fe + a]] = e
++        m[g_fs + a] = s
++        m[g_fe + a] = e
++    return 0
++
++def reduce_union():
++    if g_opn and m[g_ops + g_opn - 1] == 1:
++        alternate()
++        g_opn = g_opn - 1
++    return 0
++
++def closure(start, marks, members, stamp, count):
++    h = count
++    t = count
++    if start >= 0 and m[marks + start] != stamp:
++        m[marks + start] = stamp
++        m[members + t] = start
++        t = t + 1
++    while h < t:
++        s = m[members + h]
++        h = h + 1
++        if m[g_type + s] == 0:
++            x = m[g_out1 + s]
++            if x >= 0 and m[marks + x] != stamp:
++                m[marks + x] = stamp
++                m[members + t] = x
++                t = t + 1
++            x = m[g_out2 + s]
++            if x >= 0 and m[marks + x] != stamp:
++                m[marks + x] = stamp
++                m[members + t] = x
++                t = t + 1
++    return t
++
+ def boot():
+-    output = alloc(1)
++    g_type = alloc(256)
++    g_out1 = alloc(256)
++    g_out2 = alloc(256)
++    g_set = alloc(24320)
++    g_fs = alloc(128)
++    g_fe = alloc(128)
++    g_ops = alloc(128)
++    g_gprev = alloc(128)
++    g_queue = alloc(256)
++    g_a = alloc(256)
++    g_b = alloc(256)
++    g_ma = alloc(256)
++    g_mb = alloc(256)
++    g_ca = alloc(256)
++    g_cb = alloc(256)
++    g_states = 0
++    g_fp = 0
++    g_opn = 0
++    g_fold = m[0]
++    g_cache_n = -1
++    n = m[1]
++    p = 0
++    previous = 0
++    depth = 0
++    while p < n:
++        c = m[2 + p]
++        if c == 40:
++            m[g_gprev + depth] = previous
++            depth = depth + 1
++            m[g_ops + g_opn] = 2
++            g_opn = g_opn + 1
++            previous = 0
++            p = p + 1
++        if c == 41:
++            if not previous:
++                empty_fragment()
++            reduce_union()
++            g_opn = g_opn - 1
++            depth = depth - 1
++            old = m[g_gprev + depth]
++            if old:
++                concatenate()
++            previous = 1
++            p = p + 1
++        if c == 124:
++            if not previous:
++                empty_fragment()
++            reduce_union()
++            m[g_ops + g_opn] = 1
++            g_opn = g_opn + 1
++            previous = 0
++            p = p + 1
++        if c == 46:
++            any_character()
++            if previous:
++                concatenate()
++            previous = 1
++            p = p + 1
++        if c == 91:
++            s = state()
++            m[g_type + s] = 1
++            e = state()
++            m[g_out1 + s] = e
++            m[g_fs + g_fp] = s
++            m[g_fe + g_fp] = e
++            g_fp = g_fp + 1
++            p = p + 1
++            neg = 0
++            if m[2 + p] == 94:
++                neg = 1
++                p = p + 1
++            while m[2 + p] != 93:
++                first = m[2 + p]
++                if first == 92:
++                    p = p + 1
++                    first = m[2 + p]
++                p = p + 1
++                last = first
++                if m[2 + p] == 45:
++                    p = p + 1
++                    last = m[2 + p]
++                    if last == 92:
++                        p = p + 1
++                        last = m[2 + p]
++                    p = p + 1
++                x = first
++                while x <= last:
++                    m[g_set + s * 95 + x - 32] = 1
++                    if g_fold and x >= 65 and x <= 90:
++                        m[g_set + s * 95 + x] = 1
++                    if g_fold and x >= 97 and x <= 122:
++                        m[g_set + s * 95 + x - 64] = 1
++                    x = x + 1
++            if neg:
++                x = 0
++                while x < 95:
++                    m[g_set + s * 95 + x] = not m[g_set + s * 95 + x]
++                    x = x + 1
++            p = p + 1
++            if previous:
++                concatenate()
++            previous = 1
++        if c != 40 and c != 41 and c != 124 and c != 46 and c != 91 and c != 42 and c != 43 and c != 63:
++            if c == 92:
++                p = p + 1
++                c = m[2 + p]
++            character(c)
++            if previous:
++                concatenate()
++            previous = 1
++            p = p + 1
++        if p < n and (m[2 + p] == 42 or m[2 + p] == 43 or m[2 + p] == 63):
++            quantify(m[2 + p])
++            p = p + 1
++    if not previous:
++        empty_fragment()
++    reduce_union()
++    accept = state()
++    m[g_type + accept] = 2
++    m[g_out1 + m[g_fe]] = accept
++    start = m[g_fs]
++    output = alloc(9)
+     m[output] = 0
++    at = 2 + n
++    count = m[at]
++    at = at + 1
++    ri = 0
++    while ri < count:
++        length = m[at]
++        at = at + 1
++        stamp = ri * 65 + 1
++        na = closure(start, g_ma, g_a, stamp, 0)
++        j = 0
++        while j < length:
++            byte = m[at + j]
++            stamp = stamp + 1
++            nb = 0
++            same = g_cache_n == na and g_cache_byte == byte
++            i = 0
++            while same and i < na:
++                same = m[g_a + i] == m[g_ca + i]
++                i = i + 1
++            if same:
++                nb = g_cache_out
++                i = 0
++                while i < nb:
++                    s = m[g_cb + i]
++                    m[g_b + i] = s
++                    m[g_mb + s] = stamp
++                    i = i + 1
++            if not same:
++                i = 0
++                while i < na:
++                    s = m[g_a + i]
++                    if m[g_type + s] == 1 and m[g_set + s * 95 + byte - 32]:
++                        nb = closure(m[g_out1 + s], g_mb, g_b, stamp, nb)
++                    i = i + 1
++                g_cache_n = na
++                g_cache_out = nb
++                g_cache_byte = byte
++                i = 0
++                while i < na:
++                    m[g_ca + i] = m[g_a + i]
++                    i = i + 1
++                i = 0
++                while i < nb:
++                    m[g_cb + i] = m[g_b + i]
++                    i = i + 1
++            old_list = g_a
++            g_a = g_b
++            g_b = old_list
++            old_marks = g_ma
++            g_ma = g_mb
++            g_mb = old_marks
++            na = nb
++            j = j + 1
++        if m[g_ma + accept] == stamp:
++            k = m[output]
++            m[output + 1 + k] = ri
++            m[output] = k + 1
++        at = at + length
++        ri = ri + 1
+     return output

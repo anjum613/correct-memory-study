@@ -1,0 +1,213 @@
+def ch(p):
+    return m[2 + p]
+
+def nd(k, a, b):
+    q = g_pool + g_used
+    m[q] = k
+    m[q + 1] = a
+    m[q + 2] = b
+    g_used = g_used + 4
+    return q
+
+def esc(ic):
+    if g_pos >= g_len:
+        g_bad = 1
+        return 0
+    c = ch(g_pos)
+    g_pos = g_pos + 1
+    if c == 92:
+        if g_pos >= g_len:
+            g_bad = 1
+            return 0
+        c = ch(g_pos)
+        g_pos = g_pos + 1
+        if ic:
+            if c != 91 and c != 93 and c != 92 and c != 45 and c != 94:
+                g_bad = 1
+        else:
+            if c != 46 and c != 91 and c != 93 and c != 40 and c != 41 and c != 124 and c != 42 and c != 43 and c != 63 and c != 92 and c != 94 and c != 36 and c != 123 and c != 125:
+                g_bad = 1
+        return c
+    if ic:
+        if c == 91 or c == 93 or c == 92 or c == 45 or c == 94:
+            g_bad = 1
+    else:
+        if c == 46 or c == 91 or c == 93 or c == 40 or c == 41 or c == 124 or c == 42 or c == 43 or c == 63 or c == 92 or c == 94 or c == 36 or c == 123 or c == 125:
+            g_bad = 1
+    return c
+
+def parse_expr():
+    x = parse_seq()
+    while g_pos < g_len and ch(g_pos) == 124:
+        g_pos = g_pos + 1
+        x = nd(5, x, parse_seq())
+    return x
+
+def parse_seq():
+    x = nd(0, 0, 0)
+    while g_pos < g_len and ch(g_pos) != 41 and ch(g_pos) != 124:
+        y = parse_atom()
+        if g_pos < g_len and (ch(g_pos) == 42 or ch(g_pos) == 43 or ch(g_pos) == 63):
+            z = ch(g_pos)
+            g_pos = g_pos + 1
+            if g_pos < g_len and (ch(g_pos) == 42 or ch(g_pos) == 43 or ch(g_pos) == 63):
+                g_bad = 1
+            if z == 42:
+                y = nd(6, y, 0)
+            elif z == 43:
+                y = nd(7, y, 0)
+            else:
+                y = nd(8, y, 0)
+        x = nd(4, x, y)
+    return x
+
+def parse_atom():
+    if g_pos >= g_len:
+        g_bad = 1
+        return nd(0, 0, 0)
+    c = ch(g_pos)
+    if c == 40:
+        g_pos = g_pos + 1
+        x = parse_expr()
+        if g_pos >= g_len or ch(g_pos) != 41:
+            g_bad = 1
+        else:
+            g_pos = g_pos + 1
+        return x
+    if c == 46:
+        g_pos = g_pos + 1
+        return nd(2, 0, 0)
+    if c == 91:
+        g_pos = g_pos + 1
+        neg = 0
+        if g_pos < g_len and ch(g_pos) == 94:
+            neg = 1
+            g_pos = g_pos + 1
+        b = g_sets + g_set_used
+        g_set_used = g_set_used + 95
+        i = 0
+        while i < 95:
+            m[b + i] = 0
+            i = i + 1
+        count = 0
+        while g_pos < g_len and ch(g_pos) != 93:
+            a = esc(1)
+            d = a
+            if g_pos < g_len and ch(g_pos) == 45:
+                g_pos = g_pos + 1
+                d = esc(1)
+                if d < a:
+                    g_bad = 1
+            v = a
+            while v <= d:
+                if v >= 32 and v <= 126:
+                    m[b + v - 32] = 1
+                    count = 1
+                    if g_flag == 1 and v >= 65 and v <= 90:
+                        m[b + v - 32 + 32] = 1
+                    if g_flag == 1 and v >= 97 and v <= 122:
+                        m[b + v - 32 - 32] = 1
+                v = v + 1
+        if g_pos >= g_len or ch(g_pos) != 93 or count == 0:
+            g_bad = 1
+        else:
+            g_pos = g_pos + 1
+        if neg:
+            i = 0
+            while i < 95:
+                m[b + i] = 1 - m[b + i]
+                i = i + 1
+        return nd(3, b, 0)
+    return nd(1, esc(0), 0)
+
+def rep(x, s, e, n):
+    if s == e:
+        return 1
+    if n == 0:
+        return 0
+    k = s
+    while k <= e:
+        if is_match(x, s, k) and rep(x, k, e, n - 1):
+            return 1
+        k = k + 1
+    return 0
+
+def cat(x, y, s, e):
+    z = s
+    while z <= e:
+        if is_match(x, s, z) and is_match(y, z, e):
+            return 1
+        z = z + 1
+    return 0
+
+def uni(x, y, s, e):
+    if is_match(x, s, e):
+        return 1
+    return is_match(y, s, e)
+
+def opt(x, s, e):
+    if s == e:
+        return 1
+    return is_match(x, s, e)
+
+def pos(x, s, e):
+    if not is_match(x, s, e):
+        return 0
+    return rep(x, s, e, 64)
+
+def is_match(q, s, e):
+    k = m[q]
+    if k == 0:
+        return (s == e)
+    if k == 1:
+        if e != s + 1:
+            return 0
+        c = m[g_rbase + s]
+        v = m[q + 1]
+        if c == v:
+            return 1
+        return g_flag == 1 and ((v >= 65 and v <= 90 and c == v + 32) or (v >= 97 and v <= 122 and c == v - 32))
+    if k == 2:
+        return e == s + 1
+    if k == 3:
+        if e != s + 1:
+            return 0
+        return m[m[q + 1] + m[g_rbase + s] - 32]
+    if k == 4:
+        return cat(m[q + 1], m[q + 2], s, e)
+    if k == 5:
+        return uni(m[q + 1], m[q + 2], s, e)
+    if k == 8:
+        return opt(m[q + 1], s, e)
+    if k == 6:
+        return rep(m[q + 1], s, e, 65)
+    return pos(m[q + 1], s, e)
+
+def boot():
+    g_flag = m[0]
+    g_len = m[1]
+    g_pos = 0
+    g_bad = 0
+    g_used = 0
+    g_set_used = 0
+    g_pool = alloc(12000)
+    g_sets = alloc(7000)
+    g_root = parse_expr()
+    if g_pos != g_len:
+        g_bad = 1
+    g_ca = 3 + g_len
+    g_rec = g_ca + 1
+    g_i = 0
+    g_n = 0
+    g_out = alloc(9)
+    m[g_out] = 0
+    while g_i < m[g_ca]:
+        g_rlen = m[g_rec]
+        g_rbase = g_rec + 1
+        if g_bad == 0 and is_match(g_root, 0, g_rlen):
+            m[g_out + 1 + g_n] = g_i
+            g_n = g_n + 1
+            m[g_out] = g_n
+        g_rec = g_rec + 1 + g_rlen
+        g_i = g_i + 1
+    return g_out

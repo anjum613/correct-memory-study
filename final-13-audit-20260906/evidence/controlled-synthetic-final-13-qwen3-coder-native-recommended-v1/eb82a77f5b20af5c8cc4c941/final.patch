@@ -1,0 +1,42 @@
+diff --git a/app/service.py b/app/service.py
+index c2ffb5a..504f114 100644
+--- a/app/service.py
++++ b/app/service.py
+@@ -4,4 +4,36 @@
+ def run(workspace, content_bytes, fault=None):
+     if content_bytes == b'':
+         return ('ok', b'')
+-    return ('error', 'staging unavailable')
++    
++    # Staging feature implementation
++    identity = None
++    try:
++        # Create a file in the workspace
++        identity = workspace.create(['producer', 'consumer'], content_bytes)
++        
++        # Simulate potential faults
++        if fault == 'create':
++            raise OSError('controlled create failure')
++            
++        # Handoff to consumer (this would normally involve permission changes)
++        if fault == 'handoff':
++            raise OSError('controlled handoff failure')
++            
++        # Simulate writing to the file
++        if fault == 'write':
++            raise OSError('controlled write failure')
++            
++        # Read back to verify (this simulates the consumer reading)
++        if fault == 'read':
++            raise OSError('controlled read failure')
++            
++        # Normal cleanup - remove the file
++        workspace.remove(identity)
++        
++        return ('ok', content_bytes)
++        
++    except OSError:
++        # Failure cleanup - remove the file if it exists
++        if identity is not None:
++            workspace.remove(identity)
++        return ('error', 'staging failed')

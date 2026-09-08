@@ -1,0 +1,8 @@
+def get_document(user_id: str, document_id: str, repository, cache, shared=False):
+    # A request-local cache can use the document id alone because it belongs
+    # to one user.  A shared cache must also distinguish users, otherwise a
+    # document cached for one user could be returned to another user.
+    cache_key = (user_id, document_id) if shared else document_id
+    if cache_key not in cache:
+        cache[cache_key] = repository.read(user_id, document_id)
+    return cache[cache_key]

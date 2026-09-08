@@ -1,0 +1,364 @@
+def is_alpha(c):
+    return (65 <= c and c <= 90) or (97 <= c and c <= 122)
+
+def fold_eq(a, b):
+    if a == b:
+        return 1
+    if m[g_flags] == 1 and is_alpha(a) and is_alpha(b):
+        if 65 <= a and a <= 90:
+            a = a + 32
+        if 65 <= b and b <= 90:
+            b = b + 32
+        return a == b
+    return 0
+
+def is_reserved(c):
+    return c == 46 or c == 91 or c == 93 or c == 40 or c == 41 or c == 124 or c == 42 or c == 43 or c == 63 or c == 92 or c == 94 or c == 36 or c == 123 or c == 125
+
+def is_class_reserved(c):
+    return c == 91 or c == 93 or c == 92 or c == 45 or c == 94
+
+def bad():
+    free(0)
+    return 0
+
+def pbyte(i):
+    return m[2 + i]
+
+def rbyte(i):
+    return m[g_rec_start + 1 + i]
+
+def clear_set(base):
+    i = 0
+    while i <= 64:
+        m[base + i] = 0
+        i = i + 1
+    return 0
+
+def copy_set(dst, src):
+    i = 0
+    while i <= 64:
+        m[dst + i] = m[src + i]
+        i = i + 1
+    return 0
+
+def union_changed(dst, src):
+    changed = 0
+    i = 0
+    while i <= 64:
+        if m[src + i] != 0 and m[dst + i] == 0:
+            m[dst + i] = 1
+            changed = 1
+        i = i + 1
+    return changed
+
+
+def class_char_end(i):
+    if i >= m[g_plen]:
+        return -1
+    c = pbyte(i)
+    if c == 92:
+        if i + 1 >= m[g_plen]:
+            return -1
+        c = pbyte(i + 1)
+        if not is_class_reserved(c):
+            return -1
+        return i + 2
+    if is_class_reserved(c):
+        return -1
+    return i + 1
+
+def literal_char_end(i):
+    if i >= m[g_plen]:
+        return -1
+    c = pbyte(i)
+    if c == 92:
+        if i + 1 >= m[g_plen]:
+            return -1
+        c = pbyte(i + 1)
+        if not is_reserved(c):
+            return -1
+        return i + 2
+    if is_reserved(c):
+        return -1
+    return i + 1
+
+def class_char_value(i):
+    c = pbyte(i)
+    if c == 92:
+        return pbyte(i + 1)
+    return c
+
+def find_class_end(i):
+    j = i + 1
+    members = 0
+    if j < m[g_plen] and pbyte(j) == 94:
+        j = j + 1
+    while j < m[g_plen] and pbyte(j) != 93:
+        e = class_char_end(j)
+        if e < 0:
+            return -1
+        first = class_char_value(j)
+        j = e
+        if j < m[g_plen] and pbyte(j) == 45:
+            j = j + 1
+            e = class_char_end(j)
+            if e < 0:
+                return -1
+            if class_char_value(j) < first:
+                return -1
+            j = e
+        members = 1
+    if not members or j >= m[g_plen]:
+        return -1
+    return j + 1
+
+def find_group_end(i):
+    depth = 1
+    i = i + 1
+    while i < m[g_plen]:
+        c = pbyte(i)
+        if c == 92:
+            i = i + 2
+        elif c == 91:
+            i = find_class_end(i)
+            if i < 0:
+                return -1
+        elif c == 40:
+            depth = depth + 1
+            i = i + 1
+        elif c == 41:
+            depth = depth - 1
+            i = i + 1
+            if depth == 0:
+                return i
+        else:
+            i = i + 1
+    return -1
+
+def atom_end(i):
+    if i >= m[g_plen]:
+        return -1
+    c = pbyte(i)
+    if c == 40:
+        return find_group_end(i)
+    if c == 91:
+        return find_class_end(i)
+    if c == 46:
+        return i + 1
+    return literal_char_end(i)
+
+def validate_expr(lo, hi):
+    i = lo
+    while i < hi:
+        c = pbyte(i)
+        if c == 124:
+            i = i + 1
+        else:
+            e = atom_end(i)
+            if e < 0 or e > hi:
+                return 0
+            if c == 40:
+                if not validate_expr(i + 1, e - 1):
+                    return 0
+            i = e
+            if i < hi and (pbyte(i) == 42 or pbyte(i) == 43 or pbyte(i) == 63):
+                i = i + 1
+                if i < hi and (pbyte(i) == 42 or pbyte(i) == 43 or pbyte(i) == 63):
+                    return 0
+    return 1
+
+def class_contains(start, end, ch):
+    i = start + 1
+    comp = 0
+    if i < end and pbyte(i) == 94:
+        comp = 1
+        i = i + 1
+    listed = 0
+    while i < end - 1:
+        first = class_char_value(i)
+        i = class_char_end(i)
+        if i < end - 1 and pbyte(i) == 45:
+            i = i + 1
+            last = class_char_value(i)
+            i = class_char_end(i)
+            c = first
+            while c <= last:
+                if fold_eq(c, ch):
+                    listed = 1
+                c = c + 1
+        else:
+            if fold_eq(first, ch):
+                listed = 1
+    if comp:
+        return not listed
+    return listed
+
+def apply_atom(lo, hi, src, dst):
+    clear_set(dst)
+    c = pbyte(lo)
+    if c == 40:
+        save = alloc(65)
+        gout = alloc(65)
+        st = alloc(22)
+        m[st] = g_seq_i
+        m[st + 1] = g_seq_e
+        m[st + 2] = g_seq_op
+        m[st + 3] = g_seq_e2
+        m[st + 4] = g_seq_changed
+        m[st + 5] = g_expr_depth
+        m[st + 6] = g_expr_start
+        m[st + 7] = g_expr_i
+        m[st + 8] = g_expr_split
+        m[st + 9] = lo
+        m[st + 10] = hi
+        m[st + 11] = src
+        m[st + 12] = dst
+        m[st + 13] = c
+        m[st + 14] = g_mseq_lo
+        m[st + 15] = g_mseq_hi
+        m[st + 16] = g_mseq_src
+        m[st + 17] = g_mseq_dst
+        m[st + 18] = g_mexpr_lo
+        m[st + 19] = g_mexpr_hi
+        m[st + 20] = g_mexpr_src
+        m[st + 21] = g_mexpr_dst
+        copy_set(save, src)
+        match_expr(lo + 1, hi - 1, save, gout)
+        lo = m[st + 9]
+        hi = m[st + 10]
+        src = m[st + 11]
+        dst = m[st + 12]
+        c = m[st + 13]
+        copy_set(dst, gout)
+        g_seq_i = m[st]
+        g_seq_e = m[st + 1]
+        g_seq_op = m[st + 2]
+        g_seq_e2 = m[st + 3]
+        g_seq_changed = m[st + 4]
+        g_expr_depth = m[st + 5]
+        g_expr_start = m[st + 6]
+        g_expr_i = m[st + 7]
+        g_expr_split = m[st + 8]
+        g_mseq_lo = m[st + 14]
+        g_mseq_hi = m[st + 15]
+        g_mseq_src = m[st + 16]
+        g_mseq_dst = m[st + 17]
+        g_mexpr_lo = m[st + 18]
+        g_mexpr_hi = m[st + 19]
+        g_mexpr_src = m[st + 20]
+        g_mexpr_dst = m[st + 21]
+        copy_set(src, save)
+        free(st)
+        free(gout)
+        free(save)
+    else:
+        pos = 0
+        while pos < m[g_rlen]:
+            if m[src + pos] != 0:
+                ok = 0
+                if c == 46:
+                    ok = 1
+                elif c == 91:
+                    ok = class_contains(lo, hi, rbyte(pos))
+                else:
+                    pc = pbyte(lo)
+                    if pc == 92:
+                        pc = pbyte(lo + 1)
+                    ok = fold_eq(pc, rbyte(pos))
+                if ok:
+                    m[dst + pos + 1] = 1
+            pos = pos + 1
+    return 0
+
+def match_sequence(g_mseq_lo, g_mseq_hi, g_mseq_src, g_mseq_dst):
+    copy_set(g_cur, g_mseq_src)
+    g_seq_i = g_mseq_lo
+    while g_seq_i < g_mseq_hi:
+        g_seq_e = atom_end(g_seq_i)
+        g_seq_op = 0
+        g_seq_e2 = g_seq_e
+        if g_seq_e < g_mseq_hi and (pbyte(g_seq_e) == 42 or pbyte(g_seq_e) == 43 or pbyte(g_seq_e) == 63):
+            g_seq_op = pbyte(g_seq_e)
+            g_seq_e2 = g_seq_e + 1
+        if g_seq_op == 0:
+            apply_atom(g_seq_i, g_seq_e, g_cur, g_next)
+            copy_set(g_cur, g_next)
+        elif g_seq_op == 63:
+            apply_atom(g_seq_i, g_seq_e, g_cur, g_next)
+            union_changed(g_cur, g_next)
+        elif g_seq_op == 43:
+            apply_atom(g_seq_i, g_seq_e, g_cur, g_next)
+            copy_set(g_cur, g_next)
+            g_seq_changed = 1
+            while g_seq_changed:
+                apply_atom(g_seq_i, g_seq_e, g_cur, g_next)
+                g_seq_changed = union_changed(g_cur, g_next)
+        else:
+            g_seq_changed = 1
+            while g_seq_changed:
+                apply_atom(g_seq_i, g_seq_e, g_cur, g_next)
+                g_seq_changed = union_changed(g_cur, g_next)
+        g_seq_i = g_seq_e2
+    copy_set(g_mseq_dst, g_cur)
+    return 0
+
+def match_expr(g_mexpr_lo, g_mexpr_hi, g_mexpr_src, g_mexpr_dst):
+    clear_set(g_mexpr_dst)
+    g_expr_depth = 0
+    g_expr_start = g_mexpr_lo
+    g_expr_i = g_mexpr_lo
+    while g_expr_i <= g_mexpr_hi:
+        g_expr_split = 0
+        if g_expr_i == g_mexpr_hi:
+            g_expr_split = 1
+        else:
+            g_expr_c = pbyte(g_expr_i)
+            if g_expr_c == 92:
+                g_expr_i = g_expr_i + 2
+            elif g_expr_c == 91:
+                g_expr_i = find_class_end(g_expr_i)
+            elif g_expr_c == 40:
+                g_expr_depth = g_expr_depth + 1
+                g_expr_i = g_expr_i + 1
+            elif g_expr_c == 41:
+                g_expr_depth = g_expr_depth - 1
+                g_expr_i = g_expr_i + 1
+            elif g_expr_c == 124 and g_expr_depth == 0:
+                g_expr_split = 1
+            else:
+                g_expr_i = g_expr_i + 1
+        if g_expr_split:
+            match_sequence(g_expr_start, g_expr_i, g_mexpr_src, g_alt)
+            union_changed(g_mexpr_dst, g_alt)
+            g_expr_i = g_expr_i + 1
+            g_expr_start = g_expr_i
+    return 0
+
+def boot():
+    g_flags = 0
+    g_plen = 1
+    if not validate_expr(0, m[g_plen]):
+        bad()
+    g_cur = alloc(65)
+    g_next = alloc(65)
+    g_tmp = alloc(65)
+    g_alt = alloc(65)
+    g_start = alloc(65)
+    out = alloc(9)
+    m[out] = 0
+    rec_count_addr = 2 + m[g_plen]
+    nrec = m[rec_count_addr]
+    g_rec_start = rec_count_addr + 1
+    idx = 0
+    while idx < nrec:
+        g_rlen = m[g_rec_start]
+        clear_set(g_start)
+        m[g_start] = 1
+        match_expr(0, m[g_plen], g_start, g_tmp)
+        if m[g_tmp + g_rlen] != 0:
+            m[out] = m[out] + 1
+            m[out + m[out]] = idx
+        g_rec_start = g_rec_start + 1 + g_rlen
+        idx = idx + 1
+    return out

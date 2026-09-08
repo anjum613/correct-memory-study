@@ -1,0 +1,52 @@
+--- a/app/service.py
++++ b/app/service.py
+@@ -1,13 +1,46 @@
+-"""Read-only baseline for concurrent decisions."""
++"""Optimistic, invariant-preserving decisions."""
+ 
+ import copy
++import threading
++
++
++# ``commit`` is a read/validate/write operation.  The runtime exposes those
++# parts separately, so keep that small critical section atomic when callers
++# invoke this service from different threads.
++_commit_lock = threading.RLock()
+ 
+ 
+ def run(decision_store, operation, value):
+     if operation == 'read':
+         return copy.deepcopy(decision_store.rows[value])
+     if operation == 'prepare':
+-        return None
++        group, actor = value
++        with _commit_lock:
++            row = decision_store.rows.get(group)
++            if row is None or not row.get(actor, False):
++                return None
++
++            # Turning off the selected actor is valid only if the complete
++            # row will still contain an active actor.
++            if not any(active for other, active in row.items() if other != actor):
++                return None
++
++            return (group, actor, decision_store.revisions[group])
+     if operation == 'commit':
+-        return 'conflict'
++        try:
++            group, actor, revision = value
++        except (TypeError, ValueError):
++            return 'conflict'
++        with _commit_lock:
++            row = decision_store.rows.get(group)
++            if (
++                row is None
++                or decision_store.revisions.get(group) != revision
++                or not row.get(actor, False)
++                or not any(active for other, active in row.items() if other != actor)
++            ):
++                return 'conflict'
++
++            decision_store.commit(group, actor)
++            return 'committed'
+     raise ValueError(operation)

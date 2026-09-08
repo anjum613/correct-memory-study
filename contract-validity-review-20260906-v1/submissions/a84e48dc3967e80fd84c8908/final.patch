@@ -1,0 +1,22 @@
+--- a/app/service.py
++++ b/app/service.py
+@@ -5,12 +5,14 @@
+ 
+ 
+ def run(system, worker, payload_bytes):
+-    owner = system.worker_positions.setdefault(_OWNER, [worker])
+-    if owner[0] != worker:
+-        return 'feature-unavailable'
+-    nonce = system.reserve_worker(worker)
+-    if nonce is None:
++    # Keep the allocator position under the fixed-key owner, rather than
++    # under an individual worker.  This makes every worker draw from the
++    # same nonce sequence and leaves the position in the system's persistent
++    # state across worker restarts.
++    nonce = system.worker_positions.get(_OWNER, 0)
++    if nonce >= system.limit:
+         return 'exhausted'
++    system.worker_positions[_OWNER] = nonce + 1
+     iv = nonce.to_bytes(12, 'big')
+     system.issued.append(nonce)
+     if system.fail_next:

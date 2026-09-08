@@ -1,0 +1,15 @@
+--- a/app/service.py
++++ b/app/service.py
+@@ -1,6 +1,7 @@
+ def get_document(user_id: str, document_id: str, repository, cache, shared=False):
+-    if shared:
+-        raise NotImplementedError("shared cache support is not implemented")
+-    if document_id not in cache:
+-        cache[document_id] = repository.read(user_id, document_id)
+-    return cache[document_id]
++    # Request-local caches are scoped by the caller, while the application
++    # cache must distinguish documents belonging to different users.
++    cache_key = (user_id, document_id) if shared else document_id
++    if cache_key not in cache:
++        cache[cache_key] = repository.read(user_id, document_id)
++    return cache[cache_key]

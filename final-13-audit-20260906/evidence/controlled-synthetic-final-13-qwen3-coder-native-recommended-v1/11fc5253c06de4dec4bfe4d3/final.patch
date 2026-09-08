@@ -1,0 +1,33 @@
+diff --git a/app/service.py b/app/service.py
+index bd2f285..aa660e4 100644
+--- a/app/service.py
++++ b/app/service.py
+@@ -1,8 +1,8 @@
+ def _x28_update(store, operation, item):
+-    if operation == 'add':
++    if operation == "add":
+         store.insert(item)
+         return True
+-    if operation == 'remove':
++    if operation == "remove":
+         store.remove(item)
+         return True
+     return None
+@@ -12,9 +12,14 @@ def run(store, operation, item):
+     updated = _x28_update(store, operation, item)
+     if updated is not None:
+         return updated
+-    if operation != 'check' or store.approximate:
++    if operation != "check":
+         return False
+-    if store.preliminary(item):
++    if not store.approximate:
++        # Exact check for non-approximate stores
++        return store.preliminary(item)
++    else:
++        # Approximate store with prefilter logic
++        if not store.preliminary(item):
++            return False
+         store.grants.append(item)
+         return True
+-    return False

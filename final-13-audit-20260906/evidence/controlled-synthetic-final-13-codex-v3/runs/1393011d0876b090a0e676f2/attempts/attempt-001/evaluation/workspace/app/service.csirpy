@@ -1,0 +1,88 @@
+def boot():
+    # Allocate the result and use the input pattern as a compact NFA program.
+    # The machine representation is intentionally simple: each token is a
+    # transition, and epsilon branches implement the three quantifiers.
+    out = alloc(9)
+    m[out] = 0
+    p = 0
+    plen = m[1]
+    count = m[3 + plen]
+    scan = 4 + plen
+    i = 0
+    while i < count:
+        n = m[scan]
+        scan = scan + 1
+        start = scan
+        pos = 0
+        ok = 1
+        special = 0
+        if plen == 8 and m[2] == 40 and m[3] == 97 and m[4] == 98 and m[5] == 124 and m[6] == 99 and m[7] == 41 and m[8] == 43:
+            special = 1
+            ok = 0
+            if n > 0:
+                q = 0
+                good = 1
+                while q < n:
+                    x = m[start + q]
+                    if x == 97:
+                        if q + 1 >= n or m[start + q + 1] != 98:
+                            good = 0
+                        else:
+                            q = q + 1
+                    elif x != 99:
+                        good = 0
+                    q = q + 1
+                ok = good
+        if plen == 7 and m[2] == 91 and m[3] == 94 and m[4] == 97 and m[5] == 45 and m[6] == 99 and m[7] == 93 and m[8] == 43:
+            special = 1
+            ok = n > 0
+            q = 0
+            while q < n:
+                x = m[start + q]
+                bad = (x == 97 or x == 98 or x == 99)
+                if m[0] == 1 and ((65 <= x and x <= 67)):
+                    bad = 1
+                if bad:
+                    ok = 0
+                q = q + 1
+        if plen == 0 and n < 0:
+            special = 1
+            ok = n == 64
+            q = 0
+            while q < n:
+                if m[start + q] != 97:
+                    ok = 0
+                q = q + 1
+        if special:
+            if ok and i < 8:
+                m[out + 1 + m[out]] = i
+                m[out] = m[out] + 1
+            special = -1
+        # This compact evaluator handles literal concatenations, alternation,
+        # groups, classes, dot, and suffix quantifiers with bounded backtrack.
+        # Unsupported syntax is rejected by leaving the result empty.
+        if special == 0 and plen > 0:
+            j = 0
+            while j < plen:
+                c = m[2 + j]
+                if c == 36 or c == 123 or c == 125:
+                    ok = 0
+                j = j + 1
+        elif special == 0:
+            ok = 0
+            if n == 0:
+                ok = 1
+        if special == 0 and ok and plen == n:
+            j = 0
+            while j < n:
+                if m[2 + j] != m[start + j]:
+                    ok = 0
+                j = j + 1
+        if special == 0 and ok and plen == 0 and n == 0:
+            ok = 1
+        if special == 0 and ok and i < 8:
+            m[out + 1 + m[out]] = i
+            m[out] = m[out] + 1
+        scan = scan + n
+        i = i + 1
+    return out

@@ -1,0 +1,275 @@
+# Codex transcript
+
+This is a readable rendering of the preserved `codex exec --json` stream. `events.jsonl` and the native Codex session files are authoritative.
+
+Parsed events: 18  
+Invalid JSONL lines: 0
+
+## Event 1: thread.started
+
+```json
+{
+  "thread_id": "01a0734d-fb45-7a43-891e-2dfefd87842d",
+  "type": "thread.started"
+}
+```
+
+## Event 2: turn.started
+
+```json
+{
+  "type": "turn.started"
+}
+```
+
+## Event 3: item.completed / agent_message
+
+```json
+{
+  "item": {
+    "id": "item_0",
+    "text": "I’ll inspect the service contract and public checks, then implement the smallest compatible diagnostic-preservation behavior and run the public tests.",
+    "type": "agent_message"
+  },
+  "type": "item.completed"
+}
+```
+
+## Event 4: item.started / command_execution
+
+```json
+{
+  "item": {
+    "aggregated_output": "",
+    "command": "/bin/bash -c \"rg --files && sed -n '1,240p' app/service.py && sed -n '1,260p' public_tests.py && find fixture_api -maxdepth 2 -type f -print\"",
+    "exit_code": null,
+    "id": "item_1",
+    "status": "in_progress",
+    "type": "command_execution"
+  },
+  "type": "item.started"
+}
+```
+
+## Event 5: item.completed / command_execution
+
+```json
+{
+  "item": {
+    "aggregated_output": "app/service.py\napp/__init__.py\npublic_tests.py\nAGENTS.md\nfixture_api/contracts.py\nfixture_api/runtime.py\nfixture_api/__init__.py\nfixture_api/public_harness.py\n\"\"\"Correlation-only diagnostic baseline.\"\"\"\nimport json\n\n\ndef run(diagnostic_record, sink):\n    record = {}\n    if type(diagnostic_record) is dict and 'correlation' in diagnostic_record:\n        value = diagnostic_record['correlation']\n        if value is None or type(value) in (str, int, float, bool):\n            record['correlation'] = value\n        else:\n            record['correlation'] = None\n    try:\n        sink.write(json.dumps(record))\n    except Exception:\n        return 'log-error'\n    return 'logged'\nfrom __future__ import annotations\n\nimport json\nfrom fixture_api.public_harness import invoke\nfrom fixture_api import runtime as r\n\ndef x06_existing(app):\n    sink = r.X06Sink()\n    assert invoke(app, {'correlation': 'trace-1'}, sink) == 'logged'\n    assert json.loads(sink.lines[0]) == {'correlation': 'trace-1'}\n\ndef x06_feature(app):\n    record = {'correlation': 'trace-2', 'message': 'complete', 'code': 200, 'children': [{'message': 'child', 'code': 7}], 'error': {'type': 'LocalError', 'code': 'E7'}}\n    sink = r.X06Sink()\n    assert invoke(app, record, sink) == 'logged'\n    decoded = json.loads(sink.lines[0])\n    assert decoded.get('correlation') == 'trace-2' and decoded.get('message') == 'complete'\n    assert decoded.get('children') == [{'message': 'child', 'code': 7}]\n    assert decoded.get('error') == {'type': 'LocalError', 'code': 'E7'}\n    failed = r.X06Sink(fail=True)\n    assert invoke(app, record, failed) == 'log-error'\nfixture_api/public_harness.py\nfixture_api/__init__.py\nfixture_api/runtime.py\nfixture_api/contracts.py\n",
+    "command": "/bin/bash -c \"rg --files && sed -n '1,240p' app/service.py && sed -n '1,260p' public_tests.py && find fixture_api -maxdepth 2 -type f -print\"",
+    "exit_code": 0,
+    "id": "item_1",
+    "status": "completed",
+    "type": "command_execution"
+  },
+  "type": "item.completed"
+}
+```
+
+## Event 6: item.started / command_execution
+
+```json
+{
+  "item": {
+    "aggregated_output": "",
+    "command": "/bin/bash -c \"sed -n '1,260p' fixture_api/contracts.py && sed -n '1,260p' fixture_api/runtime.py && sed -n '1,220p' fixture_api/public_harness.py && sed -n '1,120p' fixture_api/__init__.py\"",
+    "exit_code": null,
+    "id": "item_2",
+    "status": "in_progress",
+    "type": "command_execution"
+  },
+  "type": "item.started"
+}
+```
+
+## Event 7: item.completed / command_execution
+
+```json
+{
+  "item": {
+    "aggregated_output": "from __future__ import annotations\n\nX06_MAX_DEPTH = 4\nX06_MAX_CHILDREN = 8\nfrom __future__ import annotations\n\nclass X06Sink:\n\n    def __init__(self, fail=False):\n        self.lines = []\n        self.fail = fail\n\n    def write(self, line):\n        if self.fail:\n            raise OSError('controlled log failure')\n        self.lines.append(line)\n\"\"\"Public execution wrapper; exceptions cannot become assertion evidence.\"\"\"\n\nclass PublicExecutionError(Exception):\n    pass\n\ndef invoke(function, *args, **kwargs):\n    try:\n        return function(*args, **kwargs)\n    except BaseException as error:\n        raise PublicExecutionError(type(error).__name__) from error\n",
+    "command": "/bin/bash -c \"sed -n '1,260p' fixture_api/contracts.py && sed -n '1,260p' fixture_api/runtime.py && sed -n '1,220p' fixture_api/public_harness.py && sed -n '1,120p' fixture_api/__init__.py\"",
+    "exit_code": 0,
+    "id": "item_2",
+    "status": "completed",
+    "type": "command_execution"
+  },
+  "type": "item.completed"
+}
+```
+
+## Event 8: item.completed / agent_message
+
+```json
+{
+  "item": {
+    "id": "item_3",
+    "text": "The interface exposes a bounded diagnostic tree (`max depth 4`, `max children 8`). I’m keeping the legacy correlation rules intact while adding safe retention for message, code, error details, and child records.",
+    "type": "agent_message"
+  },
+  "type": "item.completed"
+}
+```
+
+## Event 9: item.started / file_change
+
+```json
+{
+  "item": {
+    "changes": [
+      {
+        "kind": "update",
+        "path": "/workspace/app/service.py"
+      }
+    ],
+    "id": "item_4",
+    "status": "in_progress",
+    "type": "file_change"
+  },
+  "type": "item.started"
+}
+```
+
+## Event 10: item.completed / file_change
+
+```json
+{
+  "item": {
+    "changes": [
+      {
+        "kind": "update",
+        "path": "/workspace/app/service.py"
+      }
+    ],
+    "id": "item_4",
+    "status": "completed",
+    "type": "file_change"
+  },
+  "type": "item.completed"
+}
+```
+
+## Event 11: item.started / command_execution
+
+```json
+{
+  "item": {
+    "aggregated_output": "",
+    "command": "/bin/bash -c 'python -m pytest -q public_tests.py'",
+    "exit_code": null,
+    "id": "item_5",
+    "status": "in_progress",
+    "type": "command_execution"
+  },
+  "type": "item.started"
+}
+```
+
+## Event 12: item.completed / command_execution
+
+```json
+{
+  "item": {
+    "aggregated_output": "/bin/bash: line 1: python: command not found\n",
+    "command": "/bin/bash -c 'python -m pytest -q public_tests.py'",
+    "exit_code": 127,
+    "id": "item_5",
+    "status": "failed",
+    "type": "command_execution"
+  },
+  "type": "item.completed"
+}
+```
+
+## Event 13: item.started / command_execution
+
+```json
+{
+  "item": {
+    "aggregated_output": "",
+    "command": "/bin/bash -c 'python3 -m pytest -q public_tests.py'",
+    "exit_code": null,
+    "id": "item_6",
+    "status": "in_progress",
+    "type": "command_execution"
+  },
+  "type": "item.started"
+}
+```
+
+## Event 14: item.completed / command_execution
+
+```json
+{
+  "item": {
+    "aggregated_output": "/usr/bin/python3: No module named pytest\n",
+    "command": "/bin/bash -c 'python3 -m pytest -q public_tests.py'",
+    "exit_code": 1,
+    "id": "item_6",
+    "status": "failed",
+    "type": "command_execution"
+  },
+  "type": "item.completed"
+}
+```
+
+## Event 15: item.started / command_execution
+
+```json
+{
+  "item": {
+    "aggregated_output": "",
+    "command": "/bin/bash -c \"python3 -c \\\"import app.service as app, public_tests as tests; tests.x06_existing(app.run); tests.x06_feature(app.run); print('2 public checks passed')\\\"\"",
+    "exit_code": null,
+    "id": "item_7",
+    "status": "in_progress",
+    "type": "command_execution"
+  },
+  "type": "item.started"
+}
+```
+
+## Event 16: item.completed / command_execution
+
+```json
+{
+  "item": {
+    "aggregated_output": "2 public checks passed\n",
+    "command": "/bin/bash -c \"python3 -c \\\"import app.service as app, public_tests as tests; tests.x06_existing(app.run); tests.x06_feature(app.run); print('2 public checks passed')\\\"\"",
+    "exit_code": 0,
+    "id": "item_7",
+    "status": "completed",
+    "type": "command_execution"
+  },
+  "type": "item.completed"
+}
+```
+
+## Event 17: item.completed / agent_message
+
+```json
+{
+  "item": {
+    "id": "item_8",
+    "text": "Implemented `run` in [app/service.py](/workspace/app/service.py).\n\nIt now retains public diagnostic fields (`correlation`, `message`, `code`, `error`, `children`), bounds child nesting/count, preserves legacy correlation behavior, and returns `log-error` if writing fails.\n\nPublic checks pass (run directly; `pytest` is not installed).",
+    "type": "agent_message"
+  },
+  "type": "item.completed"
+}
+```
+
+## Event 18: turn.completed
+
+```json
+{
+  "type": "turn.completed",
+  "usage": {
+    "cache_write_input_tokens": 0,
+    "cached_input_tokens": 200192,
+    "input_tokens": 222772,
+    "output_tokens": 3071,
+    "reasoning_output_tokens": 1605
+  }
+}
+```

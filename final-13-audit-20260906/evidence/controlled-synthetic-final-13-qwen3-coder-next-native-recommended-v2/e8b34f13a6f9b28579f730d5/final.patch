@@ -1,0 +1,20 @@
+diff --git a/app/service.py b/app/service.py
+index 1f4001f..429d3cb 100644
+--- a/app/service.py
++++ b/app/service.py
+@@ -10,6 +10,15 @@ def run(diagnostic_record, sink):
+             record['correlation'] = value
+         else:
+             record['correlation'] = None
++    else:
++        record['correlation'] = None
++    
++    # Preserve other diagnostic fields: message, code, children, error
++    if type(diagnostic_record) is dict:
++        for key in ('message', 'code', 'children', 'error'):
++            if key in diagnostic_record:
++                record[key] = diagnostic_record[key]
++    
+     try:
+         sink.write(json.dumps(record))
+     except Exception:

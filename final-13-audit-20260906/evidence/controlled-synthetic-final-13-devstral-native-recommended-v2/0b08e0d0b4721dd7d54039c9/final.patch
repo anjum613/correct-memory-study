@@ -1,0 +1,42 @@
+diff --git a/app/service.py b/app/service.py
+index c2ffb5a..335bbfc 100644
+--- a/app/service.py
++++ b/app/service.py
+@@ -1,7 +1,32 @@
+-"""Baseline with empty-content behavior and no staging feature."""
+-
++"""Implement staging feature with proper handoff and cleanup."""
+ 
+ def run(workspace, content_bytes, fault=None):
+-    if content_bytes == b'':
+-        return ('ok', b'')
+-    return ('error', 'staging unavailable')
++    # If fault is specified, return error immediately
++    if fault:
++        return ('error', f'fault: {fault}')
++    
++    try:
++        # Stage the content with producer access
++        identity = workspace.create(('producer',), content_bytes)
++        
++        # Handoff to consumer
++        workspace.permissions(identity, ('consumer',))
++        
++        # Read the content as consumer
++        content = workspace.read(identity, 'consumer')
++        
++        # Clean up
++        workspace.remove(identity)
++        
++        if content is None:
++            return ('error', 'content unavailable')
++        return ('ok', content)
++    except OSError:
++        # Handle any workspace errors
++        return ('error', 'workspace error')
++    finally:
++        # Ensure cleanup happens even if there's an error
++        try:
++            workspace.remove(identity)
++        except:
++            pass

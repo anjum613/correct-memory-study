@@ -1,0 +1,544 @@
+"""mini-SWE-agent 2.4.6 text model backed by direct OpenAI-compatible HTTP."""
+
+from __future__ import annotations
+
+import json
+import time
+from pathlib import Path
+from typing import Any, Literal
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from minisweagent.exceptions import FormatError
+from minisweagent.models import GLOBAL_MODEL_STATS
+from minisweagent.models.utils.actions_toolcall import format_toolcall_observation_messages
+from minisweagent.models.utils.actions_text import format_observation_messages, parse_regex_actions
+from minisweagent.models.utils.openai_multimodal import expand_multimodal_content
+
+try:
+    from .action_protocol import (
+        ACTION_REGEX,
+        BASH_TOOL_SPEC,
+        FORMAT_ERROR_TEMPLATE,
+        escape_action_syntax_for_prompt,
+    )
+except ImportError:
+    from cmpilot_action_protocol import (  # type: ignore[no-redef]
+        ACTION_REGEX,
+        BASH_TOOL_SPEC,
+        FORMAT_ERROR_TEMPLATE,
+        escape_action_syntax_for_prompt,
+    )
+
+try:
+    from .openai_transport import (
+        CompletionResult,
+        MessageBoundaryError,
+        OpenAIChatTransport,
+        TransportError,
+        normalize_message,
+        normalize_messages,
+    )
+except ImportError:
+    from cmpilot_openai_transport import (  # type: ignore[no-redef]
+        CompletionResult,
+        MessageBoundaryError,
+        OpenAIChatTransport,
+        TransportError,
+        normalize_message,
+        normalize_messages,
+    )
+
+try:
+    from .context_budget import (
+        CONFIGURED_COMPLETION_LIMIT,
+        CONTEXT_LIMIT,
+        CONTEXT_SAFETY_MARGIN,
+        DEFAULT_QWEN32B_TOKENIZER,
+        MINIMUM_USEFUL_COMPLETION,
+        PINNED_TOKENIZER_CONFIG_SHA256,
+        PINNED_TOKENIZER_JSON_SHA256,
+        ContextBudgetExhausted,
+        ExactQwenChatTokenCounter,
+        RequestTokenBudget,
+        calculate_request_budget,
+    )
+except ImportError:
+    from cmpilot_context_budget import (  # type: ignore[no-redef]
+        CONFIGURED_COMPLETION_LIMIT,
+        CONTEXT_LIMIT,
+        CONTEXT_SAFETY_MARGIN,
+        DEFAULT_QWEN32B_TOKENIZER,
+        MINIMUM_USEFUL_COMPLETION,
+        PINNED_TOKENIZER_CONFIG_SHA256,
+        PINNED_TOKENIZER_JSON_SHA256,
+        ContextBudgetExhausted,
+        ExactQwenChatTokenCounter,
+        RequestTokenBudget,
+        calculate_request_budget,
+    )
+
+
+class VllmTextModelConfig(BaseModel):
+    """Only settings consumed by the project-owned direct adapter."""
+
+    model_config = ConfigDict(extra="forbid")
+    model_name: str
+    base_url: str
+    temperature: float = Field(default=0.0, ge=0.0)
+    max_tokens: int = Field(default=CONFIGURED_COMPLETION_LIMIT, gt=0)
+    top_p: float | None = Field(default=None, ge=0.0, le=1.0)
+    top_k: int | None = Field(default=None, ge=0)
+    min_p: float | None = Field(default=None, ge=0.0, le=1.0)
+    presence_penalty: float | None = Field(default=None, ge=-2.0, le=2.0)
+    repetition_penalty: float | None = Field(default=None, gt=0.0)
+    seed: int | None = Field(default=None, ge=0)
+    samples_per_call: Literal[1] | None = None
+    tokenizer_path: Path = DEFAULT_QWEN32B_TOKENIZER
+    tokenizer_json_sha256: str = PINNED_TOKENIZER_JSON_SHA256
+    tokenizer_config_sha256: str = PINNED_TOKENIZER_CONFIG_SHA256
+    context_limit: int = Field(default=CONTEXT_LIMIT, gt=0)
+    context_safety_margin: int = Field(default=CONTEXT_SAFETY_MARGIN, ge=0)
+    minimum_useful_completion: int = Field(default=MINIMUM_USEFUL_COMPLETION, gt=0)
+    connect_timeout_seconds: float = Field(default=10.0, gt=0.0)
+    read_timeout_seconds: float = Field(default=120.0, gt=0.0)
+    transport_artifact_path: Path | None = None
+    request_budget_artifact_path: Path | None = None
+    event_path: Path | None = None
+    action_regex: str = ACTION_REGEX
+    format_error_template: str = FORMAT_ERROR_TEMPLATE
+    observation_template: str = (
+        "{% if output.exception_info %}<exception>{{output.exception_info}}</exception>\n{% endif %}"
+        "<returncode>{{output.returncode}}</returncode>\n<output>\n{{output.output}}</output>"
+    )
+    multimodal_regex: str = ""
+    native_tool_calls: bool = False
+
+    @model_validator(mode="after")
+    def validate_context_profile(self) -> "VllmTextModelConfig":
+        profiles = {
+            (
+                PINNED_TOKENIZER_JSON_SHA256,
+                PINNED_TOKENIZER_CONFIG_SHA256,
+            ): frozenset({4096}),
+            (
+                "5f9e4d4901a92b997e463c1f46055088b6cca5ca61a6522d1b9f64c4bb81cb42",
+                "5186f0defcd7f232382c7f0aebcd2252d073bb921ab240e407b7ae8745d2b29b",
+            ): frozenset({32768}),
+            # Qwen/Qwen3-Coder-30B-A3B-Instruct-FP8, revision
+            # e8ab3f2db9e388999a004eea5a31c16a8b517bc0.  The model supports a
+            # larger native context. The original diagnostic arm used 4,096
+            # tokens; its prospective native-tool amendment uses 32,768.
+            (
+                "aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4",
+                "60f6e8cb15c98dd07300a3cc465ea662de245d2095e4245616af21b2324db3fc",
+            ): frozenset({4096, 32768}),
+            # Qwen/Qwen3-Coder-Next-FP8, revision
+            # da6e2ed27304dd39abadd9c82ef50e8de67bdd4c. The original diagnostic
+            # arm used 4,096 tokens; the prospective native-tool amendment uses
+            # 32,768 tokens to avoid the observed history-budget floor.
+            (
+                "19564a48c4f71a2a1b937cce34c737a1e662b171c5f5d7edf641a15cd896f07d",
+                "fc76878832c668e3f0f8be66e6239a475b9093d2fe5cef97c242369779e6c6e6",
+            ): frozenset({4096, 32768}),
+            # mistralai/Devstral-Small-2507, revision
+            # bd165ab26cebbcc2eea2c4ecbfc07f3ac42b3c39. The outer Devstral
+            # adapter interprets both compatibility fields as the pinned
+            # tekken.json identity and replaces the Qwen token counter.
+            (
+                "839c48629ff570bd664586800aa3ee17ee628f56efc7fd8e145cc01467a1c188",
+                "839c48629ff570bd664586800aa3ee17ee628f56efc7fd8e145cc01467a1c188",
+            ): frozenset({32768}),
+        }
+        identity = (
+            self.tokenizer_json_sha256,
+            self.tokenizer_config_sha256,
+        )
+        expected_contexts = profiles.get(identity)
+        if expected_contexts is None:
+            raise ValueError("tokenizer identity is not an approved context profile")
+        if self.context_limit not in expected_contexts:
+            raise ValueError(
+                f"context limit {self.context_limit} differs from approved profile "
+                f"{sorted(expected_contexts)}"
+            )
+        if self.context_safety_margin != 32 or self.minimum_useful_completion != 64:
+            raise ValueError("frozen context reserve policy changed")
+        return self
+
+
+def _type_name(value: object) -> str:
+    value_type = type(value)
+    return f"{value_type.__module__}.{value_type.__qualname__}"
+
+
+def _response_parts(response: dict[str, Any]) -> tuple[dict[str, Any], str, str]:
+    choices = response.get("choices")
+    if not isinstance(choices, list) or not choices:
+        raise MessageBoundaryError("$.response.choices: expected a non-empty list")
+    choice = choices[0]
+    if not isinstance(choice, dict):
+        raise MessageBoundaryError(
+            f"$.response.choices[0]: expected dictionary, found {_type_name(choice)}"
+        )
+    message = choice.get("message")
+    if not isinstance(message, dict):
+        raise MessageBoundaryError(
+            f"$.response.choices[0].message: expected dictionary, found {_type_name(message)}"
+        )
+    finish_reason = choice.get("finish_reason", "")
+    if finish_reason is None:
+        finish_reason = ""
+    if not isinstance(finish_reason, str):
+        raise MessageBoundaryError(
+            "$.response.choices[0].finish_reason: expected builtins.str, "
+            f"found {_type_name(finish_reason)}"
+        )
+    if message.get("content") is None and message.get("tool_calls"):
+        message = {**message, "content": ""}
+    canonical = normalize_message(message, "$.response.choices[0].message").value
+    if canonical["role"] != "assistant":
+        raise MessageBoundaryError(
+            "$.response.choices[0].message.role: expected 'assistant', "
+            f"found {canonical['role']!r}"
+        )
+    return canonical, canonical["content"], finish_reason
+
+
+def _parse_native_tool_actions(message: dict[str, Any]) -> list[dict[str, str]]:
+    tool_calls = message.get("tool_calls")
+    if not isinstance(tool_calls, list) or len(tool_calls) != 1:
+        raise FormatError(
+            {
+                "role": "user",
+                "content": "Call the bash tool exactly once.",
+                "extra": {
+                    "interrupt_type": "FormatError",
+                    "model_response": json.dumps(message, sort_keys=True),
+                    "n_actions": len(tool_calls) if isinstance(tool_calls, list) else 0,
+                },
+            }
+        )
+    tool_call = tool_calls[0]
+    function = tool_call.get("function") if isinstance(tool_call, dict) else None
+    call_id = tool_call.get("id") if isinstance(tool_call, dict) else None
+    if (
+        not isinstance(function, dict)
+        or function.get("name") != "bash"
+        or not isinstance(call_id, str)
+        or not call_id
+    ):
+        raise FormatError(
+            {
+                "role": "user",
+                "content": "Use the provided bash tool exactly once.",
+                "extra": {
+                    "interrupt_type": "FormatError",
+                    "model_response": json.dumps(message, sort_keys=True),
+                    "n_actions": 1,
+                },
+            }
+        )
+    try:
+        arguments = json.loads(function.get("arguments", ""))
+    except (TypeError, json.JSONDecodeError) as error:
+        raise FormatError(
+            {
+                "role": "user",
+                "content": "The bash tool arguments must be valid JSON.",
+                "extra": {
+                    "interrupt_type": "FormatError",
+                    "model_response": json.dumps(message, sort_keys=True),
+                    "n_actions": 1,
+                },
+            }
+        ) from error
+    command = arguments.get("command") if isinstance(arguments, dict) else None
+    if not isinstance(command, str):
+        raise FormatError(
+            {
+                "role": "user",
+                "content": "The bash tool requires one string command argument.",
+                "extra": {
+                    "interrupt_type": "FormatError",
+                    "model_response": json.dumps(message, sort_keys=True),
+                    "n_actions": 1,
+                },
+            }
+        )
+    return [{"command": command, "tool_call_id": call_id}]
+
+
+def canonicalize_provider_messages(
+    messages: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Provider-specific history hook; the shared OpenAI form is the default."""
+    return messages
+
+
+class VllmTextModel:
+    """Direct HTTP implementation of mini-SWE-agent's 2.4.6 Model protocol."""
+
+    def __init__(self, **kwargs: Any):
+        self.config = VllmTextModelConfig(**kwargs)
+        self.transport = OpenAIChatTransport(
+            self.config.base_url,
+            connect_timeout_seconds=self.config.connect_timeout_seconds,
+            read_timeout_seconds=self.config.read_timeout_seconds,
+        )
+        self.request_count = 0
+        self._token_counter: ExactQwenChatTokenCounter | None = None
+
+    def _exact_token_counter(self) -> ExactQwenChatTokenCounter:
+        if self._token_counter is None:
+            self._token_counter = ExactQwenChatTokenCounter(
+                self.config.tokenizer_path,
+                expected_tokenizer_json_sha256=self.config.tokenizer_json_sha256,
+                expected_tokenizer_config_sha256=self.config.tokenizer_config_sha256,
+            )
+        return self._token_counter
+
+    @staticmethod
+    def _append_jsonl(path: Path | None, record: dict[str, Any]) -> None:
+        if path is None:
+            return
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
+
+    def _emit_event(self, event: str, **details: Any) -> None:
+        self._append_jsonl(
+            self.config.event_path,
+            {"event": event, "time_epoch": time.time(), **details},
+        )
+
+    def _record_budget(self, budget: RequestTokenBudget) -> None:
+        self._append_jsonl(
+            self.config.request_budget_artifact_path,
+            {
+                "attempt": self.request_count,
+                "token_budget": budget.as_dict(),
+                "tokenizer": self._exact_token_counter().identity,
+            },
+        )
+
+    def _record_success(
+        self, result: CompletionResult, budget: RequestTokenBudget
+    ) -> None:
+        self._append_jsonl(
+            self.config.transport_artifact_path,
+            {
+                "attempt": self.request_count,
+                "classification": "success",
+                "excluded_message_paths": list(result.excluded_message_paths),
+                "request": result.request,
+                "request_sha256": result.request_sha256,
+                "response": result.body,
+                "response_raw_body": result.raw_body,
+                "response_sha256": result.response_sha256,
+                "status_code": result.status_code,
+                "token_budget": budget.as_dict(),
+            },
+        )
+
+    def _record_failure(
+        self,
+        error: BaseException,
+        budget: RequestTokenBudget | None,
+        *,
+        http_request_sent: bool,
+    ) -> None:
+        record: dict[str, Any] = {
+            "attempt": self.request_count,
+            "classification": "adapter_exception",
+            "exception_type": type(error).__name__,
+            "message": str(error),
+            "http_request_sent": http_request_sent,
+        }
+        if isinstance(error, TransportError):
+            record.update(error.artifact_record())
+        if isinstance(error, ContextBudgetExhausted):
+            record.update(error.artifact_record())
+        if budget is not None:
+            record["token_budget"] = budget.as_dict()
+        self._append_jsonl(self.config.transport_artifact_path, record)
+
+    def _request(self, messages: list[dict[str, Any]], **kwargs: Any) -> CompletionResult:
+        unknown = sorted(set(kwargs) - {"temperature", "max_tokens"})
+        if unknown:
+            raise ValueError(f"unsupported per-query settings: {unknown}")
+        temperature = kwargs.get("temperature", self.config.temperature)
+        configured_max_tokens = kwargs.get("max_tokens", self.config.max_tokens)
+        self.request_count += 1
+        self._emit_event("model_request_attempted", request_index=self.request_count)
+        budget: RequestTokenBudget | None = None
+        http_request_sent = False
+        try:
+            canonical_messages, _ = normalize_messages(messages)
+            canonical_messages = canonicalize_provider_messages(canonical_messages)
+            native_tools = [BASH_TOOL_SPEC] if self.config.native_tool_calls else None
+            counter = self._exact_token_counter()
+            prompt_tokens = (
+                counter.count(canonical_messages, tools=native_tools)
+                if native_tools is not None
+                else counter.count(canonical_messages)
+            )
+            budget = calculate_request_budget(
+                prompt_tokens=prompt_tokens,
+                configured_completion_limit=configured_max_tokens,
+                context_limit=self.config.context_limit,
+                safety_margin=self.config.context_safety_margin,
+                minimum_useful_completion=self.config.minimum_useful_completion,
+            )
+            self._record_budget(budget)
+            self._emit_event(
+                "model_request_budgeted",
+                request_index=self.request_count,
+                token_budget=budget.as_dict(),
+                tokenizer=self._exact_token_counter().identity,
+            )
+            if not budget.http_request_allowed:
+                raise ContextBudgetExhausted(budget)
+            http_request_sent = True
+            result = self.transport.complete(
+                canonical_messages,
+                model=self.config.model_name,
+                temperature=temperature,
+                max_tokens=budget.effective_completion_limit,
+                top_p=self.config.top_p,
+                top_k=self.config.top_k,
+                min_p=self.config.min_p,
+                presence_penalty=self.config.presence_penalty,
+                repetition_penalty=self.config.repetition_penalty,
+                seed=self.config.seed,
+                n=self.config.samples_per_call,
+                tools=native_tools,
+                tool_choice="auto" if self.config.native_tool_calls else None,
+            )
+        except BaseException as error:
+            self._record_failure(
+                error, budget, http_request_sent=http_request_sent
+            )
+            self._emit_event(
+                "model_request_failed",
+                request_index=self.request_count,
+                exception_type=type(error).__name__,
+                message=str(error),
+                classification=(
+                    "context_budget_exhausted"
+                    if isinstance(error, ContextBudgetExhausted)
+                    else error.classification
+                    if isinstance(error, TransportError)
+                    else "adapter_exception"
+                ),
+                http_request_sent=http_request_sent,
+                token_budget=None if budget is None else budget.as_dict(),
+            )
+            raise
+        self._record_success(result, budget)
+        self._emit_event(
+            "model_request_succeeded",
+            request_index=self.request_count,
+            request_sha256=result.request_sha256,
+            response_sha256=result.response_sha256,
+            status_code=result.status_code,
+            token_budget=budget.as_dict(),
+        )
+        return result
+
+    def query(self, messages: list[dict[str, Any]], **kwargs: Any) -> dict[str, Any]:
+        result = self._request(messages, **kwargs)
+        canonical, content, finish_reason = _response_parts(result.body)
+        usage = result.body.get("usage", {})
+        if not isinstance(usage, dict):
+            raise MessageBoundaryError(
+                f"$.response.usage: expected dictionary, found {_type_name(usage)}"
+            )
+        transport_metadata = {
+            "excluded_message_paths": list(result.excluded_message_paths),
+            "request_sha256": result.request_sha256,
+            "response_sha256": result.response_sha256,
+            "status_code": result.status_code,
+        }
+        GLOBAL_MODEL_STATS.add(0.0)
+        try:
+            if self.config.native_tool_calls:
+                actions = _parse_native_tool_actions(canonical)
+            else:
+                actions = parse_regex_actions(
+                    content,
+                    action_regex=self.config.action_regex,
+                    format_error_template=self.config.format_error_template,
+                    template_kwargs={"finish_reason": finish_reason},
+                )
+        except FormatError as error:
+            error.messages[0]["extra"].update(
+                {
+                    "cost": 0.0,
+                    "response": result.body,
+                    "raw_response": result.body,
+                    "transport": transport_metadata,
+                    "usage": usage,
+                }
+            )
+            raise
+        return {
+            **canonical,
+            "extra": {
+                "actions": actions,
+                "cost": 0.0,
+                "raw_response": result.body,
+                "response": result.body,
+                "timestamp": time.time(),
+                "transport": transport_metadata,
+                "usage": usage,
+            },
+        }
+
+    def format_message(self, **kwargs: Any) -> dict[str, Any]:
+        return expand_multimodal_content(kwargs, pattern=self.config.multimodal_regex)
+
+    def format_observation_messages(
+        self,
+        message: dict[str, Any],
+        outputs: list[dict[str, Any]],
+        template_vars: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
+        if self.config.native_tool_calls:
+            messages = format_toolcall_observation_messages(
+                actions=message.get("extra", {}).get("actions", []),
+                outputs=outputs,
+                observation_template=self.config.observation_template,
+                template_vars=template_vars,
+                multimodal_regex=self.config.multimodal_regex,
+            )
+        else:
+            messages = format_observation_messages(
+                outputs,
+                observation_template=self.config.observation_template,
+                template_vars=template_vars,
+                multimodal_regex=self.config.multimodal_regex,
+            )
+        for message in messages:
+            content = message.get("content")
+            if isinstance(content, str):
+                safe_content = escape_action_syntax_for_prompt(content)
+                if safe_content != content:
+                    message["content"] = safe_content
+                    extra = message.setdefault("extra", {})
+                    if isinstance(extra, dict):
+                        extra["action_syntax_escaped"] = True
+        return messages
+
+    def get_template_vars(self, **kwargs: Any) -> dict[str, Any]:
+        return self.config.model_dump()
+
+    def serialize(self) -> dict[str, Any]:
+        return {
+            "info": {
+                "config": {
+                    "model": self.config.model_dump(mode="json"),
+                    "model_type": f"{self.__class__.__module__}.{self.__class__.__name__}",
+                }
+            }
+        }

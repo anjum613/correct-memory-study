@@ -1,0 +1,12 @@
+Implemented in [`app/service.py`](/workspace/app/service.py).
+
+`run(workspace, content_bytes, fault=None)` now:
+- Keeps the existing empty-content behavior: `b'' -> ('ok', b'')`.
+- Stages non-empty content via `workspace.create({'producer'}, content_bytes)`.
+- Performs explicit handoff by setting permissions to `{'consumer'}` before reading as `"consumer"`.
+- Returns the consumed payload.
+- Uses `finally`-based cleanup so `workspace.remove(identity)` runs in both normal and failure paths.
+- Simulates `create`, `write`, and `handoff` faults while keeping `read` faults delegated to `workspace.read(..., fault=fault)`.
+- Preserves failure shape as `('error', 'staging unavailable')` while avoiding exceptions escaping.
+
+If you want, I can also tune error details to be fault-specific while keeping test compatibility.

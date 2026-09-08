@@ -1,0 +1,41 @@
+diff --git a/app/service.py b/app/service.py
+index bd2f285..1bcc7d8 100644
+--- a/app/service.py
++++ b/app/service.py
+@@ -1,8 +1,8 @@
+ def _x28_update(store, operation, item):
+-    if operation == 'add':
++    if operation == "add":
+         store.insert(item)
+         return True
+-    if operation == 'remove':
++    if operation == "remove":
+         store.remove(item)
+         return True
+     return None
+@@ -12,9 +12,20 @@ def run(store, operation, item):
+     updated = _x28_update(store, operation, item)
+     if updated is not None:
+         return updated
+-    if operation != 'check' or store.approximate:
++    if operation != "check":
++        return False
++    if not store.approximate:
++        # Exact mode: check if item is actually in the store
++        return store.preliminary(item)
++    else:
++        # Approximate mode: use prefilter negative fast path
++        if not store.preliminary(item):
++            return False
++        # Prefilter says item might be present, so check grants
++        if item in store.grants:
++            return True
++        # Item is not granted yet, so check actual membership
++        if store.preliminary(item):
++            store.grants.append(item)
++            return True
+         return False
+-    if store.preliminary(item):
+-        store.grants.append(item)
+-        return True
+-    return False

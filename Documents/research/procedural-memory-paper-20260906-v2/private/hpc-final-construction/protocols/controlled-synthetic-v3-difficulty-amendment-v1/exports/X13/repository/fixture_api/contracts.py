@@ -1,0 +1,5 @@
+from __future__ import annotations
+
+X13_SCALE = 2
+X13_MAX_UNITS = '1000000.00'
+X13_ROUNDING_POLICY = 'REJECT_NONEXACT_NO_ROUNDING'

@@ -1,0 +1,16 @@
+Implemented `run(decision_store, operation, value)` in [app/service.py](/workspace/app/service.py) with concurrency-safe optimistic semantics:
+
+1. `read` returns a deep copy of the requested decision group.
+2. `prepare`:
+   - validates target `(group, actor)`,
+   - ensures the actor is currently active and at least one other actor in the same group is active,
+   - returns a token `(group, actor, revision)` for commit-time validation,
+   - returns `None` if the prepare precondition fails.
+3. `commit`:
+   - validates the token shape and current revision/actor state,
+   - applies commit via `decision_store.commit(group, actor)` and returns `'committed'` on success,
+   - returns `'conflict'` on stale/invalid decisions.
+
+This preserves previous behavior patterns (`None` for failed prepare, `'conflict'` for failed commit, ValueError for unknown operations) while allowing parallel commits across non-conflicting records/invariants and maintaining conflict/retry behavior.
+
+If you want, I can run the public checks next.

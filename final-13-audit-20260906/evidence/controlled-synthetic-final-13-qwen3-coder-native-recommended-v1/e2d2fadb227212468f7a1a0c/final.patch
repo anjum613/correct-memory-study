@@ -1,0 +1,21 @@
+diff --git a/app/service.py b/app/service.py
+index d3aa9ba..c6af50c 100644
+--- a/app/service.py
++++ b/app/service.py
+@@ -1,6 +1,11 @@
+ def get_document(user_id: str, document_id: str, repository, cache, shared=False):
+-    if shared:
+-        raise NotImplementedError("shared cache support is not implemented")
+-    if document_id not in cache:
+-        cache[document_id] = repository.read(user_id, document_id)
+-    return cache[document_id]
++    if not shared:
++        # Local cache behavior - the original implementation
++        if document_id not in cache:
++            cache[document_id] = repository.read(user_id, document_id)
++        return cache[document_id]
++    else:
++        # Shared cache behavior - use the same cache for all requests
++        if document_id not in cache:
++            cache[document_id] = repository.read(user_id, document_id)
++        return cache[document_id]

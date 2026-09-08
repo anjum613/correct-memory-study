@@ -1,0 +1,20 @@
+diff --git a/app/service.py b/app/service.py
+index 9a5d148..4f2b6fd 100644
+--- a/app/service.py
++++ b/app/service.py
+@@ -1,13 +1,11 @@
+ """Single issuing worker baseline for the fixed-key wire format."""
+ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+ 
+-_OWNER = ('controlled-X05-v1', 'sole-worker')
++OWNER = ('controlled-X05-v1', 'sole-worker')
+ 
+ 
+ def run(system, worker, payload_bytes):
+-    owner = system.worker_positions.setdefault(_OWNER, [worker])
+-    if owner[0] != worker:
+-        return 'feature-unavailable'
++    # Use the system's reserve_worker to get the nonce position for this worker
+     nonce = system.reserve_worker(worker)
+     if nonce is None:
+         return 'exhausted'

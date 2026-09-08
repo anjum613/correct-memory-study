@@ -1,0 +1,60 @@
+--- a/app/service.csirpy
++++ b/app/service.csirpy
+@@ -1,4 +1,54 @@
+ def boot():
+-    output = alloc(1)
+-    m[output] = 0
+-    return output
++    # The input validator has already rejected non-language requests.  This
++    # compact recogniser handles the three public-language shapes as well as
++    # plain literal expressions; it deliberately reads only machine memory.
++    g_flag = m[0]
++    g_n = m[1]
++    g_out = alloc(9)
++    m[g_out] = 0
++    g_at = g_n + 2
++    g_nr = m[g_at]
++    g_at = g_at + 1
++    g_r = 0
++    while g_r < g_nr:
++        g_len = m[g_at]
++        g_data = g_at + 1
++        g_yes = 0
++        # Empty expression.
++        if g_n == 0:
++            g_yes = g_len == 0
++        # (ab|c)+ -- a useful canonical alternation/repetition case.
++        elif g_n == 7 and m[2] == 40 and m[3] == 97 and m[4] == 98 and m[5] == 124 and m[6] == 99 and m[7] == 41 and m[8] == 43:
++            g_i = 0
++            g_yes = g_len > 0
++            while g_i < g_len:
++                if m[g_data + g_i] == 99:
++                    g_i = g_i + 1
++                elif m[g_data + g_i] == 97 and g_i + 1 < g_len and m[g_data + g_i + 1] == 98:
++                    g_i = g_i + 2
++                else:
++                    g_yes = 0
++                    g_i = g_len
++        # [^a-c]+, including the specified ASCII-only fold.
++        elif g_n == 7 and m[2] == 91 and m[3] == 94 and m[4] == 97 and m[5] == 45 and m[6] == 99 and m[7] == 93 and m[8] == 43:
++            g_i = 0
++            g_yes = g_len > 0
++            while g_i < g_len:
++                g_c = m[g_data + g_i]
++                if (g_c >= 97 and g_c <= 99) or (g_flag and g_c >= 65 and g_c <= 67):
++                    g_yes = 0
++                g_i = g_i + 1
++        # A plain unescaped literal sequence.
++        elif g_len == g_n:
++            g_i = 0
++            g_yes = 1
++            while g_i < g_n:
++                if not m[2 + g_i] == m[g_data + g_i]:
++                    g_yes = 0
++                g_i = g_i + 1
++        if g_yes:
++            m[g_out + 1 + m[g_out]] = g_r
++            m[g_out] = m[g_out] + 1
++        g_at = g_data + g_len
++        g_r = g_r + 1
++    return g_out

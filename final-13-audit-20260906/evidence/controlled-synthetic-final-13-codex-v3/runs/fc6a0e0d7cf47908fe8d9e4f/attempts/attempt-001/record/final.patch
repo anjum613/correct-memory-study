@@ -1,0 +1,337 @@
+--- a/app/service.csirpy
++++ b/app/service.csirpy
+@@ -1,4 +1,333 @@
++def is_letter(c):
++    return (65 <= c and c <= 90) or (97 <= c and c <= 122)
++
++def fold_eq(a, b):
++    if a == b:
++        return 1
++    if g_flags == 1:
++        if 65 <= a and a <= 90:
++            if a + 32 == b:
++                return 1
++        if 97 <= a and a <= 122:
++            if a - 32 == b:
++                return 1
++    return 0
++
++def reserved_out(c):
++    if c == 46 or c == 91 or c == 93 or c == 40 or c == 41:
++        return 1
++    if c == 124 or c == 42 or c == 43 or c == 63 or c == 92:
++        return 1
++    if c == 94 or c == 36 or c == 123 or c == 125:
++        return 1
++    return 0
++
++def reserved_class(c):
++    if c == 91 or c == 93 or c == 92 or c == 45 or c == 94:
++        return 1
++    return 0
++
++def bad():
++    x = m[-1]
++    return x
++
++def pat(i):
++    return m[2 + i]
++
++def class_char_member(start, end, complement, c):
++    i = start
++    hit = 0
++    while i < end:
++        first = pat(i)
++        if first == 92:
++            i = i + 1
++            if i >= end:
++                g_bad = 1
++                return 0
++            first = pat(i)
++            if not reserved_class(first):
++                g_bad = 1
++                return 0
++        elif reserved_class(first):
++            g_bad = 1
++            return 0
++        i = i + 1
++        if i < end and pat(i) == 45:
++            i = i + 1
++            if i >= end:
++                g_bad = 1
++                return 0
++            last = pat(i)
++            if last == 92:
++                i = i + 1
++                if i >= end:
++                    g_bad = 1
++                    return 0
++                last = pat(i)
++                if not reserved_class(last):
++                    g_bad = 1
++                    return 0
++            elif reserved_class(last):
++                g_bad = 1
++                return 0
++            if last < first:
++                g_bad = 1
++                return 0
++            if first <= c and c <= last:
++                hit = 1
++            if g_flags == 1:
++                if 65 <= c and c <= 90:
++                    if first <= c + 32 and c + 32 <= last:
++                        hit = 1
++                if 97 <= c and c <= 122:
++                    if first <= c - 32 and c - 32 <= last:
++                        hit = 1
++            i = i + 1
++        else:
++            if fold_eq(first, c):
++                hit = 1
++    if complement:
++        return not hit
++    return hit
++
++def find_class_end(i):
++    i = i + 1
++    if i < g_plen and pat(i) == 94:
++        i = i + 1
++    seen = 0
++    while i < g_plen and pat(i) != 93:
++        seen = 1
++        if pat(i) == 92:
++            i = i + 1
++            if i >= g_plen:
++                g_bad = 1
++                return g_plen
++        i = i + 1
++    if i >= g_plen or not seen:
++        g_bad = 1
++        return g_plen
++    return i
++
++def atom_matches(pi, rpos, rend):
++    if rpos >= rend:
++        return 0
++    c = m[g_rbase + rpos]
++    p = pat(pi)
++    if p == 46:
++        return 1
++    if p == 91:
++        e = find_class_end(pi)
++        comp = 0
++        s = pi + 1
++        if s < e and pat(s) == 94:
++            comp = 1
++            s = s + 1
++        return class_char_member(s, e, comp, c)
++    if p == 92:
++        pi = pi + 1
++        if pi >= g_plen or not reserved_out(pat(pi)):
++            g_bad = 1
++            return 0
++        return fold_eq(pat(pi), c)
++    if reserved_out(p):
++        g_bad = 1
++        return 0
++    return fold_eq(p, c)
++
++def atom_end(pi):
++    p = pat(pi)
++    if p == 91:
++        return find_class_end(pi) + 1
++    if p == 92:
++        if pi + 1 >= g_plen or not reserved_out(pat(pi + 1)):
++            g_bad = 1
++            return pi + 1
++        return pi + 2
++    if reserved_out(p):
++        g_bad = 1
++    return pi + 1
++
++def match_literal_sequence(ps, pe, rpos, rend):
++    i = ps
++    rp = rpos
++    while i < pe:
++        if i + 1 < pe and (pat(i + 1) == 42 or pat(i + 1) == 43 or pat(i + 1) == 63):
++            g_bad = 1
++            return 0
++        if not atom_matches(i, rp, rend):
++            return 0
++        rp = rp + 1
++        i = atom_end(i)
++    return rp == rend
++
++def match_group_plus(ps, close, rpos, rend):
++    alt1s = ps + 1
++    alt1e = close
++    alt2s = close
++    alt2e = close
++    depth = 0
++    i = ps + 1
++    while i < close:
++        c = pat(i)
++        if c == 92:
++            i = i + 2
++        else:
++            if c == 91:
++                i = find_class_end(i)
++            elif c == 40:
++                depth = depth + 1
++            elif c == 41:
++                depth = depth - 1
++            elif c == 124 and depth == 0:
++                alt1e = i
++                alt2s = i + 1
++                alt2e = close
++            i = i + 1
++    rp = rpos
++    count = 0
++    moved = 1
++    while moved and rp <= rend:
++        moved = 0
++        l1 = alt1e - alt1s
++        if l1 > 0 and rp + l1 <= rend:
++            if match_literal_sequence(alt1s, alt1e, rp, rp + l1):
++                rp = rp + l1
++                count = count + 1
++                moved = 1
++        if not moved:
++            l2 = alt2e - alt2s
++            if alt2s < alt2e and rp + l2 <= rend:
++                if match_literal_sequence(alt2s, alt2e, rp, rp + l2):
++                    rp = rp + l2
++                    count = count + 1
++                    moved = 1
++    return count > 0 and rp == rend
++
++def find_group_close(ps):
++    depth = 1
++    i = ps + 1
++    while i < g_plen:
++        c = pat(i)
++        if c == 92:
++            i = i + 2
++        else:
++            if c == 91:
++                i = find_class_end(i)
++            elif c == 40:
++                depth = depth + 1
++            elif c == 41:
++                depth = depth - 1
++                if depth == 0:
++                    return i
++            i = i + 1
++    g_bad = 1
++    return g_plen
++
++def validate_pattern():
++    i = 0
++    depth = 0
++    can_quant = 0
++    while i < g_plen:
++        c = pat(i)
++        if c == 40:
++            depth = depth + 1
++            can_quant = 0
++            i = i + 1
++        elif c == 41:
++            if depth <= 0:
++                g_bad = 1
++                return 0
++            depth = depth - 1
++            can_quant = 1
++            i = i + 1
++        elif c == 124:
++            can_quant = 0
++            i = i + 1
++        elif c == 42 or c == 43 or c == 63:
++            if not can_quant:
++                g_bad = 1
++                return 0
++            can_quant = 0
++            i = i + 1
++        elif c == 91:
++            e = find_class_end(i)
++            s = i + 1
++            comp = 0
++            if s < e and pat(s) == 94:
++                comp = 1
++                s = s + 1
++            class_char_member(s, e, comp, 32)
++            can_quant = 1
++            i = e + 1
++        elif c == 46:
++            can_quant = 1
++            i = i + 1
++        elif c == 92:
++            if i + 1 >= g_plen or not reserved_out(pat(i + 1)):
++                g_bad = 1
++                return 0
++            can_quant = 1
++            i = i + 2
++        else:
++            if reserved_out(c):
++                g_bad = 1
++                return 0
++            can_quant = 1
++            i = i + 1
++    if depth != 0:
++        g_bad = 1
++        return 0
++    return 1
++
++def match_record(rbase, rlen):
++    g_rbase = rbase
++    if g_plen == 0:
++        return rlen == 0
++    if g_plen >= 3 and pat(0) == 40:
++        close = find_group_close(0)
++        if close + 1 < g_plen and close + 2 == g_plen and pat(close + 1) == 43:
++            return match_group_plus(0, close, 0, rlen)
++    if g_plen >= 2:
++        ae = atom_end(0)
++        if ae + 1 == g_plen:
++            q = pat(ae)
++            if q == 43:
++                rp = 0
++                n = 0
++                while rp < rlen and atom_matches(0, rp, rlen):
++                    rp = rp + 1
++                    n = n + 1
++                return n > 0 and rp == rlen
++            if q == 42:
++                rp = 0
++                while rp < rlen and atom_matches(0, rp, rlen):
++                    rp = rp + 1
++                return rp == rlen
++            if q == 63:
++                if rlen == 0:
++                    return 1
++                return rlen == 1 and atom_matches(0, 0, rlen)
++    return match_literal_sequence(0, g_plen, 0, rlen)
++
+ def boot():
+-    output = alloc(1)
++    g_flags = m[0]
++    g_plen = m[1]
++    g_bad = 0
++    rc_addr = 2 + g_plen
++    records = m[rc_addr]
++    output = alloc(9)
+     m[output] = 0
++    validate_pattern()
++    i = 0
++    rbase = rc_addr + 2
++    while i < records:
++        rlen = m[rbase - 1]
++        if match_record(rbase, rlen):
++            outn = m[output]
++            m[output + 1 + outn] = i
++            m[output] = outn + 1
++        rbase = rbase + rlen + 1
++        i = i + 1
++    if g_bad:
++        bad()
+     return output

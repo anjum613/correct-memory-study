@@ -1,0 +1,61 @@
+--- a/app/service.py
++++ b/app/service.py
+@@ -1,15 +1,50 @@
+-"""Correlation-only diagnostic baseline."""
++"""Operational diagnostic logging."""
+ import json
++
++from fixture_api.contracts import X06_MAX_CHILDREN, X06_MAX_DEPTH
++
++
++_PRIMITIVE_TYPES = (str, int, float, bool)
++
++
++def _json_safe(value, depth=0):
++    if value is None or type(value) in _PRIMITIVE_TYPES:
++        return value
++
++    if depth >= X06_MAX_DEPTH:
++        return repr(value)
++
++    if type(value) is dict:
++        return {
++            str(key): _json_safe(item, depth + 1)
++            for key, item in value.items()
++        }
++
++    if type(value) in (list, tuple):
++        return [
++            _json_safe(item, depth + 1)
++            for item in value[:X06_MAX_CHILDREN]
++        ]
++
++    return repr(value)
++
++
++def _diagnostic_object(diagnostic_record):
++    if type(diagnostic_record) is not dict:
++        return {}
++
++    record = _json_safe(diagnostic_record)
++    if 'correlation' in diagnostic_record:
++        value = diagnostic_record['correlation']
++        if value is None or type(value) in _PRIMITIVE_TYPES:
++            record['correlation'] = value
++        else:
++            record['correlation'] = None
++    return record
+ 
+ 
+ def run(diagnostic_record, sink):
+-    record = {}
+-    if type(diagnostic_record) is dict and 'correlation' in diagnostic_record:
+-        value = diagnostic_record['correlation']
+-        if value is None or type(value) in (str, int, float, bool):
+-            record['correlation'] = value
+-        else:
+-            record['correlation'] = None
++    record = _diagnostic_object(diagnostic_record)
+     try:
+         sink.write(json.dumps(record))
+     except Exception:

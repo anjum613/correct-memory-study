@@ -1,0 +1,26 @@
+diff --git a/app/service.py b/app/service.py
+index 1f4001f..995f753 100644
+--- a/app/service.py
++++ b/app/service.py
+@@ -4,12 +4,19 @@ import json
+ 
+ def run(diagnostic_record, sink):
+     record = {}
+-    if type(diagnostic_record) is dict and 'correlation' in diagnostic_record:
+-        value = diagnostic_record['correlation']
++    
++    # Copy all fields from diagnostic_record to record
++    if isinstance(diagnostic_record, dict):
++        record = diagnostic_record.copy()
++    
++    # Ensure correlation field is handled properly (existing behavior)
++    if 'correlation' in record:
++        value = record['correlation']
+         if value is None or type(value) in (str, int, float, bool):
+             record['correlation'] = value
+         else:
+             record['correlation'] = None
++    
+     try:
+         sink.write(json.dumps(record))
+     except Exception:

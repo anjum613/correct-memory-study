@@ -1,0 +1,34 @@
+"""Staging-backed service runner."""
+
+
+def run(workspace, content_bytes, fault=None):
+    if content_bytes == b'':
+        return ('ok', b'')
+
+    staging_identity = None
+    try:
+        if fault == 'create':
+            raise OSError('controlled create failure')
+
+        staging_identity = workspace.create(workspace.default_readers, content_bytes)
+
+        if fault == 'write':
+            raise OSError('controlled write failure')
+
+        workspace.permissions(staging_identity, {'consumer'})
+        if fault == 'handoff':
+            raise OSError('controlled handoff failure')
+
+        handoff = workspace.read(
+            staging_identity,
+            'consumer',
+            fault='read' if fault == 'read' else None
+        )
+        if handoff is None:
+            return ('error', 'consumer cannot read')
+        return ('ok', handoff)
+    except BaseException:
+        return ('error', 'staging unavailable')
+    finally:
+        if staging_identity is not None:
+            workspace.remove(staging_identity)

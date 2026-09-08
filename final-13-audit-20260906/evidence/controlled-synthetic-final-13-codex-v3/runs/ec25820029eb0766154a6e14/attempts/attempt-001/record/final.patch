@@ -1,0 +1,28 @@
+--- a/app/service.py
++++ b/app/service.py
+@@ -1,15 +1,17 @@
+-"""Correlation-only diagnostic baseline."""
++"""Diagnostic serialization baseline."""
+ import json
+ 
+ 
+ def run(diagnostic_record, sink):
+-    record = {}
+-    if type(diagnostic_record) is dict and 'correlation' in diagnostic_record:
+-        value = diagnostic_record['correlation']
+-        if value is None or type(value) in (str, int, float, bool):
+-            record['correlation'] = value
+-        else:
+-            record['correlation'] = None
++    if type(diagnostic_record) is dict:
++        record = diagnostic_record.copy()
++        if 'correlation' in record:
++            value = record['correlation']
++            if not (value is None or type(value) in (str, int, float, bool)):
++                record['correlation'] = None
++    else:
++        record = {}
++
+     try:
+         sink.write(json.dumps(record))
+     except Exception:

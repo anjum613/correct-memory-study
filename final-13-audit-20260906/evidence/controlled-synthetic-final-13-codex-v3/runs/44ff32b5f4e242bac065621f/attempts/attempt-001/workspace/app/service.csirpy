@@ -1,0 +1,207 @@
+def fold(c):
+    if 65 <= c and c <= 90:
+        return c + 32
+    return c
+
+def alpha(c):
+    return (65 <= c and c <= 90) or (97 <= c and c <= 122)
+
+def same(a, b):
+    if m[0] == 1 and alpha(a) and alpha(b):
+        return fold(a) == fold(b)
+    return a == b
+
+def reserved(c):
+    return c == 46 or c == 91 or c == 93 or c == 40 or c == 41 or c == 124 or c == 42 or c == 43 or c == 63 or c == 92 or c == 94 or c == 36 or c == 123 or c == 125
+
+def class_reserved(c):
+    return c == 91 or c == 93 or c == 92 or c == 45 or c == 94
+
+def bad():
+    return 0
+
+def literal_at(pp, rp, n):
+    i = 0
+    while i < n:
+        if not same(m[2 + pp + i], m[g_rbase + rp + i]):
+            return 0
+        i = i + 1
+    return 1
+
+def match_literal_record(rbase, rlen):
+    g_rbase = rbase
+    pp = 0
+    rp = 0
+    while pp < m[1]:
+        c = m[2 + pp]
+        if c == 92:
+            pp = pp + 1
+            if pp >= m[1] or not reserved(m[2 + pp]):
+                return 0
+            c = m[2 + pp]
+        elif reserved(c):
+            return 0
+        if rp >= rlen or not same(c, m[rbase + rp]):
+            return 0
+        pp = pp + 1
+        rp = rp + 1
+    return rp == rlen
+
+def class_add(base, c):
+    m[base + c - 32] = 1
+    if m[0] == 1 and alpha(c):
+        if 65 <= c and c <= 90:
+            m[base + c] = 1
+        else:
+            m[base + c - 64] = 1
+    return 0
+
+def parse_class(base):
+    i = 0
+    while i < 95:
+        m[base + i] = 0
+        i = i + 1
+    g_pos = 1
+    comp = 0
+    any = 0
+    if g_pos < m[1] and m[2 + g_pos] == 94:
+        comp = 1
+        g_pos = g_pos + 1
+    while g_pos < m[1] and m[2 + g_pos] != 93:
+        first = m[2 + g_pos]
+        g_pos = g_pos + 1
+        if first == 92:
+            if g_pos >= m[1] or not class_reserved(m[2 + g_pos]):
+                return 0
+            first = m[2 + g_pos]
+            g_pos = g_pos + 1
+        elif class_reserved(first):
+            return 0
+        if g_pos < m[1] and m[2 + g_pos] == 45:
+            g_pos = g_pos + 1
+            if g_pos >= m[1]:
+                return 0
+            last = m[2 + g_pos]
+            g_pos = g_pos + 1
+            if last == 92:
+                if g_pos >= m[1] or not class_reserved(m[2 + g_pos]):
+                    return 0
+                last = m[2 + g_pos]
+                g_pos = g_pos + 1
+            elif class_reserved(last):
+                return 0
+            if last < first:
+                return 0
+            c = first
+            while c <= last:
+                class_add(base, c)
+                c = c + 1
+        else:
+            class_add(base, first)
+        any = 1
+    if not any or g_pos >= m[1] or m[2 + g_pos] != 93:
+        return 0
+    g_pos = g_pos + 1
+    if comp:
+        i = 0
+        while i < 95:
+            m[base + i] = not m[base + i]
+            i = i + 1
+    if g_pos != m[1] - 1 or m[2 + g_pos] != 43:
+        return 0
+    return 1
+
+def match_class_plus(base, rbase, rlen):
+    if rlen <= 0:
+        return 0
+    i = 0
+    while i < rlen:
+        c = m[rbase + i]
+        if not m[base + c - 32]:
+            return 0
+        i = i + 1
+    return 1
+
+def parse_group_plus():
+    # Handles grouped alternatives of literal atoms followed by +, e.g. (ab|c)+.
+    if m[1] < 4 or m[2] != 40 or m[2 + m[1] - 2] != 41 or m[2 + m[1] - 1] != 43:
+        return 0
+    g_alt_count = 1
+    g_alt_start = alloc(16)
+    g_alt_len = alloc(16)
+    m[g_alt_start] = 1
+    cur = 0
+    p = 1
+    while p < m[1] - 2:
+        c = m[2 + p]
+        if c == 124:
+            m[g_alt_len + cur] = p - m[g_alt_start + cur]
+            cur = cur + 1
+            g_alt_count = g_alt_count + 1
+            m[g_alt_start + cur] = p + 1
+        elif c == 92:
+            p = p + 1
+            if p >= m[1] - 2 or not reserved(m[2 + p]):
+                return 0
+        elif reserved(c):
+            return 0
+        p = p + 1
+    m[g_alt_len + cur] = p - m[g_alt_start + cur]
+    return 1
+
+def match_group_plus(rbase, rlen):
+    if rlen <= 0:
+        return 0
+    g_rbase = rbase
+    pos = 0
+    while pos < rlen:
+        found = 0
+        a = 0
+        while a < g_alt_count and not found:
+            n = m[g_alt_len + a]
+            if n > 0 and pos + n <= rlen and literal_at(m[g_alt_start + a], pos, n):
+                pos = pos + n
+                found = 1
+            a = a + 1
+        if not found:
+            return 0
+    return 1
+
+def boot():
+    out = alloc(9)
+    cls = alloc(95)
+    mode = 0
+    if m[1] == 0:
+        mode = 1
+    elif m[2] == 91:
+        if parse_class(cls):
+            mode = 2
+    elif m[2] == 40:
+        if parse_group_plus():
+            mode = 3
+    else:
+        mode = 4
+    if mode == 0:
+        return bad()
+    rec_count_addr = 2 + m[1]
+    rec_count = m[rec_count_addr]
+    m[out] = 0
+    raddr = rec_count_addr + 1
+    idx = 0
+    while idx < rec_count:
+        rlen = m[raddr]
+        ok = 0
+        if mode == 1:
+            ok = rlen == 0
+        elif mode == 2:
+            ok = match_class_plus(cls, raddr + 1, rlen)
+        elif mode == 3:
+            ok = match_group_plus(raddr + 1, rlen)
+        else:
+            ok = match_literal_record(raddr + 1, rlen)
+        if ok:
+            m[out + 1 + m[out]] = idx
+            m[out] = m[out] + 1
+        raddr = raddr + 1 + rlen
+        idx = idx + 1
+    return out

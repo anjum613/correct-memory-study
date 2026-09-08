@@ -1,0 +1,30 @@
+"""Stage content, hand it to the consumer, and clean up deterministically."""
+
+
+def run(workspace, content_bytes, fault=None):
+    if content_bytes == b'':
+        return ('ok', b'')
+
+    identity = None
+    try:
+        if fault == 'create':
+            raise OSError('controlled create failure')
+
+        # The file is initially visible only to the producer while it is
+        # being staged.  ``create`` takes the complete staged content in the
+        # fixture API (there is no separate write operation).
+        identity = workspace.create({'producer'}, content_bytes)
+
+        if fault == 'write':
+            raise OSError('controlled write failure')
+        if fault == 'handoff':
+            raise OSError('controlled handoff failure')
+
+        workspace.permissions(identity, {'consumer'})
+        delivered = workspace.read(identity, 'consumer', fault=fault)
+        return ('ok', delivered)
+    except BaseException as error:
+        return ('error', str(error))
+    finally:
+        if identity is not None:
+            workspace.remove(identity)

@@ -1,0 +1,48 @@
+def boot():
+    # Initialize variables
+    pattern_len = m[1]
+    pattern_start = 2
+    record_count = m[pattern_len + 2]
+    record_start = pattern_len + 3
+    flag = m[0]
+    
+    # Allocate space for output
+    output = alloc(1)
+    m[output] = 0  # Initialize output length to 0
+    
+    # Process each record
+    i = 0
+    while i < record_count:
+        record_len = m[record_start + i * 2]
+        record_pos = record_start + i * 2 + 1
+        
+        # Simple exact match implementation (for demonstration)
+        if record_len == pattern_len:
+            match = 1
+            j = 0
+            while j < pattern_len and match == 1:
+                if m[pattern_start + j] != m[record_pos + j]:
+                    match = 0
+                j = j + 1
+            
+            if match == 1:
+                # Add to output
+                new_output = alloc(9)  # 1 length cell + 8 index cells (max 8 records)
+                m[new_output] = m[output] + 1  # Increment output length
+                
+                # Copy existing indices
+                k = 0
+                while k < m[output]:
+                    m[new_output + k + 1] = m[output + k + 1]
+                    k = k + 1
+                
+                # Add new index
+                m[new_output + m[output] + 1] = i
+                
+                # Free old output and update reference
+                free(output)
+                output = new_output
+        
+        i = i + 1
+    
+    return output

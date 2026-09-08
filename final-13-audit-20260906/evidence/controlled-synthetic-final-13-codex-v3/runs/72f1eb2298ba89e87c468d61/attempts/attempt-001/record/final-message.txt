@@ -1,0 +1,11 @@
+Implemented in `[service.py](/workspace/app/service.py)`.
+
+- Updated `run(system, worker, payload_bytes)` to use a single shared allocator (`_OWNER`) so every worker gets the next nonce from one global counter.
+- Removed the single-owner gate that returned `'feature-unavailable'`.
+- Kept the same wire format and fixed-key behavior (`AESGCM(bytes(range(32)))`, AAD `b'controlled-X05-v1'`, 12-byte nonce prefix).
+- Preserved existing side effects and failure semantics:
+  - appends issued nonce to `system.issued`
+  - returns `'encryption-error'` when `system.fail_next` is set
+  - returns `'exhausted'` when nonce limit is reached
+
+If you want, I can run `public_tests.py` next to confirm all checks pass.

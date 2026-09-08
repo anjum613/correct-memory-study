@@ -1,0 +1,363 @@
+def state(t, x, y, a, b, c):
+    z = g_s
+    g_s = g_s + 1
+    q = g_mem + z * 6
+    m[q] = t
+    m[q + 1] = x
+    m[q + 2] = y
+    m[q + 3] = a
+    m[q + 4] = b
+    m[q + 5] = c
+    return z
+
+def frag(a, b):
+    q = g_mem + 800 + g_f * 2
+    m[q] = a
+    m[q + 1] = b
+    g_f = g_f + 1
+    return 0
+
+def eps():
+    x = state(0, 0, 0, 0, 0, 0)
+    frag(x, x)
+    return 0
+
+def link(a, b):
+    m[g_mem + a * 6 + 1] = b
+    return 0
+
+def reduce(op):
+    g_f = g_f - 1
+    q = g_mem + 800 + g_f * 2
+    rs = m[q]
+    re = m[q + 1]
+    g_f = g_f - 1
+    q = g_mem + 800 + g_f * 2
+    ls = m[q]
+    le = m[q + 1]
+    if op == 2:
+        link(le, rs)
+        frag(ls, re)
+    if op == 3:
+        e = state(0, 0, 0, 0, 0, 0)
+        s = state(0, ls, rs, 0, 0, 0)
+        link(le, e)
+        link(re, e)
+        frag(s, e)
+    return 0
+
+def oper(op):
+    p = 3
+    if op == 3:
+        p = 2
+    more = 1
+    while more and g_o:
+        old = m[g_mem + 1100 + g_o - 1]
+        po = 1
+        if old == 2:
+            po = 3
+        if old == 3:
+            po = 2
+        if old != 1 and po >= p:
+            g_o = g_o - 1
+            reduce(old)
+        else:
+            more = 0
+    m[g_mem + 1100 + g_o] = op
+    g_o = g_o + 1
+    return 0
+
+def outer(c):
+    answer = c == 46 or c == 91 or c == 93 or c == 40 or c == 41 or c == 124 or c == 42 or c == 43 or c == 63 or c == 92 or c == 94 or c == 36 or c == 123 or c == 125
+    return answer
+
+def inner(c):
+    answer = c == 91 or c == 93 or c == 92 or c == 45 or c == 94
+    return answer
+
+def classchar():
+    bad = 0
+    escaped = 0
+    if g_p >= g_pe:
+        bad = 1
+    if not bad:
+        value = m[g_p]
+        g_p = g_p + 1
+        if value == 92:
+            escaped = 1
+            if g_p >= g_pe:
+                bad = 1
+            if not bad:
+                value = m[g_p]
+                g_p = g_p + 1
+                if not inner(value):
+                    bad = 1
+        if not escaped and inner(value):
+            bad = 1
+    if bad:
+        g_bad = 1
+    return value
+
+def atom(a, b):
+    if not g_expect:
+        oper(2)
+    link(a, b)
+    frag(a, b)
+    g_expect = 0
+    g_quant = 1
+    return 0
+
+def quant(c):
+    g_f = g_f - 1
+    q = g_mem + 800 + g_f * 2
+    a = m[q]
+    b = m[q + 1]
+    e = state(0, 0, 0, 0, 0, 0)
+    if c == 63:
+        s = state(0, a, e, 0, 0, 0)
+        link(b, e)
+    if c == 42:
+        s = state(0, a, e, 0, 0, 0)
+        link(b, s)
+    if c == 43:
+        s = a
+        loop = state(0, a, e, 0, 0, 0)
+        link(b, loop)
+    frag(s, e)
+    g_quant = 0
+    return 0
+
+def compile():
+    g_p = 2
+    g_pe = 2 + m[1]
+    g_s = 0
+    g_f = 0
+    g_o = 0
+    g_expect = 1
+    g_quant = 0
+    g_bad = 0
+    while g_p < g_pe:
+        c = m[g_p]
+        if c == 40:
+            if not g_expect:
+                oper(2)
+            m[g_mem + 1100 + g_o] = 1
+            g_o = g_o + 1
+            g_p = g_p + 1
+            g_expect = 1
+            g_quant = 0
+        if c == 41:
+            if g_expect:
+                eps()
+            found = 0
+            while g_o and not found:
+                old = m[g_mem + 1100 + g_o - 1]
+                g_o = g_o - 1
+                if old == 1:
+                    found = 1
+                else:
+                    reduce(old)
+            if not found:
+                g_bad = 1
+            g_p = g_p + 1
+            g_expect = 0
+            g_quant = 1
+        if c == 124:
+            if g_expect:
+                eps()
+            oper(3)
+            g_p = g_p + 1
+            g_expect = 1
+            g_quant = 0
+        if c == 42 or c == 43 or c == 63:
+            if not g_quant:
+                g_bad = 1
+            if g_quant:
+                quant(c)
+            g_p = g_p + 1
+        if c != 40 and c != 41 and c != 124 and c != 42 and c != 43 and c != 63:
+            if c == 46:
+                g_p = g_p + 1
+                a = state(2, 0, 0, 0, 0, 0)
+                b = state(0, 0, 0, 0, 0, 0)
+            if c == 91:
+                g_p = g_p + 1
+                comp = 0
+                if g_p < g_pe and m[g_p] == 94:
+                    comp = 1
+                    g_p = g_p + 1
+                start = g_p
+                n = 0
+                while g_p < g_pe and m[g_p] != 93:
+                    first = classchar()
+                    n = n + 1
+                    if g_p < g_pe and m[g_p] == 45:
+                        g_p = g_p + 1
+                        last = classchar()
+                        if last < first:
+                            g_bad = 1
+                end = g_p
+                if n == 0 or g_p >= g_pe:
+                    g_bad = 1
+                if g_p < g_pe:
+                    g_p = g_p + 1
+                a = state(3, 0, 0, start, end, comp)
+                b = state(0, 0, 0, 0, 0, 0)
+            if c != 46 and c != 91:
+                value = c
+                escaped = 0
+                g_p = g_p + 1
+                if value == 92:
+                    escaped = 1
+                    if g_p >= g_pe:
+                        g_bad = 1
+                    if g_p < g_pe:
+                        value = m[g_p]
+                        g_p = g_p + 1
+                        if not outer(value):
+                            g_bad = 1
+                if not escaped and outer(value):
+                    g_bad = 1
+                a = state(1, 0, 0, value, 0, 0)
+                b = state(0, 0, 0, 0, 0, 0)
+            atom(a, b)
+    if g_expect:
+        eps()
+    while g_o:
+        old = m[g_mem + 1100 + g_o - 1]
+        g_o = g_o - 1
+        if old == 1:
+            g_bad = 1
+        if old != 1:
+            reduce(old)
+    if g_f != 1:
+        g_bad = 1
+    g_root = m[g_mem + 800]
+    e = m[g_mem + 801]
+    g_acceptstate = state(4, 0, 0, 0, 0, 0)
+    link(e, g_acceptstate)
+    return 0
+
+def lit(a, c):
+    answer = a == c
+    if g_flag and a >= 65 and a <= 90 and c == a + 32:
+        answer = 1
+    if g_flag and a >= 97 and a <= 122 and c == a - 32:
+        answer = 1
+    return answer
+
+def incl(s, e, comp, c):
+    inside = 0
+    while s < e:
+        a = m[s]
+        s = s + 1
+        if a == 92:
+            a = m[s]
+            s = s + 1
+        b = a
+        if s < e and m[s] == 45:
+            s = s + 1
+            b = m[s]
+            s = s + 1
+            if b == 92:
+                b = m[s]
+                s = s + 1
+        if c >= a and c <= b:
+            inside = 1
+        if g_flag and c >= 65 and c <= 90 and c + 32 >= a and c + 32 <= b:
+            inside = 1
+        if g_flag and c >= 97 and c <= 122 and c - 32 >= a and c - 32 <= b:
+            inside = 1
+    answer = inside
+    if comp:
+        answer = not inside
+    return answer
+
+def add(x):
+    if not m[g_mem + 1300 + x]:
+        m[g_mem + 1300 + x] = 1
+        m[g_mem + 1600 + g_tail] = x
+        g_tail = g_tail + 1
+    return 0
+
+def close():
+    while g_head < g_tail:
+        x = m[g_mem + 1600 + g_head]
+        g_head = g_head + 1
+        q = g_mem + x * 6
+        t = m[q]
+        if t == 0:
+            add(m[q + 1])
+            if m[q + 2]:
+                add(m[q + 2])
+        if t == 1 or t == 2 or t == 3:
+            m[g_mem + 1450 + x] = 1
+        if t == 4:
+            g_accept = 1
+    return 0
+
+def reset():
+    i = 0
+    while i < g_s:
+        m[g_mem + 1300 + i] = 0
+        m[g_mem + 1450 + i] = 0
+        i = i + 1
+    g_head = 0
+    g_tail = 0
+    g_accept = 0
+    return 0
+
+def match(base, length):
+    reset()
+    add(g_root)
+    close()
+    r = 0
+    while r < length:
+        byte = m[base + r]
+        i = 0
+        while i < g_s:
+            m[g_mem + 1300 + i] = 0
+            i = i + 1
+        g_head = 0
+        g_tail = 0
+        g_accept = 0
+        i = 0
+        while i < g_s:
+            if m[g_mem + 1450 + i]:
+                q = g_mem + i * 6
+                t = m[q]
+                yes = 0
+                if t == 1:
+                    yes = lit(m[q + 3], byte)
+                if t == 2:
+                    yes = 1
+                if t == 3:
+                    yes = incl(m[q + 3], m[q + 4], m[q + 5], byte)
+                if yes:
+                    add(m[q + 1])
+            m[g_mem + 1450 + i] = 0
+            i = i + 1
+        close()
+        r = r + 1
+    return g_accept
+
+def boot():
+    g_mem = alloc(1800)
+    g_flag = m[0]
+    compile()
+    at = 2 + m[1]
+    count = m[at]
+    at = at + 1
+    output = alloc(9)
+    selected = 0
+    index = 0
+    while index < count:
+        length = m[at]
+        if match(at + 1, length) and not g_bad:
+            m[output + 1 + selected] = index
+            selected = selected + 1
+        at = at + 1 + length
+        index = index + 1
+    m[output] = selected
+    free(g_mem)
+    return output

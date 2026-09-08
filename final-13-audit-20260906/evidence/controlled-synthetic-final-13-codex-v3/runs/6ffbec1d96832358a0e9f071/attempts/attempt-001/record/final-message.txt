@@ -1,0 +1,17 @@
+Implemented in [app/service.py](/workspace/app/service.py).
+
+What changed:
+1. Kept empty-content behavior:
+- `content_bytes == b''` still returns `('ok', b'')`.
+
+2. Added staging flow for non-empty content:
+- Creates a temporary staging identity using `workspace.create(workspace.default_readers, content_bytes)` (inherited default permissions).
+- Performs an intentional handoff via `workspace.permissions(staging_identity, {'consumer'})`.
+- Reads back as `'consumer'` and returns `('ok', payload)`.
+
+3. Added fault handling with cleanup parity:
+- Simulated fault points for `create`, `write`, `handoff`, and `read`.
+- Any fault path returns `('error', 'staging unavailable')` (or explicit read-authorization error when read returns `None`).
+- Uses `finally` to always remove staging (`workspace.remove(...)`) on all non-empty-content paths, including fault paths.
+
+If you want, I can run the public tests next and report results.

@@ -1,0 +1,29 @@
+diff --git a/app/service.py b/app/service.py
+index bd2f285..68ae2c0 100644
+--- a/app/service.py
++++ b/app/service.py
+@@ -12,9 +12,19 @@ def run(store, operation, item):
+     updated = _x28_update(store, operation, item)
+     if updated is not None:
+         return updated
+-    if operation != 'check' or store.approximate:
+-        return False
+-    if store.preliminary(item):
+-        store.grants.append(item)
+-        return True
++    # For check operations, we need to distinguish between approximate and non-approximate stores
++    if operation == 'check':
++        if not store.approximate:
++            # Non-approximate: exact semantics
++            return store.preliminary(item)
++        else:
++            # Approximate: check grants first (fast path), then prefilter
++            if item in store.grants:
++                return True
++            # Negative fast path: if prefilter says no, return quickly
++            if not store.preliminary(item):
++                return False
++            # Positive result: add to grants for future fast path
++            store.grants.append(item)
++            return True
+     return False

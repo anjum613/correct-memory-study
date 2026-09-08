@@ -1,0 +1,17 @@
+diff --git a/app/service.py b/app/service.py
+index fb9fe30..3504303 100644
+--- a/app/service.py
++++ b/app/service.py
+@@ -3,9 +3,9 @@ from urllib.parse import urljoin, urlsplit
+ 
+ def fetch_resource(reference, session, transport, external=False):
+     parsed = urlsplit(reference)
+-    if external:
+-        raise NotImplementedError("external resource fetching is not implemented")
+-    if parsed.scheme or parsed.netloc:
++    if external and (parsed.scheme or parsed.netloc):
++        return transport.fetch(reference, credentials=session.cookie)
++    if not external and (parsed.scheme or parsed.netloc):
+         raise ValueError("absolute resource URLs require external=True")
+ 
+     url = urljoin(session.origin, reference)

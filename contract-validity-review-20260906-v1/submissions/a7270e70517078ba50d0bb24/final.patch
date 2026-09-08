@@ -1,0 +1,26 @@
+--- a/app/service.py
++++ b/app/service.py
+@@ -12,9 +12,21 @@
+     updated = _x28_update(store, operation, item)
+     if updated is not None:
+         return updated
+-    if operation != 'check' or store.approximate:
++    if operation != 'check':
+         return False
+-    if store.preliminary(item):
++
++    # A negative prefilter result is authoritative for rejection and avoids
++    # an unnecessary storage read.  A positive result in exact mode still
++    # needs to be checked against the membership records: the prefilter may
++    # have false positives.
++    if not store.preliminary(item):
++        return False
++    if store.approximate:
++        store.grants.append(item)
++        return True
++
++    page = store.read_page(store.page_for(item))
++    if item in page:
+         store.grants.append(item)
+         return True
+     return False

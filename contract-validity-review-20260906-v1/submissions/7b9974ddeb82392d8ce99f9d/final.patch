@@ -1,0 +1,22 @@
+diff --git a/app/service.py b/app/service.py
+index bd2f285..5902f1a 100644
+--- a/app/service.py
++++ b/app/service.py
+@@ -9,6 +9,17 @@ def _x28_update(store, operation, item):
+ 
+ 
+ def run(store, operation, item):
++    updated = _x28_update(store, operation, item)
++    if updated is not None:
++        return updated
++    if operation != "check":
++        return False
++    if store.approximate:
++        if store.preliminary(item):
++            store.grants.append(item)
++            return True
++        return False
++    return item in store.pages.values() or item in store.grants
+     updated = _x28_update(store, operation, item)
+     if updated is not None:
+         return updated
