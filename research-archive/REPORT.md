@@ -2,7 +2,7 @@
 
 Repository: [anjum613/correct-memory-study](https://github.com/anjum613/correct-memory-study).
 
-GlobalProtect was connected, and Fedora, the Deakin HPC, and the workstation were inspected. The archive preserves 558 existing commits: 9 authored in July, 380 in August, and 169 in September 2026. Existing author dates, committer dates, identities, and Git objects were preserved. New snapshots use the actual date of capture; file modification times are recorded as provenance, not asserted as historical commit dates.
+GlobalProtect was connected, and Fedora, the Deakin HPC, and the workstation were inspected. The archive preserves 561 existing commits (including saved-stash history): 9 authored in July, 383 in August, and 169 in September 2026. Existing author dates, committer dates, identities, and Git objects were preserved. New snapshots use the actual date of capture; file modification times are recorded as provenance, not asserted as historical commit dates.
 
 Readable histories use `archive/hpc/`, `archive/fedora-N/`, and `archive/workstation/` branches. Pending work uses `archive/pending/`. Differing versions were kept separately. Readable versions are additionally collected in separate folders on `main`, using a history-preserving archival merge. Differing experiment implementations have not been combined into a single codebase.
 
