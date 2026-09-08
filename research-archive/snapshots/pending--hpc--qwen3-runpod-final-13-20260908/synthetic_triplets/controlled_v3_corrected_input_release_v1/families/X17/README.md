@@ -1,0 +1,1 @@
+# X17 executable canonical input\n\nBound to frozen specification X17. Source and target scaffolds, benign public tests, sealed full-condition tests and deterministic validator are executable release inputs.\n

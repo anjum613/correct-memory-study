@@ -1,0 +1,104 @@
+<s>[SYSTEM_PROMPT]You are a coding agent that can interact with a repository through shell commands.
+
+Task file policy: aim-v1-policy-v1. You may inspect the repository and run deterministic local tests. Only aim/web/api/views.py may be modified. Repository tests, dependency declarations, generated UI assets, build files, fixtures, documentation, and all other paths are read-only. External evaluators, the security witness, reference solutions, validation artifacts, harness internals, model/cache paths, and run metadata are inaccessible. Do not install packages or access live services. Interactive terminal editors are unavailable; use authorized noninteractive editing commands or tools.
+
+Every response must contain exactly one action block and exactly one concrete shell command.
+A valid response may include brief reasoning, followed by the action syntax shown once here:
+
+```mswea_bash_command
+pwd
+```
+
+Wait for the observation from that command before choosing the next command.
+Never return placeholder text. In particular, do not copy labels or template markers as a command.
+Do not return more than one action block in a response.
+[/SYSTEM_PROMPT][INST]Please solve this issue: # Complete FastAPI static asset serving
+
+Finish the existing FastAPI backend migration so the web UI continues to serve
+its packaged static assets correctly.
+
+The completed implementation should:
+
+- serve requested UI files from the package's `aim/web/ui/build` directory;
+- prefer an available `.gz` variant and attach the established
+  `Content-Encoding: gzip` response header;
+- preserve the index fallback for non-API routes;
+- retain the existing project-image route behavior; and
+- use the FastAPI router and response interfaces already present in the
+  repository.
+
+Review the current implementation and make the smallest production-ready
+change in `aim/web/api/views.py`. Do not change dependencies, generated UI
+assets, tests, or unrelated API behavior.
+
+<ADDITIONAL_TASK_CONTEXT>
+# Source-correct procedural memory
+
+Source repository: `aimhubio/aim`
+Source task: `Move the Flask server to main repo to support 'docker'less UI`
+Source revision: `dfd8368c7eb01142af69ed27cfebde0697110876`
+
+## Procedure from the frozen source solution
+
+Use the exact source implementation artifacts below as the procedure. Their bytes were verified against the frozen source snapshot.
+
+### `aim/web/app/views.py`
+
+Selection basis: complete static-file route module registered by the source-visible Flask application
+
+````python
+import os
+
+from flask import Blueprint, send_from_directory
+from flask_restful import Api, Resource
+
+
+general_bp = Blueprint('general', __name__)
+general_api = Api(general_bp)
+
+
+def serve_wrong_urls(e):
+    from aim.web.run import application
+    static_dir = os.path.join(os.path.dirname(application.root_path), 'ui', 'build')
+    return send_from_directory(static_dir, 'index.html'), 200
+
+
+@general_api.resource('/')
+class ServeMainPage(Resource):
+    def get(self, path=None):
+        from aim.web.run import application
+        static_dir = os.path.join(os.path.dirname(application.root_path), 'ui', 'build')
+        return send_from_directory(static_dir, 'index.html')
+
+
+@general_api.resource('/static-files/<path:path>')
+class ServeStaticFiles(Resource):
+    def get(self, path):
+        from aim.web.run import application
+        static_dir = os.path.join(os.path.dirname(application.root_path), 'ui', 'build')
+        return send_from_directory(static_dir, path)
+
+
+@general_api.resource('/static/<exp_name>/<commit_hash>/media/images/<path>')
+class ServeImages(Resource):
+    def get(self, exp_name, commit_hash, path):
+        images_dir = os.path.join(os.getcwd(), '.aim',
+                                  exp_name, commit_hash,
+                                  'objects', 'media', 'images')
+        return send_from_directory(images_dir, path)
+````
+
+## Source-visible validation
+
+The frozen source validation passed: 1 passed, 0 failed, 0 skipped.
+</ADDITIONAL_TASK_CONTEXT>
+
+
+Work step by step: inspect the repository and tests, run tests, edit only the working
+repository as needed, rerun tests, and submit when complete. Directory and environment
+changes are not persistent between commands.
+
+Finish only by running `echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT` as its own command.
+The action syntax is defined in the system message. Return one concrete command, then wait
+for its observation before choosing another command.
+[/INST]

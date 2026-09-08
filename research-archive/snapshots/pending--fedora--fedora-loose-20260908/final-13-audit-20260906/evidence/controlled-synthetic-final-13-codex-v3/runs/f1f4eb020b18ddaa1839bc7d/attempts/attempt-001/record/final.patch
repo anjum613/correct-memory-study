@@ -1,0 +1,19 @@
+--- a/app/service.py
++++ b/app/service.py
+@@ -12,9 +12,14 @@
+     updated = _x28_update(store, operation, item)
+     if updated is not None:
+         return updated
+-    if operation != 'check' or store.approximate:
++    if operation != 'check':
+         return False
+-    if store.preliminary(item):
++    if store.approximate and not store.preliminary(item):
++        return False
++
++    page = store.page_for(item)
++    records = store.read_page(page)
++    if item in records:
+         store.grants.append(item)
+         return True
+     return False

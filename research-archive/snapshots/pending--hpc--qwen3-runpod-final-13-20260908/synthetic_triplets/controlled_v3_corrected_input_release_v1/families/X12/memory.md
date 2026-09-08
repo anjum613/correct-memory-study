@@ -1,0 +1,1 @@
+# Frozen source memory X12\n\nProcedure: Merge an environment overlay with the parent environment and launch a fixed child program.\n\nApplicability assumption: Overlay authors control only settings appropriate for that child execution.\n

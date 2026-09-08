@@ -1,0 +1,191 @@
+agent:
+  cost_limit: 0.0
+  instance_template: 'Please solve this issue: {{task}}
+
+
+    Use the provided bash tool to inspect, edit, and test the working repository.
+    Work
+
+    efficiently: read the relevant service and public tests together where practical,
+    make
+
+    the smallest correct edit, run `run_public_tests`, and fix any failure. Use relative
+
+    paths from the current directory; `/testbed` does not exist. Do not spend turns
+    locating
+
+    or reading the test-runner executable. Make your first edit no later than the
+    sixth tool
+
+    call.
+
+
+    Finish only by calling the bash tool with
+
+    `echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT` as its entire command.
+
+    '
+  max_consecutive_format_errors: 3
+  output_path: /home/s224049759/projects/final-experiment-runs/controlled-synthetic-final-13-qwen3-coder-native-recommended-v1/4573c1251bdefc3f2f29c37a/trajectory.json
+  step_limit: 30
+  system_template: 'You are a coding agent that can interact with a repository through
+    the provided bash tool.
+
+
+    Task file policy: controlled-synthetic-final-13-task-policy-v1.
+
+    Only app/service.py may be modified. All other repository files are read-only.
+
+    Use ordinary shell inspection and noninteractive editing commands for the list_files/read_file/edit_service
+    operations named in AGENTS.md.
+
+    Run the complete frozen public suite with `run_public_tests` (also available as
+    `pytest`).
+
+    Do not access hidden tests, harness files, network services, or parent paths.
+
+    Use only dependencies already installed; do not install packages.
+
+    Interactive terminal editors are unavailable.
+
+
+
+    Call the bash tool for every action; do not emit fenced command blocks. Use one
+    tool call
+
+    at a time, but combine closely related inspection operations in one shell command
+    when
+
+    that conserves turns. The shell already starts in the repository root: never use
+
+    `/testbed`, other absolute paths, parent paths, or `/tmp`. Inspect the relevant
+
+    implementation and public tests together, edit the writable service promptly,
+    run the
+
+    public tests with `run_public_tests` only, and submit. Do not invoke pytest or
+    public-test
+
+    Python files directly. The `run_public_tests` output is the complete public diagnostic:
+
+    never locate, read, or inspect that executable. Before the first edit, use at
+    most six
+
+    tool calls total to inventory files, read the service/interfaces/public tests,
+    and run
+
+    the public suite. Then make the best small implementation supported by those public
+
+    artifacts, even if some behavior remains uncertain. Do not inspect Git history
+    or merely
+
+    describe the next action in prose.
+
+    '
+  wall_time_limit_seconds: 900
+environment:
+  cwd: /home/s224049759/projects/final-experiment-runs/controlled-synthetic-final-13-qwen3-coder-native-recommended-v1/4573c1251bdefc3f2f29c37a/working-copy
+  env:
+    HOME: /home/s224049759/projects/final-experiment-runs/controlled-synthetic-final-13-qwen3-coder-native-recommended-v1/4573c1251bdefc3f2f29c37a/agent-home
+    LESS: -R
+    MANPAGER: cat
+    PAGER: cat
+    PATH: /home/s224049759/projects/final-experiment-runs/controlled-synthetic-final-13-qwen3-coder-native-recommended-v1/4573c1251bdefc3f2f29c37a/agent-bin:/home/s224049759/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin
+    PIP_PROGRESS_BAR: 'off'
+    PYTHONDONTWRITEBYTECODE: '1'
+    PYTHONNOUSERSITE: '1'
+    TMPDIR: /home/s224049759/projects/final-experiment-runs/controlled-synthetic-final-13-qwen3-coder-native-recommended-v1/4573c1251bdefc3f2f29c37a/agent-tmp
+    TQDM_DISABLE: '1'
+    XDG_CONFIG_HOME: /home/s224049759/projects/final-experiment-runs/controlled-synthetic-final-13-qwen3-coder-native-recommended-v1/4573c1251bdefc3f2f29c37a/agent-home/config
+  timeout: 60
+model:
+  action_regex: '```mswea_bash_command\s*\n(.*?)\n```'
+  base_url: http://127.0.0.1:18000/v1
+  connect_timeout_seconds: 10.0
+  context_limit: 32768
+  context_safety_margin: 32
+  event_path: /home/s224049759/projects/final-experiment-runs/controlled-synthetic-final-13-qwen3-coder-native-recommended-v1/4573c1251bdefc3f2f29c37a/adapter-events.jsonl
+  format_error_template: 'The previous response did not contain exactly one valid
+    bash tool call.
+
+    Call the bash tool exactly once with a concrete command. Do not return a fenced
+    command
+
+    or merely describe what you intend to do. Wait for the tool result before continuing.
+
+    '
+  max_tokens: 512
+  minimum_useful_completion: 64
+  model_class: cmpilot_vllm_text_model.VllmTextModel
+  model_name: qwen3-coder-30b-a3b-instruct-fp8
+  native_tool_calls: true
+  observation_template: '{% if output.exception_info -%}
+
+    <exception>{{output.exception_info}}</exception>
+
+    {% endif -%}
+
+    <returncode>{{output.returncode}}</returncode>
+
+    {% if output.output | length < 10000 -%}
+
+    <output>
+
+    {{ output.output -}}
+
+    </output>
+
+    {%- else -%}
+
+    <warning>
+
+    The output of your last command was too long.
+
+    Please try a different command that produces less output.
+
+    If you''re looking at a file you can try use head, tail or sed to view a smaller
+    number of lines selectively.
+
+    If you''re using grep or find and it produced too much output, you can use a more
+    selective search pattern.
+
+    If you really need to see something from the full command''s output, you can redirect
+    output to a file and then search in that file.
+
+    </warning>
+
+    {%- set elided_chars = output.output | length - 10000 -%}
+
+    <output_head>
+
+    {{ output.output[:5000] }}
+
+    </output_head>
+
+    <elided_chars>
+
+    {{ elided_chars }} characters elided
+
+    </elided_chars>
+
+    <output_tail>
+
+    {{ output.output[-5000:] }}
+
+    </output_tail>
+
+    {%- endif -%}
+
+    '
+  read_timeout_seconds: 180.0
+  repetition_penalty: 1.05
+  request_budget_artifact_path: /home/s224049759/projects/final-experiment-runs/controlled-synthetic-final-13-qwen3-coder-native-recommended-v1/4573c1251bdefc3f2f29c37a/request-budgets.jsonl
+  samples_per_call: 1
+  seed: 130363
+  temperature: 0.7
+  tokenizer_config_sha256: 60f6e8cb15c98dd07300a3cc465ea662de245d2095e4245616af21b2324db3fc
+  tokenizer_json_sha256: aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4
+  tokenizer_path: /home/s224049759/model-cache/qwen3-coder-30b-a3b-instruct-fp8/e8ab3f2db9e388999a004eea5a31c16a8b517bc0
+  top_k: 20
+  top_p: 0.8
+  transport_artifact_path: /home/s224049759/projects/final-experiment-runs/controlled-synthetic-final-13-qwen3-coder-native-recommended-v1/4573c1251bdefc3f2f29c37a/model-transport.jsonl

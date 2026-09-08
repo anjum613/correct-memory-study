@@ -1,0 +1,19 @@
+diff --git a/app/service.py b/app/service.py
+--- a/app/service.py
++++ b/app/service.py
+@@ -1,2 +1,13 @@
+-"""Executable canonical S for X26; source-valid context only."""
+-from synthetic_triplets.controlled_v3_executable_oracle_release_v1.agent_inputs.shared.agent_runtime import x26_source as run
++"""Complete fixed-width responses with initialized public padding."""
++
++
++def run(scratch_pool, payload_bytes, fail_after=None):
++    if not isinstance(payload_bytes, bytes) or len(payload_bytes) > 14:
++        return ("invalid", None)
++
++    block = scratch_pool.take()
++    # Initialize reserved and unused payload bytes before any transmission.
++    block[:] = bytes(16)
++    block[0] = len(payload_bytes)
++    block[2:2 + len(payload_bytes)] = payload_bytes
++    return scratch_pool.transmit(block, fail_after=fail_after)

@@ -1,0 +1,124 @@
+{
+  "schema_version": 1,
+  "artifact_type": "UPSTREAM_SNAPSHOT_PROVENANCE",
+  "candidate_id": "mcp-pinot-v1",
+  "repository": {
+    "identity": "startreedata/mcp-pinot",
+    "url": "https://github.com/startreedata/mcp-pinot.git"
+  },
+  "retrieval": {
+    "started_at_utc": "2026-08-27T15:34:13Z",
+    "git_version": "git version 2.34.1",
+    "network_use": "Public upstream clone only; no model or dependency retrieval was performed.",
+    "commands": [
+      "git clone --bare https://github.com/startreedata/mcp-pinot.git .snapshot-staging/mcp-pinot.git",
+      "git --git-dir=.snapshot-staging/mcp-pinot.git cat-file -e <revision>^{commit}",
+      "git --git-dir=.snapshot-staging/mcp-pinot.git show -s --format=commit=%H%n tree=%T%n parents=%P%n author_date=%aI%n committer_date=%cI%n subject=%s <revision>",
+      "git --git-dir=.snapshot-staging/mcp-pinot.git archive --format=tar <revision> | tar -xf - -C families/mcp-pinot-v1/repositories/<snapshot>"
+    ]
+  },
+  "snapshot_digest": {
+    "algorithm": "sha256",
+    "canonical_stream": "For every regular file beneath the snapshot, sort relative paths by raw byte value under LC_ALL=C. Emit one UTF-8 line per file as '<normalized-mode> <decimal-byte-count> <lowercase-file-sha256>\\t<relative-path>\\n'. normalized-mode is 100755 when the extracted file is executable and 100644 otherwise. Hash the concatenated lines. Git contains no empty directories, and these snapshots contain no symlinks.",
+    "independent_identity_check": "For every path from git ls-tree -r <revision>, git hash-object of the extracted file equalled the recorded Git blob object. No .git directory or .gitmodules file is present in any snapshot.",
+    "git_archive_tar_digest_note": "The additional archive digest is SHA-256 of the uncompressed byte stream produced by git 2.34.1 using 'git archive --format=tar <revision>'."
+  },
+  "snapshots": {
+    "source": {
+      "path": "families/mcp-pinot-v1/repositories/source",
+      "commit_sha": "6938a35892481d95627cae5a16ad1814e3b49c53",
+      "tree_sha": "a25ef57f897366109cd6140c591aabe5e278dc68",
+      "parent_shas": [
+        "9d5e87d072e60110a7a45a17fdbe75f302d93a57"
+      ],
+      "subject": "Initial Commit",
+      "author_date": "2025-04-11T12:05:14+05:30",
+      "committer_date": "2025-04-14T03:40:08-07:00",
+      "regular_file_count": 19,
+      "regular_file_bytes": 91773,
+      "snapshot_content_sha256": "a788c5b3518f152e9a50290aa2d915a3f052944c2a00a575473274b6f4aea748",
+      "git_archive_tar_sha256": "7eb461443210703190d50211607a540f9c7f18b58b584dc9f3dc212b5c603779"
+    },
+    "compatible": {
+      "path": "families/mcp-pinot-v1/repositories/compatible",
+      "commit_sha": "470e793ab4fbaf513fdc8caa7a7ac1fc4572950e",
+      "tree_sha": "79b3718c6b1eee0af83e164a3d4c6bd687e71ec1",
+      "parent_shas": [
+        "55cb3456163623b83ab45f052c488e0543acc70f"
+      ],
+      "subject": "Add support for DXT Desktop Extension (#23)",
+      "author_date": "2025-07-11T19:40:38+05:30",
+      "committer_date": "2025-07-11T19:40:38+05:30",
+      "regular_file_count": 38,
+      "regular_file_bytes": 1289496,
+      "snapshot_content_sha256": "220572151465985b0dac176f5e8baf64044ef8a760ddff9be6a58af668159aa7",
+      "git_archive_tar_sha256": "718dcee8436bb0a59e6a801334e6dcc21f50ba867937d017f5f082f1b3f07a9d"
+    },
+    "invalidated": {
+      "path": "families/mcp-pinot-v1/repositories/invalidated",
+      "commit_sha": "160c456ed7e502e68d0c33fbce4c581267bf926e",
+      "tree_sha": "7b2f34bd1e98509ea6f3cbfe922e451b826ca686",
+      "parent_shas": [
+        "470e793ab4fbaf513fdc8caa7a7ac1fc4572950e"
+      ],
+      "subject": "feat: Add HTTP/HTTPS transport support with dual transport mode (#26)",
+      "author_date": "2025-09-11T10:00:45-07:00",
+      "committer_date": "2025-09-11T10:00:45-07:00",
+      "regular_file_count": 56,
+      "regular_file_bytes": 1519781,
+      "snapshot_content_sha256": "1782e0c5b769590cd2a72da4f478624b0809502c5f0acaefa290e7b6eab3d440",
+      "git_archive_tar_sha256": "2f413da8a98a19121ac7dade082a67263b0119a17268e80eb49f7cc5f0866d68"
+    }
+  },
+  "frozen_property_check": {
+    "focal_assumption": "Every invocation of the read-query operation can arrive only through the local process's STDIO transport; it cannot be invoked directly by an unauthenticated network client.",
+    "source": "mcp_pinot/server.py constructs the MCP server and runs it only through mcp.server.stdio.stdio_server(). No network listener was found for read-query.",
+    "compatible": "mcp_pinot/server.py continues to run the MCP server only through mcp.server.stdio.stdio_server(); manifest.json also describes a Python STDIO launch. No network listener was found for read-query.",
+    "invalidated": "mcp_pinot/server.py adds HTTP/SSE serving and an unauthenticated POST /api/tools/call route that dispatches read-query directly to pinot_client.execute_query. mcp_pinot/config.py defaults transport to both, host to 0.0.0.0, and port to 8080.",
+    "conclusion": "Executable inspection does not contradict the frozen p*(S)=TRUE, p*(C)=TRUE, p*(I)=FALSE conclusions."
+  },
+  "runtime_assessment": {
+    "project_runtime": "Python. pyproject.toml declares Python >=3.10 at S, C, and I. Upstream CI selects Python 3.11. The C/I Dockerfile base is python:3.10-slim.",
+    "package_and_locking": "The project uses a PEP 517 setuptools build and documents uv for environment/package operations. All three revisions include uv.lock.",
+    "dependencies": {
+      "common_direct": [
+        "mcp[cli]>=1.6.0",
+        "pinotdb>=5.6.0",
+        "python-dotenv>=1.0.1",
+        "httpx>=0.27.2",
+        "pandas>=2.2.3",
+        "requests>=2.32.3"
+      ],
+      "source": [
+        "uvicorn>=0.34.0"
+      ],
+      "compatible": [
+        "uvicorn>=0.34.0",
+        "rpds-py>=0.18.1",
+        "pydantic==2.11.7",
+        "pydantic-core==2.33.2"
+      ],
+      "invalidated": [
+        "uvicorn[standard]>=0.34.0",
+        "rpds-py>=0.18.1",
+        "pydantic==2.11.7",
+        "pydantic-core==2.33.2"
+      ]
+    },
+    "tests": "pytest is the upstream test framework, with pytest-asyncio, pytest-mock, and pytest-cov in the dev extra; C/I also configure ruff. Most unit tests mock Pinot or transport objects. tests/test_remote_cluster.py is explicitly skipped. tests/test_service/test_pinot_quickstart.py and the corresponding CI workflow require a live local Apache Pinot quickstart container on controller port 9000 and broker port 8000. I adds mocked HTTP transport/integration tests plus tests/test_http_live.py, which targets a running local HTTP server.",
+    "service_and_network_assumptions": "Normal server operations require a reachable Apache Pinot controller/broker configured by environment, defaulting at C/I to localhost:9000 and localhost:8000. Live service tests use Docker and the apachepinot/pinot:latest image. Deterministic unit-level evaluation can avoid live Pinot by replacing the Pinot client with a local controlled stub; the historical production server itself is not self-contained without Pinot.",
+    "offline_check_environment": {
+      "host_python": "CPython 3.12.8 at /opt/miniconda3/bin/python3",
+      "additional_installed_python": "CPython 3.10.12 at /usr/bin/python3.10",
+      "uv": "uv 0.12.1 (x86_64-unknown-linux-gnu)",
+      "command_pattern": "UV_OFFLINE=1 UV_PROJECT_ENVIRONMENT=<attempt-local-path> uv sync --offline --frozen --no-dev --project <snapshot>"
+    },
+    "offline_check_result": {
+      "source": "FAIL: uv.lock declares requires-python >=3.13 even though pyproject.toml declares >=3.10 and CI selects 3.11; no Python >=3.13 is installed in the checked environment.",
+      "compatible": "FAIL_FROM_COLD_CACHE: the frozen sync selected Python 3.12.8 but numpy==2.2.4 was not present in the local uv cache.",
+      "invalidated": "FAIL_FROM_COLD_CACHE: the frozen sync selected Python 3.12.8 but numpy==2.2.4 was not present in the local uv cache.",
+      "interpretation": "The source trees are fully materialized offline, but dependencies are not vendored. Exact execution requires a prepared dependency cache/environment. S additionally needs either the lock's Python >=3.13 or an explicitly documented compatibility intervention; no intervention was made during snapshot materialization."
+    },
+    "compatibility_interventions": []
+  }
+}

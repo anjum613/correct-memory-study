@@ -1,0 +1,11 @@
+Implemented `run()` in [app/service.py](/workspace/app/service.py).
+
+Behavior now:
+- `read` returns a deep copy as before.
+- `prepare` validates the requested row/actor and returns a commit token.
+- `commit` rechecks current state before applying, allowing concurrent commits on independent records while returning `conflict` for stale or invariant-breaking commits.
+
+Verification:
+- Public assertions passed via direct execution.
+- `pytest` could not be run because it is not installed in the container.
+- Extra probes confirmed same-row concurrent commits conflict, different-row commits both succeed, and retrying an already committed token returns `conflict`.

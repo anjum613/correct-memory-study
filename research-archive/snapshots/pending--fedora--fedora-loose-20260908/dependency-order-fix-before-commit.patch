@@ -1,0 +1,197 @@
+diff --git a/src/cmpilot/candidate_discovery_v03.py b/src/cmpilot/candidate_discovery_v03.py
+index 799f0cd6c..2601fb444 100644
+--- a/src/cmpilot/candidate_discovery_v03.py
++++ b/src/cmpilot/candidate_discovery_v03.py
+@@ -2371,15 +2371,15 @@ def capture_searches(
+                 number,
+             )
+         elif query.get("object_type") == "ISSUE":
+-            repository_payload, _ = _capture_repository(evidence, owner, repository)
+-            if repository_payload is None:
+-                continue
+             nodes = _capture_issue_relations(
+                 evidence,
+                 owner=owner,
+                 repository=repository,
+                 number=number,
+             )
++            repository_payload, _ = _capture_repository(evidence, owner, repository)
++            if repository_payload is None:
++                continue
+             for node in nodes:
+                 repository_node = node.get("repository")
+                 name_with_owner = (
+diff --git a/tests/test_candidate_discovery_v03.py b/tests/test_candidate_discovery_v03.py
+index 3ae904080..9cfef3677 100644
+--- a/tests/test_candidate_discovery_v03.py
++++ b/tests/test_candidate_discovery_v03.py
+@@ -339,6 +339,169 @@ def test_search_leaf_capture_accounts_every_item_without_ranking(tmp_path: Path)
+     assert "trust_family" not in json.dumps(items)
+ 
+ 
++def test_issue_graphql_is_captured_before_unavailable_repository(
++    tmp_path: Path,
++) -> None:
++    run_root = tmp_path / "run"
++    context = CaptureContext.create(
++        run_root=run_root,
++        source_id=SEARCH_SOURCE_ID,
++        source_kind="TRUST_BOUNDARY_ISSUE_PR_SEARCH",
++        source_revision={
++            "kind": "FROZEN_QUERY_SPECIFICATION",
++            "value": "b" * 64,
++        },
++        token=FIXTURE_TOKEN,
++    )
++    calls: list[tuple[str, str]] = []
++
++    def transport(method, url, headers, body):  # type: ignore[no-untyped-def]
++        del headers
++        parsed = urlsplit(url)
++        calls.append((method, parsed.path))
++        if parsed.path == "/search/issues":
++            query = parse_qs(parsed.query)["q"][0]
++            items = (
++                [
++                    {
++                        "id": 4418020886,
++                        "node_id": "I_kwDORxnDcM8AAAABB1WmFg",
++                        "number": 86,
++                        "repository_url": (
++                            "https://api.github.com/repos/nickatnight96/BTagent"
++                        ),
++                        "url": (
++                            "https://api.github.com/repos/"
++                            "nickatnight96/BTagent/issues/86"
++                        ),
++                        "html_url": (
++                            "https://github.com/nickatnight96/BTagent/issues/86"
++                        ),
++                    }
++                ]
++                if '"fixture-0"' in query
++                else []
++            )
++            return _response(
++                {
++                    "total_count": len(items),
++                    "incomplete_results": False,
++                    "items": items,
++                }
++            )
++        if parsed.path == "/graphql":
++            assert method == "POST"
++            assert body is not None
++            request_body = json.loads(body)
++            assert request_body == {
++                "query": discovery_v03.GRAPHQL_DOCUMENT,
++                "variables": {
++                    "owner": "nickatnight96",
++                    "repository": "BTagent",
++                    "number": 86,
++                    "cursor": None,
++                },
++            }
++            return _response(
++                {
++                    "data": {
++                        "repository": {
++                            "databaseId": 7,
++                            "issue": {
++                                "closedByPullRequestsReferences": {
++                                    "nodes": [{"merged": True}],
++                                    "pageInfo": {
++                                        "hasNextPage": False,
++                                        "endCursor": None,
++                                    },
++                                }
++                            },
++                        }
++                    }
++                }
++            )
++        if parsed.path == "/repos/nickatnight96/BTagent":
++            assert method == "GET"
++            return _response(
++                {
++                    "message": "Not Found",
++                    "documentation_url": (
++                        "https://docs.github.com/rest/repos/repos#get-a-repository"
++                    ),
++                },
++                status=404,
++            )
++        raise AssertionError(f"unexpected offline request: {method} {url}")
++
++    context.api.transport = transport
++    context.api.clock = lambda: "2026-08-14T19:05:08Z"
++    evidence = GitHubEvidence(context)
++    search_spec = {
++        "queries": [
++            {
++                "query_id": f"TB-Q{index + 1:02d}",
++                "query": (
++                    f'"fixture-{index}" is:issue '
++                    "created:2020-01-01..2026-08-12"
++                ),
++                "object_type": "ISSUE",
++            }
++            for index in range(8)
++        ]
++    }
++
++    discovery_v03.capture_searches(context, evidence, search_spec=search_spec)
++
++    assert calls[-2:] == [
++        ("POST", "/graphql"),
++        ("GET", "/repos/nickatnight96/BTagent"),
++    ]
++    expected_graphql_key = GitHubEvidence._key(
++        method="POST",
++        endpoint="https://api.github.com/graphql",
++        ordered_parameters=(),
++        json_body={
++            "query": discovery_v03.GRAPHQL_DOCUMENT,
++            "variables": {
++                "owner": "nickatnight96",
++                "repository": "BTagent",
++                "number": 86,
++                "cursor": None,
++            },
++        },
++    )
++    expected_repository_key = GitHubEvidence._key(
++        method="GET",
++        endpoint="https://api.github.com/repos/nickatnight96/BTagent",
++        ordered_parameters=(),
++        json_body=None,
++    )
++    entries = {entry["evidence_key"]: entry for entry in evidence.entries}
++    assert entries[expected_graphql_key]["status"] == "AVAILABLE"
++    assert entries[expected_repository_key]["status"] == "UNAVAILABLE"
++
++    _, capture_digest = context.finalize(
++        status="CAPTURE_COMPLETE", evidence=evidence
++    )
++    manifest, verified_digest, index = load_verified_capture(context.root)
++    assert verified_digest == capture_digest
++
++    records, occurrences = discovery_v03.materialize_searches(
++        source_root=context.root,
++        manifest=manifest,
++        capture_digest=capture_digest,
++        index=index,
++        search_spec=search_spec,
++    )
++
++    assert occurrences == []
++    assert len(records) == 1
++    assert records[0]["disposition"] == "SOURCE_REJECTED"
++    assert records[0]["rejection_reason_codes"] == [
++        "GITHUB_REPOSITORY_UNAVAILABLE"
++    ]
++
++
+ def _record(record_id: str, candidate_id: str, episode: dict[str, object]) -> dict[str, object]:
+     return {
+         "source_record_id": record_id,

@@ -1,0 +1,72 @@
+diff --git a/app/service.py b/app/service.py
+--- a/app/service.py
++++ b/app/service.py
+@@ -1,2 +1,66 @@
+-"""Executable canonical S for X09; source-valid context only."""
+-from synthetic_triplets.controlled_v3_executable_oracle_release_v1.agent_inputs.shared.agent_runtime import x09_source as run
++"""Retry-safe operations over the public in-memory operation store.
++
++The acknowledgment is ('ack', operation_id, one_based_effect_position).
++A retry returns that original acknowledgment. Reusing an identity with a
++changed meaning raises ValueError and never commits another effect.
++"""
++from copy import deepcopy
++
++
++def _enter(store):
++    # The public fixture uses Python dictionaries. setdefault publishes one
++    # store-local gate, and atomically selects its owner under the Python GIL.
++    # Keep user hooks outside the gate so concurrent hooks can rendezvous.
++    gate = store.__dict__.setdefault('_x09_commit_gate', {})
++    token = object()
++    while gate.setdefault('owner', token) is not token:
++        pass
++    return gate
++
++
++def _receipt(store, operation_id, meaning):
++    # The effects ledger is authoritative, including recovery when an effect
++    # exists but receipt publication was interrupted. Never apply it again.
++    for position, (identity, committed_meaning) in enumerate(store.effects, 1):
++        if identity == operation_id:
++            if committed_meaning != meaning:
++                raise ValueError('operation identity already has a different meaning')
++            result = ('ack', operation_id, position)
++            store.receipts[operation_id] = (deepcopy(committed_meaning), result)
++            return result
++    return None
++
++
++def run(operation_store, operation_id, meaning, fault=None):
++    snapshot = deepcopy(meaning)
++    # Validate the receipt key before performing any externally visible work.
++    hash(operation_id)
++    gate = _enter(operation_store)
++    try:
++        result = _receipt(operation_store, operation_id, snapshot)
++        if result is not None:
++            return result
++    finally:
++        del gate['owner']
++
++    hook = operation_store.before_commit
++    if hook is not None:
++        hook()
++
++    gate = _enter(operation_store)
++    try:
++        # Another delivery may have committed while this delivery ran its hook.
++        result = _receipt(operation_store, operation_id, snapshot)
++        if result is not None:
++            return result
++        if fault in ('before_effect', 'before_commit'):
++            raise RuntimeError('operation interrupted before commit')
++        operation_store.effects.append((operation_id, snapshot))
++        result = ('ack', operation_id, len(operation_store.effects))
++        operation_store.receipts[operation_id] = (deepcopy(snapshot), result)
++        # A lost response must leave both the effect and its receipt committed.
++        if fault in ('after_effect', 'after_commit', 'after_receipt'):
++            raise RuntimeError('operation committed; acknowledgment interrupted')
++        return result
++    finally:
++        del gate['owner']

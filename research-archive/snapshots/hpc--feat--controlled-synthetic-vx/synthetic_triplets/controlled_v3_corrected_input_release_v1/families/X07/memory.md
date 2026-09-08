@@ -1,0 +1,1 @@
+# Frozen source memory X07\n\nProcedure: Decode a serialized job record and reconstruct its documented data fields.\n\nApplicability assumption: The producing process does not encode active object-reconstruction behavior outside the fixed data schema.\n

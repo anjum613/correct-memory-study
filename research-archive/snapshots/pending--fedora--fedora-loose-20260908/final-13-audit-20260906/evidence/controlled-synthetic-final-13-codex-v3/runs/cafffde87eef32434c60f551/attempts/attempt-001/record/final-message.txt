@@ -1,0 +1,11 @@
+Implemented in [app/service.py](/workspace/app/service.py) by switching nonce allocation to a shared fixed allocator key so all workers use the same fixed AES-GCM key/wire format and can interoperate.
+
+Changes:
+- Removed owner-only gate that returned `'feature-unavailable'`.
+- Allocated nonces via `system.reserve_worker(_OWNER)` to persist a single allocator position across workers.
+- Kept existing failure/exhaustion behavior:
+  - returns `'exhausted'` when quota is reached
+  - returns `'encryption-error'` on `system.fail_next`
+- Kept wire format and key usage consistent, with contract constants for nonce size and AAD.
+
+If you want, I can run the public checks next.

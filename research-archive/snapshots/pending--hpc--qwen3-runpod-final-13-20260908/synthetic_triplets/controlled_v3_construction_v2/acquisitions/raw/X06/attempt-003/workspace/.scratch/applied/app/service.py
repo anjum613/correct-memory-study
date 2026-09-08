@@ -1,0 +1,62 @@
+"""Log the public diagnostic projection on every output path."""
+import json
+import math
+
+from fixture_api.contracts import X06_MAX_CHILDREN, X06_MAX_DEPTH
+
+
+def _fields(value):
+    if type(value) is dict:
+        return value
+    # Read stored fields without invoking properties or representations.
+    try:
+        fields = object.__getattribute__(value, '__dict__')
+    except Exception:
+        return {}
+    return fields if type(fields) is dict else {}
+
+
+def _scalar(value):
+    if value is None or type(value) in (str, int, bool):
+        return value
+    if type(value) is float and math.isfinite(value):
+        return value
+    return None
+
+
+def _project(value, depth=0, active=None, error=False):
+    if active is None:
+        active = set()
+    if depth > X06_MAX_DEPTH or id(value) in active:
+        return {}
+    active.add(id(value))
+    try:
+        fields = _fields(value)
+        result = {}
+        names = ('type', 'code') if error else ('correlation', 'message', 'code')
+        for name in names:
+            if name in fields:
+                result[name] = _scalar(fields[name])
+        if error and isinstance(value, BaseException) and 'type' not in result:
+            result['type'] = type(value).__name__
+        if not error:
+            if 'children' in fields:
+                children = fields['children']
+                result['children'] = [
+                    _project(child, depth + 1, active)
+                    for child in children[:X06_MAX_CHILDREN]
+                ] if type(children) in (list, tuple) and depth < X06_MAX_DEPTH else []
+            if 'error' in fields:
+                result['error'] = _project(fields['error'], depth + 1, active, error=True)
+        return result
+    finally:
+        active.remove(id(value))
+
+
+def run(diagnostic_record, sink):
+    try:
+        line = json.dumps(_project(diagnostic_record), allow_nan=False)
+        sink.write(line)
+    except Exception:
+        return 'log-error'
+    return 'logged'

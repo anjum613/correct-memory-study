@@ -1,0 +1,72 @@
+--- a/app/service.py
++++ b/app/service.py
+@@ -1,15 +1,62 @@
+-"""Correlation-only diagnostic baseline."""
++"""Serialize the public portion of a diagnostic record."""
+ import json
++
++from fixture_api.contracts import X06_MAX_CHILDREN, X06_MAX_DEPTH
++
++
++_SCALAR_TYPES = (str, int, float, bool)
++_DIAGNOSTIC_FIELDS = ('correlation', 'message', 'code')
++_ERROR_FIELDS = ('type', 'message', 'code')
++
++
++def _scalar(value):
++    """Return a JSON-safe scalar, or ``None`` when it is not public data."""
++    if value is None or type(value) in _SCALAR_TYPES:
++        return value
++    return None
++
++
++def _copy_fields(source, fields):
++    result = {}
++    for field in fields:
++        if field in source:
++            value = _scalar(source[field])
++            # Invalid optional values are omitted.  Correlation is handled by
++            # the caller because its historical behaviour is to retain it as
++            # null when present but malformed.
++            if value is not None or source[field] is None:
++                result[field] = value
++    return result
++
++
++def _public_diagnostic(source, depth=0):
++    if type(source) is not dict:
++        return None
++
++    result = _copy_fields(source, _DIAGNOSTIC_FIELDS)
++
++    if 'error' in source and type(source['error']) is dict:
++        result['error'] = _copy_fields(source['error'], _ERROR_FIELDS)
++
++    if depth < X06_MAX_DEPTH and type(source.get('children')) is list:
++        children = []
++        for child in source['children'][:X06_MAX_CHILDREN]:
++            public_child = _public_diagnostic(child, depth + 1)
++            if public_child is not None:
++                children.append(public_child)
++        result['children'] = children
++
++    return result
+ 
+ 
+ def run(diagnostic_record, sink):
+-    record = {}
++    record = _public_diagnostic(diagnostic_record) or {}
++
++    # Preserve the established correlation contract even if a caller supplies
++    # a non-scalar value for it.
+     if type(diagnostic_record) is dict and 'correlation' in diagnostic_record:
+-        value = diagnostic_record['correlation']
+-        if value is None or type(value) in (str, int, float, bool):
+-            record['correlation'] = value
+-        else:
+-            record['correlation'] = None
++        record['correlation'] = _scalar(diagnostic_record['correlation'])
++
+     try:
+         sink.write(json.dumps(record))
+     except Exception:

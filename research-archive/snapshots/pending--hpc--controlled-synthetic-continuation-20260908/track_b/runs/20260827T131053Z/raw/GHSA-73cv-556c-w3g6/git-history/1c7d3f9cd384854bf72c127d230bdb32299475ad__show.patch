@@ -1,0 +1,1495 @@
+commit 1c7d3f9cd384854bf72c127d230bdb32299475ad
+Author:     Xiang Fu <xiangfu@startree.ai>
+AuthorDate: Mon May 25 14:09:53 2026 +0800
+Commit:     GitHub <noreply@github.com>
+CommitDate: Sun May 24 23:09:53 2026 -0700
+
+    [codex] fix read-query exposure safeguards (#95)
+---
+ .env.example                             |   4 +-
+ CHANGELOG.md                             |  10 +-
+ PR_DESCRIPTION.md                        | 176 ----------------
+ README.md                                |  18 +-
+ SECURITY.md                              |  70 +++++++
+ docs/index.html                          |   2 +-
+ helm/README.md                           |  23 ++-
+ helm/mcp-pinot/templates/_helpers.tpl    |  24 +++
+ helm/mcp-pinot/templates/deployment.yaml |   1 +
+ helm/mcp-pinot/templates/service.yaml    |   2 +
+ helm/mcp-pinot/values.yaml               |   9 +-
+ mcp_pinot/config.py                      |   4 +-
+ mcp_pinot/pinot_client.py                | 336 ++++++++++++++++++++++++++++++-
+ mcp_pinot/prompts.py                     |   2 +-
+ mcp_pinot/server.py                      |  31 ++-
+ pyproject.toml                           |   3 +-
+ tests/mocks/execute_query.py             |   2 +-
+ tests/mocks/pinot_client.py              |   2 +-
+ tests/test_config.py                     |   6 +-
+ tests/test_pinot_client.py               | 160 +++++++++++++++
+ tests/test_server.py                     | 101 +++++++++-
+ user_guide.md                            |   6 +-
+ uv.lock                                  |  13 +-
+ 23 files changed, 799 insertions(+), 206 deletions(-)
+
+diff --git a/.env.example b/.env.example
+index 3011d7b..fc9b6dc 100644
+--- a/.env.example
++++ b/.env.example
+@@ -43,7 +43,7 @@ PINOT_QUERY_TIMEOUT=60
+ MCP_TRANSPORT=http
+ 
+ # Server Host and Port
+-MCP_HOST=0.0.0.0
++MCP_HOST=127.0.0.1
+ MCP_PORT=8080
+ 
+ # SSL Configuration (optional)
+@@ -54,7 +54,7 @@ MCP_PORT=8080
+ # OAuth Authentication Configuration
+ # =============================================================================
+ 
+-# Enable OAuth authentication
++# Enable OAuth authentication before exposing HTTP beyond localhost
+ OAUTH_ENABLED=false
+ 
+ # OAuth Client Configuration
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 0db2bd6..9eb0865 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -58,10 +58,12 @@
+ 
+ #### Dependencies
+ - **Updated uvicorn**: Enhanced to `uvicorn[standard]` for better HTTP support
+-- **Minimal Dependencies**: No new required dependencies added
++- **SQL parsing**: Added `sqlglot` for parser-backed read-query validation
+ - **Optional SSL**: SSL libraries only used when certificates provided
+ 
+ ### 🔒 Security
++- **Loopback HTTP default**: The default HTTP bind host is now `127.0.0.1`; the server refuses non-loopback HTTP binds unless OAuth is enabled.
++- **Read-only query enforcement**: `read-query` now rejects non-SELECT statements, stacked statements, and write/DDL/admin keywords before forwarding SQL to Pinot.
+ - **DNS rebinding mitigation**: Raised minimum `mcp[cli]` dependency to `>=1.10.0` (fixes HTTP/SSE rebinding protections) and recommend binding HTTP to loopback or enabling TLS when exposed
+ 
+ ### 🌐 API Endpoints
+@@ -83,10 +85,10 @@
+ 
+ #### New MCP Server Configuration
+ ```bash
+-MCP_TRANSPORT=both          # Transport mode: stdio/http/both (default: both)
+-MCP_HOST=0.0.0.0           # HTTP bind host (default: 0.0.0.0)
++MCP_TRANSPORT=http          # Transport mode: stdio/http (default: http)
++MCP_HOST=127.0.0.1         # HTTP bind host (default: 127.0.0.1)
+ MCP_PORT=8080              # HTTP port (default: 8080)
+-MCP_ENDPOINT=/sse          # SSE endpoint path (default: /sse)
++MCP_PATH=/mcp              # MCP HTTP path (default: /mcp)
+ MCP_SSL_KEYFILE=           # SSL private key path (optional)
+ MCP_SSL_CERTFILE=          # SSL certificate path (optional)
+ ```
+diff --git a/PR_DESCRIPTION.md b/PR_DESCRIPTION.md
+deleted file mode 100644
+index 4af0b41..0000000
+--- a/PR_DESCRIPTION.md
++++ /dev/null
+@@ -1,176 +0,0 @@
+-# 🚀 Add HTTP/HTTPS Transport Support with Dual Transport Mode
+-
+-## 🎯 Overview
+-
+-This PR adds comprehensive HTTP/HTTPS transport support to the MCP Pinot Server, enabling deployment in Kubernetes environments while maintaining full backward compatibility with existing STDIO usage.
+-
+-## ✨ Key Features
+-
+-### 🌐 **Dual Transport Mode (Default)**
+-- **STDIO Transport**: Continues to work for Claude Desktop integration
+-- **HTTP Transport**: New SSE-based transport for web clients and remote access
+-- **Both Simultaneously**: Default mode runs both transports concurrently
+-- **Zero Breaking Changes**: Existing users see no changes in behavior
+-
+-### 🔒 **Production-Ready HTTPS Support**
+-- **SSL/TLS Configuration**: Full certificate support for HTTPS
+-- **Kubernetes Ready**: Complete deployment manifests with Ingress
+-- **Security First**: HTTPS by default in production configurations
+-- **Flexible Deployment**: Direct HTTPS or Ingress termination options
+-
+-### 🛠 **REST API Endpoints**
+-- **GET `/api/tools/list`**: List available MCP tools
+-- **POST `/api/tools/call`**: Execute tool calls with JSON payload
+-- **Simple Integration**: Easy HTTP API for web applications
+-- **No Dependencies**: Query with built-in Python or curl
+-
+-## 📊 **What's New**
+-
+-### Configuration Options
+-```bash
+-# New environment variables (all optional)
+-MCP_TRANSPORT=both          # "stdio", "http", or "both" (default: both)
+-MCP_HOST=0.0.0.0           # HTTP bind host
+-MCP_PORT=8080              # HTTP port
+-MCP_ENDPOINT=/sse          # SSE endpoint path
+-MCP_SSL_KEYFILE=           # SSL private key (for HTTPS)
+-MCP_SSL_CERTFILE=          # SSL certificate (for HTTPS)
+-```
+-
+-### Transport Modes
+-- **`both`** (default): Runs STDIO + HTTP simultaneously
+-- **`stdio`**: STDIO only (original behavior)
+-- **`http`**: HTTP only (for pure web deployments)
+-
+-### Kubernetes Deployment
+-```bash
+-# Deploy to Kubernetes with HTTPS
+-kubectl apply -f k8s/
+-```
+-
+-## 🧪 **Testing & Quality**
+-
+-### Comprehensive Test Coverage
+-- **45+ new tests** added across 3 new test files
+-- **100% configuration module coverage**
+-- **All existing tests pass** (backward compatibility verified)
+-- **Integration tests** with real Pinot quickstart data
+-
+-### Test Results
+-```
+-============================================ 67 passed, 7 skipped ============================================
+-```
+-
+-### Files Added/Modified
+-- **Core**: `mcp_pinot/server.py`, `mcp_pinot/config.py`
+-- **Tests**: `tests/test_http_transport.py`, `tests/test_http_integration.py`
+-- **K8s**: Complete deployment manifests in `k8s/` directory
+-- **Examples**: Demo scripts and user guides
+-
+-## 🎯 **Problem Solved**
+-
+-**Original Issue**: MCP server only supported STDIO transport, making Kubernetes deployment with HTTPS impossible.
+-
+-**Solution**: Added HTTP/HTTPS transport support while maintaining STDIO compatibility, enabling both local desktop usage and production Kubernetes deployment.
+-
+-## 📈 **Impact**
+-
+-### For Existing Users
+-- ✅ **Zero Impact**: Default behavior includes HTTP alongside existing STDIO
+-- ✅ **No Configuration Changes**: Everything works as before
+-- ✅ **Enhanced Capability**: Now get HTTP access for free
+-
+-### For New Users
+-- ✅ **Web Integration**: Easy HTTP API for web applications
+-- ✅ **Kubernetes Deployment**: Production-ready with HTTPS
+-- ✅ **Multiple Clients**: Concurrent connections supported
+-- ✅ **Simple Testing**: Query with curl or Python scripts
+-
+-### For Production
+-- ✅ **Scalable**: Multiple replicas in Kubernetes
+-- ✅ **Secure**: HTTPS with automatic certificate management
+-- ✅ **Monitored**: Health checks and structured logging
+-- ✅ **Configurable**: Environment-based configuration
+-
+-## 🔍 **Validation**
+-
+-### Tested Scenarios
+-1. **✅ Local Development**: Both transports working simultaneously
+-2. **✅ HTTP API**: REST endpoints returning real Pinot data
+-3. **✅ Table Queries**: All 10 Pinot quickstart tables accessible
+-4. **✅ Query Execution**: SELECT queries returning proper results
+-5. **✅ Connection Testing**: Pinot connectivity verified
+-6. **✅ Backward Compatibility**: Existing STDIO functionality unchanged
+-
+-### Sample Working Commands
+-```bash
+-# List all Pinot tables via HTTP
+-curl -X POST http://127.0.0.1:8080/api/tools/call \
+-  -H "Content-Type: application/json" \
+-  -d '{"name": "list-tables", "arguments": {}}'
+-
+-# Execute queries
+-curl -X POST http://127.0.0.1:8080/api/tools/call \
+-  -H "Content-Type: application/json" \
+-  -d '{"name": "read-query", "arguments": {"query": "SELECT COUNT(*) FROM airlineStats"}}'
+-```
+-
+-## 🎉 **Benefits**
+-
+-### Immediate Benefits
+-- **Kubernetes Deployment**: Ready for production K8s environments
+-- **HTTPS Support**: Secure communication for remote clients
+-- **Multiple Clients**: Support concurrent web application connections
+-- **Easy Testing**: Simple HTTP API for development and debugging
+-
+-### Future Benefits
+-- **Web Dashboard**: Foundation for web-based Pinot exploration UI
+-- **API Integration**: Easy integration with existing web services
+-- **Load Balancing**: Horizontal scaling in Kubernetes
+-- **Monitoring**: HTTP endpoints enable better observability
+-
+-## 🔄 **Migration Guide**
+-
+-### Existing Users (No Action Required)
+-- Server now runs both STDIO and HTTP by default
+-- All existing Claude Desktop configurations work unchanged
+-- New HTTP API available as bonus feature
+-
+-### New Kubernetes Users
+-```bash
+-# 1. Configure your Pinot connection
+-kubectl create configmap mcp-pinot-config \
+-  --from-literal=controller_url=http://pinot-controller:9000 \
+-  --from-literal=broker_url=http://pinot-broker:8000
+-
+-# 2. Deploy the server
+-kubectl apply -f k8s/
+-
+-# 3. Access via HTTPS
+-https://your-domain.com/sse
+-```
+-
+-## 📋 **Checklist**
+-
+-- ✅ **Backward Compatibility**: All existing functionality preserved
+-- ✅ **Test Coverage**: Comprehensive test suite with 45+ new tests
+-- ✅ **Documentation**: Complete user guides and examples
+-- ✅ **Production Ready**: Kubernetes manifests and HTTPS support
+-- ✅ **Security**: SSL/TLS configuration and secure defaults
+-- ✅ **Performance**: Concurrent transport handling
+-- ✅ **Validation**: Tested with real Pinot quickstart data
+-
+-## 🎯 **Review Focus Areas**
+-
+-1. **Transport Logic**: Review dual transport implementation in `server.py`
+-2. **Configuration**: Check new ServerConfig in `config.py`
+-3. **Security**: Verify SSL/TLS and HTTPS configurations
+-4. **Kubernetes**: Review production deployment manifests
+-5. **Testing**: Ensure test coverage is adequate
+-6. **Documentation**: Verify user guides are clear and complete
+-
+-This PR transforms the MCP Pinot Server from a desktop-only tool into a production-ready, dual-transport server suitable for both local development and enterprise Kubernetes deployments with full HTTPS support.
+-
+----
+-
+-**Ready for Review** ✅ | **Tested with Pinot Quickstart** ✅ | **Kubernetes Ready** ✅
+diff --git a/README.md b/README.md
+index c1340f3..50b02b6 100644
+--- a/README.md
++++ b/README.md
+@@ -8,6 +8,7 @@
+ - [Docker Build](#docker-build)
+ - [Claude Desktop Integration](#claude-desktop-integration)
+ - [Try a Prompt](#try-a-prompt)
++- [Security and Vulnerability Reporting](#security-and-vulnerability-reporting)
+ - [Developer Notes](#developer-notes)
+ 
+ ## Overview
+@@ -166,6 +167,13 @@ To disable table filtering, either:
+ 
+ When not configured, all tables in the Pinot cluster are visible.
+ 
++### Read-only Query Enforcement
++
++The `read-query` tool always validates SQL before forwarding it to Pinot. It
++accepts one statement only, and that statement must be a read-only `SELECT` or
++`WITH ... SELECT` query. SQL comments are stripped, semicolon-stacked statements
++are rejected, and write/DDL/admin keywords are blocked.
++
+ ### Configure OAuth Authentication (Optional)
+ To enable OAuth authentication, set the following environment variables in your `.env` file:
+ 
+@@ -204,7 +212,9 @@ uv --directory . run mcp_pinot/server.py
+ You should see logs indicating that the server is running.
+ 
+ > Security notes:
+-> - The HTTP transport binds to `0.0.0.0` by default; prefer the `stdio` transport for Claude Desktop, or bind HTTP to `127.0.0.1` via `MCP_HOST=127.0.0.1`, or enable TLS (`MCP_SSL_KEYFILE`/`MCP_SSL_CERTFILE`) before exposing it.
++> - The HTTP transport binds to `127.0.0.1` by default. Prefer the `stdio` transport for Claude Desktop; set `MCP_HOST=0.0.0.0` only when the server is protected by OAuth and TLS or an authenticated reverse proxy.
++> - The server refuses to start when HTTP is bound to a non-loopback host and `OAUTH_ENABLED` is not `true`.
++> - `read-query` enforces a single read-only SQL statement before execution. This is a guardrail, not a replacement for Pinot authentication and authorization.
+ > - Ensure you are using `mcp[cli]` version `>=1.10.0`, which includes DNS rebinding protections for the HTTP/SSE server.
+ 
+ ### Launch Pinot Quickstart (Optional)
+@@ -280,6 +290,12 @@ dxt pack
+ 
+ After this you'll get a .dxt file in your dir. Double click on that file to install it in claude desktop
+ 
++## Security and Vulnerability Reporting
++
++See [SECURITY.md](SECURITY.md) for vulnerability reporting instructions,
++security categories, and the checklist for safely exposing the MCP HTTP
++endpoint.
++
+ ## Developer
+ 
+ - All tools are defined in the `Pinot` class in `utils/pinot_client.py`
+diff --git a/SECURITY.md b/SECURITY.md
+new file mode 100644
+index 0000000..675bd06
+--- /dev/null
++++ b/SECURITY.md
+@@ -0,0 +1,70 @@
++# Security
++
++## Reporting a vulnerability
++
++Do not open a public GitHub issue for a suspected vulnerability.
++
++Report security issues through GitHub private vulnerability reporting or a
++private security advisory for this repository. Include:
++
++- Affected version, commit, or container image tag
++- Deployment mode: stdio, HTTP, HTTPS, Docker, Helm, or Kubernetes
++- Relevant configuration with secrets removed
++- Steps to reproduce and expected impact
++- Any known workaround or mitigation
++
++The maintainers will triage the report, confirm the affected scope, and
++coordinate a fix and disclosure timeline before public details are shared.
++
++## Supported security scope
++
++Security fixes target the current `main` branch and the latest published
++package or container release. If a vulnerability affects an older release,
++upgrade guidance will be included with the advisory when practical.
++
++## Security categories
++
++### Network exposure and authentication
++
++The MCP HTTP transport is intended to be local by default. It binds to
++`127.0.0.1` unless configured otherwise. Binding HTTP or HTTPS to a non-loopback
++address must be protected with OAuth, TLS, or an authenticated reverse proxy.
++
++For Helm deployments, exposing the server through a Kubernetes Service or
++Traefik requires an explicit non-loopback bind host and OAuth-enabled
++configuration.
++
++### Tool invocation and query safety
++
++The `read-query` tool accepts one read-only `SELECT` or `WITH ... SELECT`
++statement. It rejects stacked statements and write, DDL, or administrative SQL
++keywords before sending SQL to Pinot.
++
++This validation is a defense-in-depth guardrail. It is not a replacement for
++Pinot authentication, Pinot authorization, network controls, or least-privilege
++cluster credentials.
++
++### Pinot data access
++
++Use Pinot's native authentication and table-level access controls for production
++authorization. MCP table filtering is a usability feature for limiting visible
++tables and reducing cognitive load; it is not a security boundary.
++
++### Secrets and deployment configuration
++
++Never commit real Pinot credentials, OAuth client secrets, TLS private keys, or
++cluster-specific tokens. Use environment variables, Kubernetes Secrets, or your
++organization's secret manager.
++
++Review `.env.example` and the Helm chart values before exposing the MCP HTTP
++endpoint outside a local development environment.
++
++## Security checklist before exposing HTTP
++
++- Set `MCP_HOST=0.0.0.0` only when remote clients need network access.
++- Set `OAUTH_ENABLED=true` before binding to a non-loopback host.
++- Use TLS directly or terminate TLS at an authenticated reverse proxy.
++- Configure Pinot-side authentication and authorization.
++- Use least-privilege credentials for the MCP server's Pinot connection.
++- Confirm Helm `service.enabled`, `traefik.enabled`, and health checks match the
++  intended exposure model.
+diff --git a/docs/index.html b/docs/index.html
+index a056af1..33f077e 100644
+--- a/docs/index.html
++++ b/docs/index.html
+@@ -969,7 +969,7 @@ kubectl apply -f k8s/</pre>
+             <tr>
+               <td><code>MCP_HOST</code></td>
+               <td>HTTP bind address</td>
+-              <td><code>0.0.0.0</code></td>
++              <td><code>127.0.0.1</code></td>
+             </tr>
+             <tr>
+               <td><code>MCP_PORT</code></td>
+diff --git a/helm/README.md b/helm/README.md
+index dce75cc..bbad63c 100644
+--- a/helm/README.md
++++ b/helm/README.md
+@@ -14,7 +14,7 @@ This Helm chart deploys the MCP Pinot server to Kubernetes.
+ ## Quick Start
+ 
+ ```bash
+-# Install with default values
++# Install local-only defaults. This does not create a Service.
+ helm install mcp-pinot ./helm/mcp-pinot --namespace mcp-pinot --create-namespace
+ 
+ # Install with custom image
+@@ -24,6 +24,21 @@ helm install mcp-pinot ./helm/mcp-pinot \
+   --set image.tag=v1.0.0
+ ```
+ 
++To expose the server through a Kubernetes Service, enable OAuth and bind the
++container to the pod interface:
++
++```bash
++helm install mcp-pinot ./helm/mcp-pinot \
++  --namespace mcp-pinot \
++  --create-namespace \
++  --set service.enabled=true \
++  --set mcp.host=0.0.0.0 \
++  --set mcp.oauth.enabled=true
++```
++
++Set the OAuth endpoint, issuer, audience, client ID, and client secret values
++for your identity provider before exposing the Service.
++
+ ## Traefik Integration
+ 
+ The chart includes Traefik IngressRoute support. Enable it by setting:
+@@ -35,6 +50,12 @@ traefik:
+   tls: {}
+ ```
+ 
++Only expose the MCP HTTP endpoint outside a trusted network when OAuth is enabled
++and the route is protected by TLS or an authenticated ingress/reverse proxy. The
++chart defaults to local-only mode with no Service; set `service.enabled=true` and
++`mcp.host=0.0.0.0` only together with `mcp.oauth.enabled=true`, otherwise the
++chart refuses to render or the server refuses to start.
++
+ ## Configuration
+ 
+ See `values.yaml` for all available configuration options including:
+diff --git a/helm/mcp-pinot/templates/_helpers.tpl b/helm/mcp-pinot/templates/_helpers.tpl
+index 32eca4a..a3a563e 100644
+--- a/helm/mcp-pinot/templates/_helpers.tpl
++++ b/helm/mcp-pinot/templates/_helpers.tpl
+@@ -61,6 +61,30 @@ Create the name of the service account to use
+ {{- end }}
+ {{- end }}
+ 
++{{/*
++Validate MCP HTTP exposure settings.
++*/}}
++{{- define "mcp-pinot.isLoopbackHost" -}}
++{{- $host := lower (toString .Values.mcp.host) -}}
++{{- if or (eq $host "localhost") (eq $host "::1") (hasPrefix "127." $host) -}}true{{- else -}}false{{- end -}}
++{{- end }}
++
++{{- define "mcp-pinot.validateExposure" -}}
++{{- $isLoopback := eq (include "mcp-pinot.isLoopbackHost" .) "true" -}}
++{{- $serviceEnabled := .Values.service.enabled -}}
++{{- $traefikEnabled := .Values.traefik.enabled -}}
++{{- $healthCheckEnabled := or .Values.healthCheck.liveness.enabled .Values.healthCheck.readiness.enabled -}}
++{{- if and $traefikEnabled (not $serviceEnabled) -}}
++{{- fail "traefik.enabled=true requires service.enabled=true" -}}
++{{- end -}}
++{{- if and (or $serviceEnabled $traefikEnabled $healthCheckEnabled) $isLoopback -}}
++{{- fail "service, Traefik, and HTTP health checks require mcp.host to be non-loopback; set mcp.host=0.0.0.0 and mcp.oauth.enabled=true" -}}
++{{- end -}}
++{{- if and (not $isLoopback) (not .Values.mcp.oauth.enabled) -}}
++{{- fail "mcp.host is non-loopback, so mcp.oauth.enabled must be true" -}}
++{{- end -}}
++{{- end }}
++
+ {{/*
+ Certificate template for internal certificates
+ */}}
+diff --git a/helm/mcp-pinot/templates/deployment.yaml b/helm/mcp-pinot/templates/deployment.yaml
+index 5586536..75dff56 100644
+--- a/helm/mcp-pinot/templates/deployment.yaml
++++ b/helm/mcp-pinot/templates/deployment.yaml
+@@ -1,3 +1,4 @@
++{{- include "mcp-pinot.validateExposure" . }}
+ apiVersion: apps/v1
+ kind: Deployment
+ metadata:
+diff --git a/helm/mcp-pinot/templates/service.yaml b/helm/mcp-pinot/templates/service.yaml
+index 6422742..9717f8a 100644
+--- a/helm/mcp-pinot/templates/service.yaml
++++ b/helm/mcp-pinot/templates/service.yaml
+@@ -1,3 +1,4 @@
++{{- if .Values.service.enabled -}}
+ apiVersion: v1
+ kind: Service
+ metadata:
+@@ -17,3 +18,4 @@ spec:
+       name: http
+   selector:
+     {{- include "mcp-pinot.selectorLabels" . | nindent 4 }}
++{{- end }}
+diff --git a/helm/mcp-pinot/values.yaml b/helm/mcp-pinot/values.yaml
+index e82e62e..2a17213 100644
+--- a/helm/mcp-pinot/values.yaml
++++ b/helm/mcp-pinot/values.yaml
+@@ -42,6 +42,10 @@ securityContext:
+ 
+ # Service configuration
+ service:
++  # Disabled by default because the default MCP bind host is loopback-only.
++  # To expose the pod through a Service, set service.enabled=true,
++  # mcp.host=0.0.0.0, and mcp.oauth.enabled=true.
++  enabled: false
+   type: ClusterIP
+   port: 80
+   targetPort: 8000
+@@ -88,7 +92,9 @@ replicas: 1
+ # MCP Server Configuration
+ mcp:
+   transport: "http"
+-  host: "0.0.0.0"
++  # Set to "0.0.0.0" only with OAuth enabled; otherwise the server refuses
++  # network-reachable HTTP binds.
++  host: "127.0.0.1"
+   port: 8000
+   path: "/mcp"
+   ssl:
+@@ -96,6 +102,7 @@ mcp:
+     keyFile: "/etc/ssl/tls.key"
+     certFile: "/etc/ssl/tls.crt"
+   oauth:
++    # Required when binding MCP HTTP to a non-loopback host.
+     enabled: false
+     clientId: ""
+     clientSecret: ""
+diff --git a/mcp_pinot/config.py b/mcp_pinot/config.py
+index caf1953..8d4931f 100644
+--- a/mcp_pinot/config.py
++++ b/mcp_pinot/config.py
+@@ -57,7 +57,7 @@ class ServerConfig:
+     """Configuration container for MCP server transport settings"""
+ 
+     transport: str = "http"
+-    host: str = "0.0.0.0"
++    host: str = "127.0.0.1"
+     port: int = 8080
+     ssl_keyfile: str | None = None
+     ssl_certfile: str | None = None
+@@ -321,7 +321,7 @@ def load_server_config() -> ServerConfig:
+ 
+     return ServerConfig(
+         transport=os.getenv("MCP_TRANSPORT", "http").lower(),
+-        host=os.getenv("MCP_HOST", "0.0.0.0"),
++        host=os.getenv("MCP_HOST", "127.0.0.1"),
+         port=int(os.getenv("MCP_PORT", "8080")),
+         ssl_keyfile=os.getenv("MCP_SSL_KEYFILE"),
+         ssl_certfile=os.getenv("MCP_SSL_CERTFILE"),
+diff --git a/mcp_pinot/pinot_client.py b/mcp_pinot/pinot_client.py
+index 05dedf2..005e12e 100644
+--- a/mcp_pinot/pinot_client.py
++++ b/mcp_pinot/pinot_client.py
+@@ -8,6 +8,9 @@ from typing import Any, Dict, Tuple
+ import pandas as pd
+ from pinotdb import connect
+ import requests
++import sqlglot
++from sqlglot import exp
++from sqlglot.errors import ParseError
+ 
+ from .config import PinotConfig, get_logger, reload_table_filters_from_file
+ 
+@@ -46,6 +49,289 @@ class PinotEndpoints:
+     TABLE_CONFIG = "tableConfigs/{}"
+ 
+ 
++_READ_QUERY_START_KEYWORDS = {"SELECT", "WITH"}
++_PROHIBITED_READ_QUERY_KEYWORDS = {
++    "ALTER",
++    "CALL",
++    "COPY",
++    "CREATE",
++    "DELETE",
++    "DESCRIBE",
++    "DROP",
++    "EXEC",
++    "EXECUTE",
++    "EXPLAIN",
++    "EXPORT",
++    "GRANT",
++    "IMPORT",
++    "INSERT",
++    "INTO",
++    "LOAD",
++    "MERGE",
++    "REFRESH",
++    "REPLACE",
++    "RESET",
++    "REVOKE",
++    "SET",
++    "SHOW",
++    "TRUNCATE",
++    "UPDATE",
++    "UPSERT",
++    "USE",
++}
++
++
++def _strip_sql_comments(query: str) -> str:
++    """Remove SQL comments while preserving quoted strings and identifiers."""
++    result: list[str] = []
++    quote: str | None = None
++    i = 0
++
++    while i < len(query):
++        char = query[i]
++        next_char = query[i + 1] if i + 1 < len(query) else ""
++
++        if quote:
++            result.append(char)
++            if char == "\\" and quote in {"'", '"'} and next_char:
++                result.append(next_char)
++                i += 2
++                continue
++            if char == quote:
++                if next_char == quote:
++                    result.append(next_char)
++                    i += 2
++                    continue
++                quote = None
++            i += 1
++            continue
++
++        if char in {"'", '"', "`"}:
++            quote = char
++            result.append(char)
++            i += 1
++            continue
++
++        if char == "-" and next_char == "-":
++            i += 2
++            while i < len(query) and query[i] not in {"\n", "\r"}:
++                i += 1
++            result.append("\n")
++            continue
++
++        if char == "/" and next_char == "*":
++            i += 2
++            while i + 1 < len(query) and not (query[i] == "*" and query[i + 1] == "/"):
++                i += 1
++            i = min(i + 2, len(query))
++            result.append(" ")
++            continue
++
++        result.append(char)
++        i += 1
++
++    return "".join(result)
++
++
++def _split_sql_statements(query: str) -> list[str]:
++    """Split SQL on semicolons outside quoted strings and identifiers."""
++    query = _strip_sql_comments(query)
++    statements: list[str] = []
++    current: list[str] = []
++    quote: str | None = None
++    i = 0
++
++    while i < len(query):
++        char = query[i]
++        next_char = query[i + 1] if i + 1 < len(query) else ""
++
++        if quote:
++            current.append(char)
++            if char == "\\" and quote in {"'", '"'} and next_char:
++                current.append(next_char)
++                i += 2
++                continue
++            if char == quote:
++                if next_char == quote:
++                    current.append(next_char)
++                    i += 2
++                    continue
++                quote = None
++            i += 1
++            continue
++
++        if char in {"'", '"', "`"}:
++            quote = char
++            current.append(char)
++            i += 1
++            continue
++
++        if char == ";":
++            statement = "".join(current).strip()
++            if statement:
++                statements.append(statement)
++            current = []
++            i += 1
++            continue
++
++        current.append(char)
++        i += 1
++
++    statement = "".join(current).strip()
++    if statement:
++        statements.append(statement)
++
++    return statements
++
++
++def _sql_words(statement: str, *, top_level_only: bool = False) -> list[str]:
++    """Return unquoted SQL word tokens in order."""
++    words: list[str] = []
++    current: list[str] = []
++    quote: str | None = None
++    depth = 0
++    i = 0
++
++    def append_current_word() -> None:
++        if current and (not top_level_only or depth == 0):
++            words.append("".join(current).upper())
++        current.clear()
++
++    while i < len(statement):
++        char = statement[i]
++        next_char = statement[i + 1] if i + 1 < len(statement) else ""
++
++        if quote:
++            if char == "\\" and quote in {"'", '"'} and next_char:
++                i += 2
++                continue
++            if char == quote:
++                if next_char == quote:
++                    i += 2
++                    continue
++                quote = None
++            i += 1
++            continue
++
++        if char in {"'", '"', "`"}:
++            append_current_word()
++            quote = char
++            i += 1
++            continue
++
++        if char.isalnum() or char == "_":
++            current.append(char)
++        elif char == "(":
++            append_current_word()
++            depth += 1
++        elif char == ")":
++            append_current_word()
++            depth = max(0, depth - 1)
++        else:
++            append_current_word()
++        i += 1
++
++    append_current_word()
++
++    return words
++
++
++def _strip_trailing_pinot_option(statement: str) -> str:
++    """Remove a top-level trailing Pinot OPTION clause for SQL parser validation."""
++    quote: str | None = None
++    depth = 0
++    i = 0
++
++    def option_clause_ends_statement(index: int) -> bool:
++        while index < len(statement) and statement[index].isspace():
++            index += 1
++        if index >= len(statement) or statement[index] != "(":
++            return False
++
++        option_quote: str | None = None
++        option_depth = 0
++        while index < len(statement):
++            char = statement[index]
++            next_char = statement[index + 1] if index + 1 < len(statement) else ""
++
++            if option_quote:
++                if char == "\\" and option_quote in {"'", '"'} and next_char:
++                    index += 2
++                    continue
++                if char == option_quote:
++                    if next_char == option_quote:
++                        index += 2
++                        continue
++                    option_quote = None
++                index += 1
++                continue
++
++            if char in {"'", '"', "`"}:
++                option_quote = char
++            elif char == "(":
++                option_depth += 1
++            elif char == ")":
++                option_depth -= 1
++                if option_depth == 0:
++                    index += 1
++                    break
++            index += 1
++
++        if option_depth != 0:
++            return False
++
++        while index < len(statement) and statement[index].isspace():
++            index += 1
++
++        return index == len(statement)
++
++    while i < len(statement):
++        char = statement[i]
++        next_char = statement[i + 1] if i + 1 < len(statement) else ""
++
++        if quote:
++            if char == "\\" and quote in {"'", '"'} and next_char:
++                i += 2
++                continue
++            if char == quote:
++                if next_char == quote:
++                    i += 2
++                    continue
++                quote = None
++            i += 1
++            continue
++
++        if char in {"'", '"', "`"}:
++            quote = char
++            i += 1
++            continue
++
++        if char == "(":
++            depth += 1
++            i += 1
++            continue
++
++        if char == ")":
++            depth = max(0, depth - 1)
++            i += 1
++            continue
++
++        if depth == 0 and (char.isalpha() or char == "_"):
++            word_start = i
++            while i < len(statement) and (
++                statement[i].isalnum() or statement[i] == "_"
++            ):
++                i += 1
++            word = statement[word_start:i]
++            if word.upper() == "OPTION" and option_clause_ends_statement(i):
++                return statement[:word_start].rstrip()
++            continue
++
++        i += 1
++
++    return statement
++
++
+ def create_connection(config: PinotConfig) -> connect:
+     """Create Pinot connection with proper authentication handling"""
+     try:
+@@ -296,6 +582,7 @@ class PinotClient:
+         query: str,
+         params: dict[str, Any] | None = None,
+     ) -> list[dict[str, Any]]:
++        query = self.validate_read_query(query)
+         logger.debug(f"Executing query: {query[:100]}...")  # Log first 100 chars
+ 
+         # Validate table access authorization
+@@ -316,6 +603,52 @@ class PinotClient:
+                 logger.error(error_msg)
+                 raise
+ 
++    def validate_read_query(self, query: str) -> str:
++        """Validate and normalize SQL accepted by the read-query tool."""
++        if not isinstance(query, str):
++            raise ValueError("read-query requires a SQL string")
++
++        statements = _split_sql_statements(query)
++        if not statements:
++            raise ValueError("Only read-only SELECT queries are allowed for read-query")
++
++        if len(statements) != 1:
++            raise ValueError(
++                "Only a single read-only SELECT statement is allowed for read-query"
++            )
++
++        statement = statements[0]
++        words = _sql_words(statement)
++        top_level_words = _sql_words(statement, top_level_only=True)
++        if not top_level_words or top_level_words[0] not in _READ_QUERY_START_KEYWORDS:
++            raise ValueError("Only read-only SELECT queries are allowed for read-query")
++
++        prohibited_keyword = next(
++            (word for word in words if word in _PROHIBITED_READ_QUERY_KEYWORDS),
++            None,
++        )
++        if prohibited_keyword:
++            raise ValueError(
++                "Only read-only SELECT queries are allowed for read-query; "
++                f"found prohibited keyword {prohibited_keyword}"
++            )
++
++        if top_level_words[0] == "WITH" and "SELECT" not in top_level_words[1:]:
++            raise ValueError("WITH queries must resolve to a SELECT statement")
++
++        parse_statement = _strip_trailing_pinot_option(statement)
++        try:
++            expression = sqlglot.parse_one(parse_statement, read="trino")
++        except ParseError as e:
++            raise ValueError(
++                "Only valid read-only SELECT queries are allowed for read-query"
++            ) from e
++
++        if not isinstance(expression, exp.Select):
++            raise ValueError("Only read-only SELECT queries are allowed for read-query")
++
++        return statement
++
+     def preprocess_query(self, query: str) -> str:
+         """Preprocess query by removing database prefix and adding timeout options"""
+         # Remove database prefix if present
+@@ -390,8 +723,7 @@ class PinotClient:
+             list[str]: Unique list of table names found in the query
+         """
+         # Remove comments and normalize whitespace
+-        query = re.sub(r"--.*?$", "", query, flags=re.MULTILINE)
+-        query = re.sub(r"/\*.*?\*/", "", query, flags=re.DOTALL)
++        query = _strip_sql_comments(query)
+         query = " ".join(query.split())
+ 
+         matches = []
+diff --git a/mcp_pinot/prompts.py b/mcp_pinot/prompts.py
+index de9a17a..6caf47c 100644
+--- a/mcp_pinot/prompts.py
++++ b/mcp_pinot/prompts.py
+@@ -28,7 +28,7 @@ and ask clarifying questions when needed.
+ 
+ You have access to the following tools to assist in your analysis:
+ 
+-1. read-query: Execute a SQL query on Pinot and return the results
++1. read-query: Execute one read-only SELECT query on Pinot and return the results
+ 2. list-tables: List all available tables in Pinot
+ 3. list-schema: List the schema for a specific table
+ 4. table-details: Get detailed information about a specific table
+diff --git a/mcp_pinot/server.py b/mcp_pinot/server.py
+index 04bfad4..b64f150 100644
+--- a/mcp_pinot/server.py
++++ b/mcp_pinot/server.py
+@@ -5,6 +5,7 @@
+ FastMCP-based implementation for the Apache Pinot MCP Server.
+ """
+ 
++from ipaddress import ip_address
+ import json
+ from typing import Optional
+ 
+@@ -46,6 +47,31 @@ if server_config.oauth_enabled:
+ mcp = FastMCP("Pinot MCP Server", auth=_auth)
+ 
+ 
++def _is_loopback_host(host: str) -> bool:
++    """Return True when host is a local-only bind address."""
++    if host.lower() == "localhost":
++        return True
++
++    try:
++        return ip_address(host).is_loopback
++    except ValueError:
++        return False
++
++
++def _enforce_http_auth_safety(http_enabled: bool) -> None:
++    """Refuse unauthenticated HTTP on network-reachable bind addresses."""
++    if (
++        http_enabled
++        and not server_config.oauth_enabled
++        and not _is_loopback_host(server_config.host)
++    ):
++        raise SystemExit(
++            "Refusing to start: HTTP transport is bound to "
++            f"{server_config.host!r} without OAuth. Set OAUTH_ENABLED=true "
++            "or bind local-only with MCP_HOST=127.0.0.1."
++        )
++
++
+ @mcp.tool
+ def test_connection() -> str:
+     """Test Pinot connection and return diagnostics"""
+@@ -81,8 +107,6 @@ def reload_table_filters() -> str:
+ def read_query(query: str) -> str:
+     """Execute a SELECT query on the Pinot database"""
+     try:
+-        if not query.strip().upper().startswith("SELECT"):
+-            raise ValueError("Only SELECT queries are allowed for read-query")
+         results = pinot_client.execute_query(query=query)
+         return json.dumps(results, indent=2)
+     except Exception as e:
+@@ -248,6 +272,9 @@ def pinot_query() -> str:
+ def main():
+     """Main entry point for FastMCP Pinot Server"""
+     tls_enabled = server_config.ssl_keyfile and server_config.ssl_certfile
++    http_enabled = bool(tls_enabled) or server_config.transport != "stdio"
++    _enforce_http_auth_safety(http_enabled)
++
+     if tls_enabled:
+         app = mcp.http_app(path=server_config.path)
+         uvicorn.run(
+diff --git a/pyproject.toml b/pyproject.toml
+index 2e95752..0f40d22 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -15,7 +15,8 @@ dependencies = [
+     "requests>=2.32.3",
+     "rpds-py>=0.18.1",
+     "pydantic>=2.12.5",
+-    "pyyaml>=6.0.1"
++    "pyyaml>=6.0.1",
++    "sqlglot>=30.8.0",
+ ]
+ 
+ [project.scripts]
+diff --git a/tests/mocks/execute_query.py b/tests/mocks/execute_query.py
+index b3fec11..aef7c17 100644
+--- a/tests/mocks/execute_query.py
++++ b/tests/mocks/execute_query.py
+@@ -9,7 +9,7 @@ def execute_query(query):
+     Returns a sample result.
+     """
+     if "SELECT" not in query.upper():
+-        raise ValueError("Only SELECT queries are allowed")
++        raise ValueError("Only read-only SELECT queries are allowed")
+ 
+     # Return a sample result
+     return [{"id": 1, "name": "Test 1"}, {"id": 2, "name": "Test 2"}]
+diff --git a/tests/mocks/pinot_client.py b/tests/mocks/pinot_client.py
+index 00d92a5..e72a647 100644
+--- a/tests/mocks/pinot_client.py
++++ b/tests/mocks/pinot_client.py
+@@ -17,7 +17,7 @@ class PinotClient:
+         Returns a sample result.
+         """
+         if "SELECT" not in query.upper():
+-            raise ValueError("Only SELECT queries are allowed")
++            raise ValueError("Only read-only SELECT queries are allowed")
+ 
+         # Return a sample result
+         return [{"id": 1, "name": "Test 1"}, {"id": 2, "name": "Test 2"}]
+diff --git a/tests/test_config.py b/tests/test_config.py
+index 161759a..9fb100c 100644
+--- a/tests/test_config.py
++++ b/tests/test_config.py
+@@ -213,7 +213,7 @@ class TestServerConfig:
+         """Test ServerConfig default values"""
+         config = ServerConfig()
+         assert config.transport == "http"
+-        assert config.host == "0.0.0.0"
++        assert config.host == "127.0.0.1"
+         assert config.port == 8080
+         assert config.ssl_keyfile is None
+         assert config.ssl_certfile is None
+@@ -246,7 +246,7 @@ class TestLoadServerConfig:
+             with patch.dict(os.environ, {}, clear=True):
+                 config = load_server_config()
+                 assert config.transport == "http"
+-                assert config.host == "0.0.0.0"
++                assert config.host == "127.0.0.1"
+                 assert config.port == 8080
+                 assert config.ssl_keyfile is None
+                 assert config.ssl_certfile is None
+@@ -290,7 +290,7 @@ class TestLoadServerConfig:
+             with patch.dict(os.environ, env_vars, clear=True):
+                 config = load_server_config()
+                 assert config.transport == "http"
+-                assert config.host == "0.0.0.0"  # default
++                assert config.host == "127.0.0.1"  # default
+                 assert config.port == 3000
+                 assert config.ssl_keyfile is None  # default
+                 assert config.ssl_certfile is None  # default
+diff --git a/tests/test_pinot_client.py b/tests/test_pinot_client.py
+index c9be8db..bae6c36 100644
+--- a/tests/test_pinot_client.py
++++ b/tests/test_pinot_client.py
+@@ -665,6 +665,166 @@ class TestPinotClient:
+ 
+         assert result == [{"col1": "data"}]
+ 
++    def test_execute_query_rejects_non_select_when_no_filter(
++        self, mock_pinot_config, mock_requests
++    ):
++        """Test execute_query rejects write statements even without table filtering."""
++        mock_pinot_config.included_tables = None
++        pinot = PinotClient(mock_pinot_config)
++
++        with pytest.raises(ValueError, match="Only read-only SELECT queries"):
++            pinot.execute_query("DELETE FROM any_table_name WHERE id = 1")
++
++        mock_requests.post.assert_not_called()
++
++    def test_execute_query_rejects_stacked_statement(
++        self, mock_pinot_config, mock_requests
++    ):
++        """Test execute_query rejects stacked statements after a SELECT."""
++        pinot = PinotClient(mock_pinot_config)
++
++        with pytest.raises(
++            ValueError, match="Only a single read-only SELECT statement"
++        ):
++            pinot.execute_query("SELECT * FROM test_table; DROP TABLE test_table")
++
++        mock_requests.post.assert_not_called()
++
++    def test_execute_query_rejects_obfuscated_destructive_keyword(
++        self, mock_pinot_config, mock_requests
++    ):
++        """Test execute_query rejects destructive keywords hidden by comments."""
++        pinot = PinotClient(mock_pinot_config)
++
++        with pytest.raises(
++            ValueError, match="Only a single read-only SELECT statement"
++        ):
++            pinot.execute_query("SELECT * FROM test_table; DR/**/OP TABLE test_table")
++
++        mock_requests.post.assert_not_called()
++
++    def test_execute_query_rejects_prohibited_keyword_in_cte(
++        self, mock_pinot_config, mock_requests
++    ):
++        """Test execute_query rejects write operations embedded in a WITH query."""
++        pinot = PinotClient(mock_pinot_config)
++
++        with pytest.raises(ValueError, match="prohibited keyword UPDATE"):
++            pinot.execute_query(
++                "WITH cte AS (UPDATE test_table SET name = 'x') SELECT * FROM cte"
++            )
++
++        mock_requests.post.assert_not_called()
++
++    def test_execute_query_rejects_with_without_top_level_select(
++        self, mock_pinot_config, mock_requests
++    ):
++        """Test WITH queries must resolve to a top-level SELECT."""
++        pinot = PinotClient(mock_pinot_config)
++
++        with pytest.raises(ValueError, match="WITH queries must resolve"):
++            pinot.execute_query("WITH cte AS (SELECT * FROM test_table) VALUES (1)")
++
++        mock_requests.post.assert_not_called()
++
++    def test_execute_query_allows_trailing_semicolon_comments_and_string_semicolons(
++        self, mock_pinot_config, mock_requests
++    ):
++        """Test read-only validation keeps string semicolons and strips comments."""
++        pinot = PinotClient(mock_pinot_config)
++
++        mock_response = MagicMock()
++        mock_response.json.return_value = {
++            "resultTable": {
++                "dataSchema": {"columnNames": ["literal"]},
++                "rows": [["; DROP TABLE test_table"]],
++            }
++        }
++        mock_requests.post.return_value = mock_response
++
++        result = pinot.execute_query(
++            "/* leading */ SELECT '; DROP TABLE test_table' AS literal FROM test_table;"
++        )
++
++        assert result == [{"literal": "; DROP TABLE test_table"}]
++        assert mock_requests.post.call_args.kwargs["json"]["sql"] == (
++            "SELECT '; DROP TABLE test_table' AS literal FROM test_table"
++        )
++
++    def test_execute_query_allows_with_select(self, mock_pinot_config, mock_requests):
++        """Test read-only validation allows WITH queries that resolve to SELECT."""
++        pinot = PinotClient(mock_pinot_config)
++
++        mock_response = MagicMock()
++        mock_response.json.return_value = {
++            "resultTable": {
++                "dataSchema": {"columnNames": ["col1"]},
++                "rows": [["data"]],
++            }
++        }
++        mock_requests.post.return_value = mock_response
++
++        result = pinot.execute_query(
++            "WITH cte AS (SELECT * FROM test_table) SELECT * FROM cte"
++        )
++
++        assert result == [{"col1": "data"}]
++
++    def test_execute_query_allows_order_by_desc(self, mock_pinot_config, mock_requests):
++        """Test DESC sort direction is accepted in read-only SELECT queries."""
++        pinot = PinotClient(mock_pinot_config)
++
++        mock_response = MagicMock()
++        mock_response.json.return_value = {
++            "resultTable": {
++                "dataSchema": {"columnNames": ["col1"]},
++                "rows": [["data"]],
++            }
++        }
++        mock_requests.post.return_value = mock_response
++
++        result = pinot.execute_query(
++            "SELECT * FROM test_table ORDER BY created_at DESC LIMIT 10"
++        )
++
++        assert result == [{"col1": "data"}]
++        assert mock_requests.post.call_args.kwargs["json"]["sql"] == (
++            "SELECT * FROM test_table ORDER BY created_at DESC LIMIT 10"
++        )
++
++    def test_execute_query_allows_trailing_pinot_option(
++        self, mock_pinot_config, mock_requests
++    ):
++        """Test Pinot OPTION clauses are accepted after parser validation."""
++        pinot = PinotClient(mock_pinot_config)
++
++        mock_response = MagicMock()
++        mock_response.json.return_value = {
++            "resultTable": {
++                "dataSchema": {"columnNames": ["col1"]},
++                "rows": [["data"]],
++            }
++        }
++        mock_requests.post.return_value = mock_response
++
++        result = pinot.execute_query("SELECT * FROM test_table OPTION(timeoutMs=30000)")
++
++        assert result == [{"col1": "data"}]
++        assert mock_requests.post.call_args.kwargs["json"]["sql"] == (
++            "SELECT * FROM test_table OPTION(timeoutMs=30000)"
++        )
++
++    def test_execute_query_rejects_invalid_select_syntax(
++        self, mock_pinot_config, mock_requests
++    ):
++        """Test parser validation rejects malformed SELECT syntax."""
++        pinot = PinotClient(mock_pinot_config)
++
++        with pytest.raises(ValueError, match="Only valid read-only SELECT"):
++            pinot.execute_query("SELECT FROM")
++
++        mock_requests.post.assert_not_called()
++
+     def test_execute_query_blocks_multiple_unauthorized_tables(
+         self, mock_pinot_config, mock_requests
+     ):
+diff --git a/tests/test_server.py b/tests/test_server.py
+index ddfd469..b46975e 100644
+--- a/tests/test_server.py
++++ b/tests/test_server.py
+@@ -4,7 +4,7 @@ from unittest.mock import patch
+ from fastmcp import Client
+ import pytest
+ 
+-from mcp_pinot.server import main, mcp
++from mcp_pinot.server import _is_loopback_host, main, mcp
+ 
+ 
+ @pytest.fixture
+@@ -123,13 +123,35 @@ class TestFastMCPServer:
+     @pytest.mark.asyncio
+     async def test_tool_read_query_invalid(self, mock_pinot_client):
+         """Test the read_query tool with invalid query"""
++        mock_pinot_client.execute_query.side_effect = ValueError(
++            "Only read-only SELECT queries are allowed for read-query"
++        )
++
+         async with Client(mcp) as client:
+             result = await client.call_tool(
+                 "read_query", {"query": "INSERT INTO test_table VALUES (1)"}
+             )
+ 
+             # Should return error message
+-            assert "Error: Only SELECT queries are allowed" in result.data
++            assert "Error: Only read-only SELECT queries are allowed" in result.data
++            mock_pinot_client.execute_query.assert_called_once_with(
++                query="INSERT INTO test_table VALUES (1)"
++            )
++
++    @pytest.mark.asyncio
++    async def test_tool_read_query_rejects_stacked_statement(self, mock_pinot_client):
++        """Test the read_query tool rejects stacked statements from the client layer."""
++        mock_pinot_client.execute_query.side_effect = ValueError(
++            "Only a single read-only SELECT statement is allowed for read-query"
++        )
++
++        async with Client(mcp) as client:
++            result = await client.call_tool(
++                "read_query",
++                {"query": "SELECT * FROM test_table; DROP TABLE test_table"},
++            )
++
++            assert "Error: Only a single read-only SELECT statement" in result.data
+ 
+     @pytest.mark.asyncio
+     async def test_tool_read_query_error(self, mock_pinot_client):
+@@ -318,14 +340,31 @@ class TestFastMCPServer:
+ class TestMainFunction:
+     """Test the main function with different configurations"""
+ 
++    @pytest.mark.parametrize(
++        "host",
++        ["127.0.0.1", "127.1.2.3", "::1", "localhost"],
++    )
++    def test_is_loopback_host(self, host):
++        """Test loopback host detection."""
++        assert _is_loopback_host(host) is True
++
++    @pytest.mark.parametrize(
++        "host",
++        ["0.0.0.0", "::", "192.168.1.10", "example.com"],
++    )
++    def test_is_loopback_host_rejects_network_hosts(self, host):
++        """Test network-reachable hosts are not treated as loopback."""
++        assert _is_loopback_host(host) is False
++
+     def test_main_function_http_transport(self, mock_pinot_client):
+         """Test the main function with HTTP transport"""
+         with patch("mcp_pinot.server.server_config") as mock_server_config:
+             mock_server_config.transport = "http"
+-            mock_server_config.host = "0.0.0.0"
++            mock_server_config.host = "127.0.0.1"
+             mock_server_config.port = 8000
+             mock_server_config.ssl_keyfile = None
+             mock_server_config.ssl_certfile = None
++            mock_server_config.oauth_enabled = False
+ 
+             with patch("mcp_pinot.server.mcp.run") as mock_mcp_run:
+                 # Call the main function
+@@ -345,6 +384,7 @@ class TestMainFunction:
+             mock_server_config.ssl_keyfile = "/path/to/key.pem"
+             mock_server_config.ssl_certfile = "/path/to/cert.pem"
+             mock_server_config.path = "/mcp"
++            mock_server_config.oauth_enabled = True
+ 
+             with patch("mcp_pinot.server.uvicorn.run") as mock_uvicorn_run:
+                 # Call the main function
+@@ -364,6 +404,7 @@ class TestMainFunction:
+             mock_server_config.port = 8000
+             mock_server_config.ssl_keyfile = None
+             mock_server_config.ssl_certfile = None
++            mock_server_config.oauth_enabled = True
+ 
+             with patch("mcp_pinot.server.mcp.run") as mock_mcp_run:
+                 # Call the main function
+@@ -383,6 +424,7 @@ class TestMainFunction:
+             mock_server_config.path = "/mcp"
+             mock_server_config.ssl_keyfile = None
+             mock_server_config.ssl_certfile = None
++            mock_server_config.oauth_enabled = False
+ 
+             with patch("mcp_pinot.server.mcp.run") as mock_mcp_run:
+                 # Call the main function
+@@ -392,3 +434,56 @@ class TestMainFunction:
+                 mock_mcp_run.assert_called_once()
+                 call_args = mock_mcp_run.call_args
+                 assert call_args[1]["transport"] == "stdio"
++
++    def test_main_function_refuses_network_http_without_oauth(self, mock_pinot_client):
++        """Test HTTP transport fails closed on non-loopback hosts without OAuth."""
++        with patch("mcp_pinot.server.server_config") as mock_server_config:
++            mock_server_config.transport = "http"
++            mock_server_config.host = "0.0.0.0"
++            mock_server_config.port = 8000
++            mock_server_config.path = "/mcp"
++            mock_server_config.ssl_keyfile = None
++            mock_server_config.ssl_certfile = None
++            mock_server_config.oauth_enabled = False
++
++            with patch("mcp_pinot.server.mcp.run") as mock_mcp_run:
++                with pytest.raises(SystemExit, match="Refusing to start"):
++                    main()
++
++                mock_mcp_run.assert_not_called()
++
++    def test_main_function_refuses_network_https_without_oauth(self, mock_pinot_client):
++        """Test TLS alone is not accepted as HTTP authentication."""
++        with patch("mcp_pinot.server.server_config") as mock_server_config:
++            mock_server_config.transport = "http"
++            mock_server_config.host = "0.0.0.0"
++            mock_server_config.port = 8000
++            mock_server_config.path = "/mcp"
++            mock_server_config.ssl_keyfile = "/path/to/key.pem"
++            mock_server_config.ssl_certfile = "/path/to/cert.pem"
++            mock_server_config.oauth_enabled = False
++
++            with patch("mcp_pinot.server.uvicorn.run") as mock_uvicorn_run:
++                with pytest.raises(SystemExit, match="without OAuth"):
++                    main()
++
++                mock_uvicorn_run.assert_not_called()
++
++    def test_main_function_refuses_stdio_tls_http_without_oauth(
++        self, mock_pinot_client
++    ):
++        """Test TLS-enabled stdio config still fails closed because HTTP starts."""
++        with patch("mcp_pinot.server.server_config") as mock_server_config:
++            mock_server_config.transport = "stdio"
++            mock_server_config.host = "0.0.0.0"
++            mock_server_config.port = 8000
++            mock_server_config.path = "/mcp"
++            mock_server_config.ssl_keyfile = "/path/to/key.pem"
++            mock_server_config.ssl_certfile = "/path/to/cert.pem"
++            mock_server_config.oauth_enabled = False
++
++            with patch("mcp_pinot.server.uvicorn.run") as mock_uvicorn_run:
++                with pytest.raises(SystemExit, match="without OAuth"):
++                    main()
++
++                mock_uvicorn_run.assert_not_called()
+diff --git a/user_guide.md b/user_guide.md
+index f2ad863..e1c945d 100644
+--- a/user_guide.md
++++ b/user_guide.md
+@@ -163,11 +163,11 @@ curl -s -X POST http://127.0.0.1:8080/api/tools/call \
+ curl -s http://127.0.0.1:8080/api/tools/list
+ 
+ # Restart server if needed
+-uv run python examples/http_server_demo.py both
++uv --directory . run mcp_pinot/server.py
+ ```
+ 
+ ### Query Errors
+-- Only SELECT queries are allowed for security
++- Only one read-only `SELECT` or `WITH ... SELECT` statement is allowed
+ - Table names are case-sensitive
+ - Use proper SQL syntax for Pinot
+ 
+@@ -183,4 +183,4 @@ Your MCP Pinot Server is working perfectly with:
+ - ✅ Dual transport (STDIO + HTTP) 
+ - ✅ Production-ready for Kubernetes
+ 
+-You can now query your Pinot data using simple HTTP requests! 🚀
+\ No newline at end of file
++You can now query your Pinot data using simple HTTP requests! 🚀
+diff --git a/uv.lock b/uv.lock
+index a493c0d..c48a740 100644
+--- a/uv.lock
++++ b/uv.lock
+@@ -1,5 +1,5 @@
+ version = 1
+-revision = 3
++revision = 2
+ requires-python = ">=3.12"
+ 
+ [[package]]
+@@ -689,6 +689,7 @@ dependencies = [
+     { name = "pyyaml" },
+     { name = "requests" },
+     { name = "rpds-py" },
++    { name = "sqlglot" },
+     { name = "uvicorn", extra = ["standard"] },
+ ]
+ 
+@@ -727,6 +728,7 @@ requires-dist = [
+     { name = "requests", specifier = ">=2.32.3" },
+     { name = "rpds-py", specifier = ">=0.18.1" },
+     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.1.6" },
++    { name = "sqlglot", specifier = ">=30.8.0" },
+     { name = "uvicorn", extras = ["standard"], specifier = ">=0.34.0" },
+ ]
+ provides-extras = ["dev"]
+@@ -1420,6 +1422,15 @@ wheels = [
+     { url = "https://files.pythonhosted.org/packages/e9/44/75a9c9421471a6c4805dbf2356f7c181a29c1879239abab1ea2cc8f38b40/sniffio-1.3.1-py3-none-any.whl", hash = "sha256:2f6da418d1f1e0fddd844478f41680e794e6051915791a034ff65e5f100525a2", size = 10235, upload-time = "2024-02-25T23:20:01.196Z" },
+ ]
+ 
++[[package]]
++name = "sqlglot"
++version = "30.8.0"
++source = { registry = "https://pypi.org/simple" }
++sdist = { url = "https://files.pythonhosted.org/packages/0f/64/89299aefc6ebdf4fc899f5dc14c7fcb7eb9da9290a2b4d615ae7ab884b17/sqlglot-30.8.0.tar.gz", hash = "sha256:1c5f93fb742dd9aaa75eee6bb33a637794a858b9a86375fac23a2dc0f7bc127e", size = 5869750, upload-time = "2026-05-13T09:04:38.923Z" }
++wheels = [
++    { url = "https://files.pythonhosted.org/packages/88/4e/80705091aaf9c95e125d243f0aa871bc9f3670b4c9d963e6bad3b3dce8ff/sqlglot-30.8.0-py3-none-any.whl", hash = "sha256:af903378c331d5b72277a1b41118f07bc3e50cf4478e2d47eed12c96ee6a22a4", size = 687831, upload-time = "2026-05-13T09:04:36.336Z" },
++]
++
+ [[package]]
+ name = "sse-starlette"
+ version = "2.2.1"

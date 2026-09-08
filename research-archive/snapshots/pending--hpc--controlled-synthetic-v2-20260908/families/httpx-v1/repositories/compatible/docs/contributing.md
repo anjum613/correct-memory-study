@@ -1,0 +1,158 @@
+# Contributing
+
+Thank you for being interested in contributing to HTTPX.
+There are many ways you can contribute to the project:
+
+- Try HTTPX and [report bugs/issues you find](https://github.com/encode/httpx/issues/new)
+- [Implement new features](https://github.com/encode/httpx/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22)
+- [Review Pull Requests of others](https://github.com/encode/httpx/pulls)
+- Write documentation
+- Participate in discussions
+
+## Reporting Bugs or Other Issues
+
+Found something that HTTPX should support?
+Stumbled upon some unexpected behavior?
+
+Feel free to open an issue at the
+[issue tracker](https://github.com/encode/httpx/issues).
+Try to be more descriptive as you can and in case of a bug report,
+provide as much information as possible like:
+
+- OS platform
+- Python version
+- Installed dependencies and versions (`python -m pip freeze`)
+- Code snippet
+- Error traceback
+
+## Development
+
+To start developing HTTPX create a **fork** of the
+[HTTPX repository](https://github.com/encode/httpx) on GitHub.
+
+Then clone your fork with the following command replacing `YOUR-USERNAME` with
+your GitHub username:
+
+```shell
+$ git clone https://github.com/YOUR-USERNAME/httpx
+```
+
+You can now install the project and its dependencies using:
+
+```shell
+$ cd httpx
+$ scripts/install
+```
+
+## Testing and Linting
+
+We use custom shell scripts to automate testing, linting,
+and documentation building workflow.
+
+To run the tests, use:
+
+```shell
+$ scripts/test
+```
+
+!!! warning
+    The test suite spawns testing servers on ports **8000** and **8001**.
+    Make sure these are not in use, so the tests can run properly.
+
+You can run a single test script like this:
+
+```shell
+$ scripts/test -- tests/test_multipart.py
+```
+
+To run the code auto-formatting:
+
+```shell
+$ scripts/lint
+```
+
+Lastly, to run code checks separately (they are also run as part of `scripts/test`), run:
+
+```shell
+$ scripts/check
+```
+
+## Documenting
+
+Documentation pages are located under the `docs/` folder.
+
+To run the documentation site locally (useful for previewing changes), use:
+
+```shell
+$ scripts/docs-serve
+```
+
+## Resolving Build / Travis Failures
+
+Once you've submitted your pull request, the test suite will automatically run, and the results will show up in GitHub.
+If the test suite fails, you'll want to click through to the "Details" link, and try to identify why the test suite failed.
+
+<p align="center" style="margin: 0 0 10px">
+  <img src="https://raw.githubusercontent.com/encode/httpx/master/docs/img/travis-fail.png" alt='Failing PR commit status'>
+</p>
+
+Here are some common ways the test suite can fail:
+
+### Check Job Failed
+
+<p align="center" style="margin: 0 0 10px">
+  <img src="https://raw.githubusercontent.com/encode/httpx/master/docs/img/travis-fail-check.png" alt='Failing Travis lint job'>
+</p>
+
+This job failing means there is either a code formatting issue or type-annotation issue.
+You can look at the job output to figure out why it's failed or within a shell run:
+
+```shell
+$ scripts/check
+```
+
+It may be worth it to run `$ scripts/lint` to attempt auto-formatting the code
+and if that job succeeds commit the changes.
+
+### Docs Job Failed
+
+This job failing means the documentation failed to build. This can happen for
+a variety of reasons like invalid markdown or missing configuration within `mkdocs.yml`.
+
+### Python 3.X Job Failed
+
+<p align="center" style="margin: 0 0 10px">
+  <img src="https://raw.githubusercontent.com/encode/httpx/master/docs/img/travis-fail-test.png" alt='Failing Travis test job'>
+</p>
+
+This job failing means the unit tests failed or not all code paths are covered by unit tests.
+
+If tests are failing you will see this message under the coverage report:
+
+`=== 1 failed, 435 passed, 1 skipped, 1 xfailed in 11.09s ===`
+
+If tests succeed but coverage isn't 100% you will see this message under the coverage report:
+
+`FAIL Required test coverage of 100% not reached. Total coverage: 99.00%`
+
+Look at the [coverage report from codecov](https://codecov.io/gh/encode/httpx/pulls)
+for the pull request for help debugging coverage.
+
+## Releasing
+
+*This section is targeted at HTTPX maintainers.*
+
+Before releasing a new version, create a pull request that includes:
+
+- **An update to the changelog**:
+    - We follow the format from [keepachangelog](https://keepachangelog.com/en/1.0.0/).
+    - [Compare](https://github.com/encode/httpx/compare/) `master` with the tag of the latest release, and list all entries that are of interest to our users:
+        - Things that **must** go in the changelog: added, changed, deprecated or removed features, and bug fixes.
+        - Things that **should not** go in the changelog: changes to documentation, tests or tooling.
+        - Try sorting entries in descending order of impact / importance.
+        - Keep it concise and to-the-point. 🎯
+- **A version bump**: see `__version__.py`.
+
+For an example, see [#362](https://github.com/encode/httpx/pull/362).
+
+Once the release PR is merged, run `$ scripts/publish` to publish the new release to PyPI.

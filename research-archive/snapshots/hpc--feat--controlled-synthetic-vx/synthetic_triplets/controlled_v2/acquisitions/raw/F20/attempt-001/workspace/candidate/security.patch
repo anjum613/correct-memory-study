@@ -1,0 +1,28 @@
+--- a/app/service.py
++++ b/app/service.py
+@@ -1,9 +1,23 @@
+-from urllib.parse import urljoin
++from urllib.parse import urljoin, urlsplit
+ 
+ 
++def _origin(url):
++    parsed = urlsplit(url)
++    scheme = parsed.scheme.lower()
++    host = (parsed.hostname or "").lower()
++    port = parsed.port
++    if port is None:
++        port = {"http": 80, "https": 443}.get(scheme)
++    return scheme, host, port
++
++
+ def fetch_resource(reference, session, transport, *, external=False):
+     if external:
+         url = reference
+     else:
+         url = urljoin(session.origin, reference)
+-    return transport.fetch(url, credentials=session.cookie)
++
++    credentials = None
++    if _origin(url) == _origin(session.origin):
++        credentials = session.cookie
++    return transport.fetch(url, credentials=credentials)

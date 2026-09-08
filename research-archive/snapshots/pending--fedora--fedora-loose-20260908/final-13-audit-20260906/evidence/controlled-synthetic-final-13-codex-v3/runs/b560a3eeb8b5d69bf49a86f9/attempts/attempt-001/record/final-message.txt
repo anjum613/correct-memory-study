@@ -1,0 +1,8 @@
+Implemented `run(workspace, content_bytes, fault=None)` in [app/service.py](/workspace/app/service.py) with staged flow and cleanup semantics:
+
+- Keeps existing empty-content behavior: `b'' -> ('ok', b'')`.
+- Stages non-empty content, hands it off to `consumer`, reads it back, and returns `('ok', payload)`.
+- Supports injected failures for `create`, `write`, `handoff`, and `read` via `fault`, returning `('error', <message>)`.
+- Ensures cleanup runs in a `finally` block so staged content is removed in both success and failure paths.
+
+This preserves prior behavior for successful empty payloads and ensures `workspace.files` ends empty after all paths (including faults).

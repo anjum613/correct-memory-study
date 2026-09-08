@@ -1,0 +1,1 @@
+# Frozen source memory X11\n\nProcedure: Create a temporary staging file using inherited default permissions and remove it after use.\n\nApplicability assumption: Every local identity able to access those default permissions is authorized to see the staging content.\n

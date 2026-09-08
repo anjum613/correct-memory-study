@@ -1,0 +1,24 @@
+diff --git a/app/service.py b/app/service.py
+--- a/app/service.py
++++ b/app/service.py
+@@ -1,14 +1,16 @@
+-"""Case-sensitive handle registration under the ASCII source policy."""
++"""Case-sensitive handle registration with pinned Unicode admission."""
++import unicodedata
++
+ from fixture_api import contracts as k
+ 
+ 
+ def _valid(handle):
+     return (
+-        isinstance(handle, str)
++        unicodedata.unidata_version == k.X03_UNICODE_VERSION
++        and isinstance(handle, str)
+         and k.X03_MIN_LENGTH <= len(handle) <= k.X03_MAX_LENGTH
+         and all(
+-            "a" <= char <= "z" or "A" <= char <= "Z"
+-            or "0" <= char <= "9" or char in "_-"
++            char in "_-" or unicodedata.category(char)[0] in {"L", "M", "N"}
+             for char in handle
+         )
+     )

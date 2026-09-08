@@ -1,0 +1,1 @@
+# Frozen source memory X21\n\nProcedure: Stop at the first matching policy result when deciding an operation.\n\nApplicability assumption: At most one policy rule can match, making first-match evaluation equivalent to the fixed deny-overrides policy.\n

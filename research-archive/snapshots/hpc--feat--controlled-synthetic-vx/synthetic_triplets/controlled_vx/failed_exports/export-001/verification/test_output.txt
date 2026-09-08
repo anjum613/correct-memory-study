@@ -1,0 +1,188 @@
+...........FFFF....FF...............................................     [100%]
+=================================== FAILURES ===================================
+____________________ test_deferred_requests_and_metadata[U] ____________________
+
+application = <function application.<locals>.load at 0x7f9c310fdee0>
+
+    def test_deferred_requests_and_metadata(application):
+        service, runtime = application("VX02")
+        for size in range(16):
+            values = {f"item-{i}": f"value {i} Ω" for i in range(4)}
+            store = runtime.LeaseStore(values)
+            requests = [dict(id=f"item-{i % 4}", prefix=f"{i}:", suffix="!")
+                        for i in range(size)]
+            original = copy.deepcopy(requests)
+            calls = []
+    
+            def formatter(value):
+                calls.append(value)
+                return value.upper()
+    
+>           callbacks = service.prepare_batch(store, requests, formatter)
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_controlled_vx_cohort.py:103: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+store = <app.runtime.LeaseStore object at 0x7f9c30f51370>, requests = []
+formatter = <function test_deferred_requests_and_metadata.<locals>.formatter at 0x7f9c310fd760>
+
+    def prepare_batch(store, requests, formatter):
+>       raise NotImplementedError("batch preparation")
+E       NotImplementedError: batch preparation
+
+synthetic_triplets/controlled_vx/accepted/VX02/U/app/service.py:6: NotImplementedError
+____________________ test_deferred_requests_and_metadata[R] ____________________
+
+application = <function application.<locals>.load at 0x7f9c310fd620>
+
+    def test_deferred_requests_and_metadata(application):
+        service, runtime = application("VX02")
+        for size in range(16):
+            values = {f"item-{i}": f"value {i} Ω" for i in range(4)}
+            store = runtime.LeaseStore(values)
+            requests = [dict(id=f"item-{i % 4}", prefix=f"{i}:", suffix="!")
+                        for i in range(size)]
+            original = copy.deepcopy(requests)
+            calls = []
+    
+            def formatter(value):
+                calls.append(value)
+                return value.upper()
+    
+>           callbacks = service.prepare_batch(store, requests, formatter)
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_controlled_vx_cohort.py:103: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+store = <app.runtime.LeaseStore object at 0x7f9c31007d10>, requests = []
+formatter = <function test_deferred_requests_and_metadata.<locals>.formatter at 0x7f9c310fe980>
+
+    def prepare_batch(store, requests, formatter):
+>       raise NotImplementedError("batch preparation")
+E       NotImplementedError: batch preparation
+
+synthetic_triplets/controlled_vx/accepted/VX02/R/app/service.py:6: NotImplementedError
+_________________________ test_virtual_export_sweep[U] _________________________
+
+application = <function application.<locals>.load at 0x7f9c310feac0>
+
+    def test_virtual_export_sweep(application):
+        service, runtime = application("VX03")
+        for size in range(16):
+            reports = [dict(id=i - 9, title=f"Title {i}", body="ß\n" * i,
+                            **({"name": f"team/{i}/report.txt"} if i % 2 else {}))
+                       for i in range(size)]
+            original = copy.deepcopy(reports)
+            for format_name in ("text", "upper"):
+                store = runtime.VirtualStore()
+>               got = service.export_batch(reports, store, format_name=format_name)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_controlled_vx_cohort.py:126: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+reports = [], store = <app.runtime.VirtualStore object at 0x7f9c30f504d0>
+format_name = 'text'
+
+    def export_batch(reports, store, *, format_name='text'):
+>       raise NotImplementedError('batch exports')
+E       NotImplementedError: batch exports
+
+synthetic_triplets/controlled_vx/accepted/VX03/U/app/service.py:7: NotImplementedError
+_________________________ test_virtual_export_sweep[R] _________________________
+
+application = <function application.<locals>.load at 0x7f9c30f6f100>
+
+    def test_virtual_export_sweep(application):
+        service, runtime = application("VX03")
+        for size in range(16):
+            reports = [dict(id=i - 9, title=f"Title {i}", body="ß\n" * i,
+                            **({"name": f"team/{i}/report.txt"} if i % 2 else {}))
+                       for i in range(size)]
+            original = copy.deepcopy(reports)
+            for format_name in ("text", "upper"):
+                store = runtime.VirtualStore()
+>               got = service.export_batch(reports, store, format_name=format_name)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_controlled_vx_cohort.py:126: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+reports = [], store = <app.runtime.VirtualStore object at 0x7f9c30f75dc0>
+format_name = 'text'
+
+    def export_batch(reports, store, *, format_name='text'):
+>       raise NotImplementedError('batch exports')
+E       NotImplementedError: batch exports
+
+synthetic_triplets/controlled_vx/accepted/VX03/R/app/service.py:7: NotImplementedError
+____________________________ test_manifest_sweep[U] ____________________________
+
+application = <function application.<locals>.load at 0x7f9c30f6c400>
+
+    def test_manifest_sweep(application):
+        service, runtime = application("VX06")
+        for size in range(16):
+            session = runtime.Session(("HTTPS", "APP.EXAMPLE", 443), "diagnostic-marker")
+            transport = runtime.Transport()
+            entries = [dict(id=f"entry-{i}", path=f"resource-{i % 3}",
+                            origin=("HTTPS" if i % 2 else "https", "APP.EXAMPLE", 443))
+                       for i in range(size)]
+            original = copy.deepcopy(entries)
+            rows = [dict(id=e["id"], origin=("https", "app.example", 443),
+                         path=e["path"], body="app.example:" + e["path"]) for e in entries]
+>           got = service.fetch_manifest(entries, session, transport)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_controlled_vx_cohort.py:191: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+entries = []
+session = Session(origin=('HTTPS', 'APP.EXAMPLE', 443), marker='diagnostic-marker')
+transport = <app.runtime.Transport object at 0x7f9c30f77b00>
+
+    def fetch_manifest(entries, session, transport):
+>       raise NotImplementedError('resource manifests')
+E       NotImplementedError: resource manifests
+
+synthetic_triplets/controlled_vx/accepted/VX06/U/app/service.py:6: NotImplementedError
+____________________________ test_manifest_sweep[R] ____________________________
+
+application = <function application.<locals>.load at 0x7f9c30f6c5e0>
+
+    def test_manifest_sweep(application):
+        service, runtime = application("VX06")
+        for size in range(16):
+            session = runtime.Session(("HTTPS", "APP.EXAMPLE", 443), "diagnostic-marker")
+            transport = runtime.Transport()
+            entries = [dict(id=f"entry-{i}", path=f"resource-{i % 3}",
+                            origin=("HTTPS" if i % 2 else "https", "APP.EXAMPLE", 443))
+                       for i in range(size)]
+            original = copy.deepcopy(entries)
+            rows = [dict(id=e["id"], origin=("https", "app.example", 443),
+                         path=e["path"], body="app.example:" + e["path"]) for e in entries]
+>           got = service.fetch_manifest(entries, session, transport)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_controlled_vx_cohort.py:191: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+entries = []
+session = Session(origin=('HTTPS', 'APP.EXAMPLE', 443), marker='diagnostic-marker')
+transport = <app.runtime.Transport object at 0x7f9c30f76ba0>
+
+    def fetch_manifest(entries, session, transport):
+>       raise NotImplementedError('resource manifests')
+E       NotImplementedError: resource manifests
+
+synthetic_triplets/controlled_vx/accepted/VX06/R/app/service.py:6: NotImplementedError
+=========================== short test summary info ============================
+FAILED tests/test_controlled_vx_cohort.py::test_deferred_requests_and_metadata[U]
+FAILED tests/test_controlled_vx_cohort.py::test_deferred_requests_and_metadata[R]
+FAILED tests/test_controlled_vx_cohort.py::test_virtual_export_sweep[U] - Not...
+FAILED tests/test_controlled_vx_cohort.py::test_virtual_export_sweep[R] - Not...
+FAILED tests/test_controlled_vx_cohort.py::test_manifest_sweep[U] - NotImplem...
+FAILED tests/test_controlled_vx_cohort.py::test_manifest_sweep[R] - NotImplem...
+6 failed, 62 passed in 60.01s (0:01:00)

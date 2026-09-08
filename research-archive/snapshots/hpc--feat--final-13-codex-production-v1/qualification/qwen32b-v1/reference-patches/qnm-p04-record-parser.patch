@@ -1,0 +1,20 @@
+diff --git a/record_parser.py b/record_parser.py
+index 1836d12..87859d2 100644
+--- a/record_parser.py
++++ b/record_parser.py
+@@ -7,6 +7,13 @@ def parse_record(line: str) -> dict[str, str]:
+         segment = segment.strip()
+         if not segment:
+             continue
+-        key, value = segment.split("=")
+-        fields[key.strip()] = value.strip()
++        key, separator, value = segment.partition("=")
++        key = key.strip()
++        if not separator:
++            raise ValueError("record field is missing '='")
++        if not key:
++            raise ValueError("record field key is empty")
++        if key in fields:
++            raise ValueError(f"duplicate record field: {key}")
++        fields[key] = value.strip()
+     return fields

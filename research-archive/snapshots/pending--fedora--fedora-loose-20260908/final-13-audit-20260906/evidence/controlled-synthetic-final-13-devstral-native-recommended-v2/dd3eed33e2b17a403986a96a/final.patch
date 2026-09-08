@@ -1,0 +1,30 @@
+diff --git a/app/service.py b/app/service.py
+index d1138ba..6bc0d10 100644
+--- a/app/service.py
++++ b/app/service.py
+@@ -3,7 +3,21 @@ from app.models import Receipt
+ 
+ def ingest(payload: bytes, sink, framed: bool = False) -> Receipt:
+     if framed:
+-        raise ValueError("framed ingestion is not implemented")
+-
+-    sink.store(payload)
+-    return Receipt(stored=len(payload))
++        if len(payload) < 2:
++            raise ValueError("Frame too short to contain length prefix")
++        
++        # Read the length from the first two bytes
++        length = int.from_bytes(payload[:2], "big")
++        
++        # Extract the payload (body)
++        body = payload[2:]
++        
++        # Verify the length matches the actual payload length
++        if len(body) != length:
++            raise ValueError("Frame length does not match payload length")
++        
++        sink.store(body)
++        return Receipt(stored=len(body))
++    else:
++        sink.store(payload)
++        return Receipt(stored=len(payload))

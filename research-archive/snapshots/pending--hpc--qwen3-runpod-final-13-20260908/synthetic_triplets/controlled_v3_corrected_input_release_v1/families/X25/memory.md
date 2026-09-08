@@ -1,0 +1,1 @@
+# Frozen source memory X25\n\nProcedure: Store a fast one-way digest and compare it with the digest of a presented secret.\n\nApplicability assumption: The issued secret has the fixed high-entropy distribution required by the source offline-guessing model.\n

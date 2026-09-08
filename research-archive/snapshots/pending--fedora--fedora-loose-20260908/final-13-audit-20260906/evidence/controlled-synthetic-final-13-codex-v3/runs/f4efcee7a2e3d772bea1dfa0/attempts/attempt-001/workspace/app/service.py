@@ -1,0 +1,73 @@
+"""Public diagnostic logging service."""
+import json
+
+from fixture_api.contracts import X06_MAX_CHILDREN, X06_MAX_DEPTH
+
+
+_DIAGNOSTIC_FIELDS = ('correlation', 'message', 'code')
+
+
+def _json_scalar(value):
+    if value is None or type(value) in (str, int, float, bool):
+        return value
+    return None
+
+
+def _sanitize_error(value, depth):
+    if depth <= 0:
+        return None
+    if type(value) is dict:
+        sanitized = {}
+        for key, item in value.items():
+            if type(key) is not str:
+                continue
+            if type(item) is dict:
+                sanitized[key] = _sanitize_error(item, depth - 1)
+            elif type(item) is list:
+                sanitized[key] = [
+                    _sanitize_error(child, depth - 1)
+                    for child in item[:X06_MAX_CHILDREN]
+                ]
+            else:
+                sanitized[key] = _json_scalar(item)
+        return sanitized
+    if type(value) is list:
+        return [
+            _sanitize_error(item, depth - 1)
+            for item in value[:X06_MAX_CHILDREN]
+        ]
+    return _json_scalar(value)
+
+
+def _sanitize_record(value, depth):
+    if type(value) is not dict:
+        return {}
+
+    record = {}
+    for field in _DIAGNOSTIC_FIELDS:
+        if field in value:
+            record[field] = _json_scalar(value[field])
+
+    if 'error' in value:
+        record['error'] = _sanitize_error(value['error'], depth - 1)
+
+    if 'children' in value:
+        children = value['children']
+        if type(children) is list and depth > 0:
+            record['children'] = [
+                _sanitize_record(child, depth - 1)
+                for child in children[:X06_MAX_CHILDREN]
+            ]
+        else:
+            record['children'] = []
+
+    return record
+
+
+def run(diagnostic_record, sink):
+    record = _sanitize_record(diagnostic_record, X06_MAX_DEPTH)
+    try:
+        sink.write(json.dumps(record))
+    except Exception:
+        return 'log-error'
+    return 'logged'

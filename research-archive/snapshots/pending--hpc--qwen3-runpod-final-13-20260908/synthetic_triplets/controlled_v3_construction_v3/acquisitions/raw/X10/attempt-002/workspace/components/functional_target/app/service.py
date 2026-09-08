@@ -1,0 +1,38 @@
+"""Serve passive media only after validating its complete byte format."""
+
+
+def _matches_format(media_type, payload):
+    if media_type == 'text/plain':
+        return (
+            payload.startswith(b'TXT\x00')
+            and len(payload) > 4
+            and all(byte in (9, 10, 13) or 32 <= byte <= 126
+                    for byte in payload[4:])
+        )
+    if media_type == 'image/x-local-pixels':
+        return (
+            payload.startswith(b'PIX\x00')
+            and len(payload) >= 6
+            and payload[4] != 0
+            and payload[5] != 0
+            and len(payload) == 6 + payload[4] * payload[5] * 3
+        )
+    return False
+
+
+def run(media_sink, claimed_type, filename, payload_bytes):
+    if not (
+        isinstance(claimed_type, str)
+        and isinstance(filename, str)
+        and isinstance(payload_bytes, bytes)
+    ):
+        return 'invalid'
+
+    if _matches_format(claimed_type, payload_bytes):
+        media_sink.deliver('inline', claimed_type, filename, payload_bytes)
+        return 'inline'
+
+    media_sink.deliver(
+        'download', 'application/octet-stream', filename, payload_bytes
+    )
+    return 'download'

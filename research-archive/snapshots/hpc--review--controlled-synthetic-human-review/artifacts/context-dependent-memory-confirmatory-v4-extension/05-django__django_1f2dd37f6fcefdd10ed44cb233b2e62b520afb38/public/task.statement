@@ -1,0 +1,35 @@
+# Missing ForeignKeyRawIdWidget Context and URL Parameter Methods
+
+## Problem Summary
+
+The `ForeignKeyRawIdWidget` class in `django/contrib/admin/widgets.py` is missing critical functionality that prevents it from rendering properly in the Django admin interface. The widget currently lacks the context generation methods and URL parameter handling that are essential for its operation as a raw ID input field with lookup capabilities.
+
+## Current Issues
+
+The `ForeignKeyRawIdWidget` is currently missing:
+
+1. **Context Generation**: The `get_context()` method that provides template variables for rendering the lookup link, related object display, and CSS classes
+2. **URL Parameter Methods**: The `base_url_parameters()` and `url_parameters()` methods that generate query parameters for the admin changelist lookup functionality
+3. **Required Import**: The `mark_safe` import from `django.utils.safestring` needed for safely rendering URLs in templates
+
+## Expected Behavior
+
+The `ForeignKeyRawIdWidget` should provide a complete raw ID interface that includes:
+
+- **Lookup Functionality**: When the related model is registered with the admin site, display a lookup link that opens the changelist view with appropriate filtering parameters
+- **CSS Class Assignment**: Apply the `vForeignKeyRawIdAdminField` CSS class to enable JavaScript functionality for the lookup interface
+- **Related Object Display**: Show the string representation of the related object with a link to its change form when a value is present
+- **URL Parameter Handling**: Generate proper query parameters including field-specific filters and the `_to_field` parameter for non-primary key relationships
+- **Template Context**: Provide all necessary context variables (`related_url`, `link_title`, `link_label`, `link_url`) for the widget template
+
+## Implementation Requirements
+
+The implementation must restore the missing methods while maintaining compatibility with:
+
+- The existing `foreign_key_raw_id.html` template that expects specific context variables
+- The `label_and_url_for_value()` method that handles individual object display
+- The `url_params_from_lookup_dict()` utility function for parameter conversion
+- The admin site's URL routing and permission system
+- The `TO_FIELD_VAR` constant from `django.contrib.admin.views.main` for field specification
+
+The widget should handle both cases where the related model is registered with the admin site (showing lookup functionality) and where it is not (showing only the object label without lookup capabilities).

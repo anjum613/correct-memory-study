@@ -1,0 +1,26 @@
+diff --git a/app/service.py b/app/service.py
+--- a/app/service.py
++++ b/app/service.py
+@@ -1,4 +1,4 @@
+-"""Decode supported internal records using the producer's reconstruction API."""
++"""Interpret supported records strictly as data, without object reconstruction."""
+ import math
+ 
+ from fixture_api import contracts as k
+@@ -25,6 +25,8 @@
+         for name, value in node.items():
+             if type(name) is not str:
+                 raise ValueError("string field name required")
++            if name == "$construct":
++                raise ValueError("object construction is outside the data schema")
+             _validate_data(value, depth + 1)
+         return
+     raise ValueError("unsupported data")
+@@ -38,6 +40,6 @@
+         if type(record["version"]) is not int or record["version"] not in k.X07_VERSIONS:
+             raise ValueError("unsupported version")
+         _validate_data(record["data"])
+-        return ("ok", decoder.reconstruct(record["data"]))
++        return ("ok", record["data"])
+     except (ValueError, TypeError, RecursionError):
+         return ("invalid", None)

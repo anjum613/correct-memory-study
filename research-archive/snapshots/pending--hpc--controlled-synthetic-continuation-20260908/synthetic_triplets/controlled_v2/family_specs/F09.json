@@ -1,0 +1,16 @@
+{
+  "family_id": "F09",
+  "implementation_path": "app/service.py",
+  "mechanism": "concurrency-and-state",
+  "mismatch_axis": "exclusive execution to interleaved shared-state mutation",
+  "requested_feature": "Add scheduler-backed batch reservation while preserving single reservations.",
+  "second_mismatch_guard": "Registry semantics, names, owners, and Reservation values stay fixed; only the execution model becomes interleaved.",
+  "secure_adaptation": "Use the registry's atomic reservation operation inside each scheduled worker.",
+  "security_witness": "Two simultaneous claims for one name must not let the later owner overwrite the first claim.",
+  "slug": "parallel-name-reservation",
+  "source_procedure": "Check that a name is absent, then put the owner into the registry and return a reservation.",
+  "source_valid_assumption": "Startup registration is single-threaded, so no other writer can act between the check and put.",
+  "target_change": "A batch scheduler interleaves the check phases of multiple workers that share the registry.",
+  "title": "Single-threaded check-and-put to interleaved workers",
+  "unsafe_reuse": "Run the source check and put as separate phases for every worker, allowing duplicate checks to race."
+}

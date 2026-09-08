@@ -1,0 +1,235 @@
+def node(kind):
+    pointer = g_nodes + g_count * 100
+    m[pointer] = kind
+    m[pointer + 99] = g_visited + g_count * 65
+    g_count = g_count + 1
+    return pointer
+
+def fragment(start, head, tail):
+    m[g_fragments + g_ftop * 3] = start
+    m[g_fragments + g_ftop * 3 + 1] = head
+    m[g_fragments + g_ftop * 3 + 2] = tail
+    g_ftop = g_ftop + 1
+    return 0
+
+def patch(head, destination):
+    while head != 0:
+        following = m[head]
+        m[head] = destination
+        head = following
+    return 0
+
+def combine(operation):
+    g_ftop = g_ftop - 2
+    left = g_fragments + g_ftop * 3
+    right = left + 3
+    if operation == 2:
+        patch(m[left + 1], m[right])
+        m[left + 1] = m[right + 1]
+        m[left + 2] = m[right + 2]
+    else:
+        split = node(3)
+        m[split + 1] = m[left]
+        m[split + 2] = m[right]
+        m[m[left + 2]] = m[right + 1]
+        m[left] = split
+        m[left + 2] = m[right + 2]
+    g_ftop = g_ftop + 1
+    return 0
+
+def operation(priority):
+    while g_otop > 0 and m[g_operators + g_otop - 1] >= priority:
+        g_otop = g_otop - 1
+        combine(m[g_operators + g_otop])
+    m[g_operators + g_otop] = priority
+    g_otop = g_otop + 1
+    return 0
+
+def empty_atom():
+    pointer = node(2)
+    fragment(pointer, pointer + 1, pointer + 1)
+    return 0
+
+def mark_character(pointer, byte):
+    m[pointer + 4 + byte - 32] = 1
+    return 0
+
+def read_character():
+    value = m[g_position + 2]
+    g_position = g_position + 1
+    if value == 92:
+        value = m[g_position + 2]
+        g_position = g_position + 1
+    return value
+
+def compile_pattern():
+    g_ftop = 0
+    g_otop = 0
+    g_position = 0
+    previous = 0
+    while g_position < g_pattern_length:
+        value = m[g_position + 2]
+        if value == 124 or value == 41:
+            if previous == 0:
+                empty_atom()
+            if value == 124:
+                operation(1)
+                previous = 0
+            else:
+                while m[g_operators + g_otop - 1] != 0:
+                    g_otop = g_otop - 1
+                    combine(m[g_operators + g_otop])
+                g_otop = g_otop - 1
+                previous = 1
+            g_position = g_position + 1
+        else:
+            if value == 42 or value == 43 or value == 63:
+                top = g_fragments + (g_ftop - 1) * 3
+                split = node(3)
+                m[split + 1] = m[top]
+                if value == 63:
+                    m[m[top + 2]] = split + 2
+                    m[top + 2] = split + 2
+                else:
+                    patch(m[top + 1], split)
+                    m[top + 1] = split + 2
+                    m[top + 2] = split + 2
+                if value != 43:
+                    m[top] = split
+                g_position = g_position + 1
+            else:
+                if previous == 1:
+                    operation(2)
+                if value == 40:
+                    m[g_operators + g_otop] = 0
+                    g_otop = g_otop + 1
+                    g_position = g_position + 1
+                    previous = 0
+                else:
+                    pointer = node(1)
+                    if value == 91:
+                        g_position = g_position + 1
+                        complement = 0
+                        if m[g_position + 2] == 94:
+                            complement = 1
+                            g_position = g_position + 1
+                        while m[g_position + 2] != 93:
+                            first = read_character()
+                            last = first
+                            if m[g_position + 2] == 45:
+                                g_position = g_position + 1
+                                last = read_character()
+                            while first <= last:
+                                mark_character(pointer, first)
+                                first = first + 1
+                        if complement == 1:
+                            byte = 0
+                            while byte < 95:
+                                m[pointer + 4 + byte] = not m[pointer + 4 + byte]
+                                byte = byte + 1
+                        g_position = g_position + 1
+                    else:
+                        if value == 46:
+                            byte = 0
+                            while byte < 95:
+                                m[pointer + 4 + byte] = 1
+                                byte = byte + 1
+                            g_position = g_position + 1
+                        else:
+                            literal = read_character()
+                            mark_character(pointer, literal)
+                    fragment(pointer, pointer + 1, pointer + 1)
+                    previous = 1
+    if previous == 0:
+        empty_atom()
+    while g_otop > 0:
+        g_otop = g_otop - 1
+        combine(m[g_operators + g_otop])
+    accept = node(0)
+    patch(m[g_fragments + 1], accept)
+    return m[g_fragments]
+
+def match(start, record):
+    length = m[record]
+    top = 0
+    m[g_search] = start
+    m[g_search + 1] = 0
+    m[g_search + 2] = 0
+    m[m[start + 99]] = 1
+    accepted = 0
+    while top >= 0:
+        frame = g_search + top * 3
+        current = m[frame]
+        position = m[frame + 1]
+        phase = m[frame + 2]
+        kind = m[current]
+        destination = 0
+        next_position = position
+        if phase == 0:
+            m[frame + 2] = 1
+            if kind == 0:
+                if position == length:
+                    accepted = 1
+            else:
+                if kind == 1:
+                    if position < length and m[current + 4 + m[record + 1 + position] - 32] == 1:
+                        destination = m[current + 1]
+                        next_position = position + 1
+                else:
+                    destination = m[current + 1]
+        else:
+            if phase == 1 and kind == 3:
+                m[frame + 2] = 2
+                destination = m[current + 2]
+            else:
+                m[m[current + 99] + position] = 0
+                top = top - 1
+        if destination != 0 and accepted == 0:
+            address = m[destination + 99] + next_position
+            if m[address] == 0:
+                m[address] = 1
+                top = top + 1
+                m[g_search + top * 3] = destination
+                m[g_search + top * 3 + 1] = next_position
+                m[g_search + top * 3 + 2] = 0
+        if accepted == 1:
+            while top >= 0:
+                frame = g_search + top * 3
+                m[m[m[frame] + 99] + m[frame + 1]] = 0
+                top = top - 1
+    return accepted
+
+def boot():
+    g_flags = m[0]
+    g_pattern_length = m[1]
+    g_nodes = alloc(13200)
+    g_visited = alloc(8580)
+    g_fragments = alloc(198)
+    g_operators = alloc(66)
+    g_search = alloc(26000)
+    g_first = alloc(132)
+    g_second = alloc(132)
+    output = alloc(9)
+    g_count = 0
+    g_stamp = 0
+    start = compile_pattern()
+    count = m[g_pattern_length + 2]
+    record = g_pattern_length + 3
+    index = 0
+    selected = 0
+    while index < count:
+        result = match(start, record)
+        if result == 1:
+            m[output + 1 + selected] = index
+            selected = selected + 1
+        record = record + m[record] + 1
+        index = index + 1
+    m[output] = selected
+    free(g_nodes)
+    free(g_visited)
+    free(g_fragments)
+    free(g_operators)
+    free(g_search)
+    free(g_first)
+    free(g_second)
+    return output

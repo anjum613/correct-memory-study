@@ -1,0 +1,1 @@
+# Frozen source memory X26\n\nProcedure: Write a fixed-layout response into scratch storage and transmit the complete record including reserved areas.\n\nApplicability assumption: Fresh scratch storage initializes every unwritten byte to the public reserved value.\n

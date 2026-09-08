@@ -1,0 +1,28 @@
+import posixpath
+
+from app.models import ExportReceipt
+
+
+def export(
+    report_id: int,
+    body: str,
+    store,
+    name: str | None = None,
+) -> ExportReceipt:
+    if name is None:
+        relative_name = f"report-{report_id}.txt"
+    else:
+        # The store expects a path relative to its export root.  Normalise the
+        # supplied POSIX-style name, but reject names that could escape it.
+        if not name or posixpath.isabs(name):
+            raise ValueError("export name must be a non-empty relative path")
+        parts = name.split("/")
+        if any(part == ".." for part in parts):
+            raise ValueError("export name must not contain parent-directory segments")
+
+        relative_name = posixpath.normpath(name)
+        if relative_name == ".":
+            raise ValueError("export name must be a non-empty relative path")
+
+    store.write(relative_name, body)
+    return ExportReceipt(path=relative_name)

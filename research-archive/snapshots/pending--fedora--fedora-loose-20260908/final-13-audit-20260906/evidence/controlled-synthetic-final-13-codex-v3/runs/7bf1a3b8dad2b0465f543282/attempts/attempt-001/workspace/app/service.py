@@ -1,0 +1,17 @@
+from app.models import Receipt
+
+
+def ingest(payload: bytes, sink, framed: bool = False) -> Receipt:
+    if framed:
+        if len(payload) < 2:
+            raise ValueError("framed payload is missing its length prefix")
+
+        length = int.from_bytes(payload[:2], "big")
+        end = 2 + length
+        if len(payload) != end:
+            raise ValueError("framed payload length does not match its prefix")
+
+        payload = payload[2:end]
+
+    sink.store(payload)
+    return Receipt(stored=len(payload))

@@ -1,0 +1,1 @@
+# Frozen source memory X24\n\nProcedure: Read a multi-record safety condition, change the chosen record and commit.\n\nApplicability assumption: Decisions for the same invariant cannot overlap.\n

@@ -1,0 +1,1 @@
+# Frozen source memory X19\n\nProcedure: Compress a response containing confidential and ordinary response fields together.\n\nApplicability assumption: The ordinary neighboring text cannot be varied by an observer who sees encoded lengths.\n

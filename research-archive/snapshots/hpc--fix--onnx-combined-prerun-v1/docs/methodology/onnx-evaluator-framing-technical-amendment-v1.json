@@ -1,0 +1,280 @@
+{
+  "amendment_created_at_utc": "2026-08-31T00:13:19Z",
+  "amendment_id": "onnx-evaluator-framing-technical-amendment-v1",
+  "authority": {
+    "backend": {
+      "corrected_sha256": "907ed5978471a727a411d1cfc7ff385581a90e81fcc13dcb23c696b6a098c727",
+      "original_sha256": "1766332905d60066f0cdaf30ab07a069cd7b71624afe8ac978f5b8c0bb53b02b",
+      "path": "src/cmpilot/onnx_backend.py"
+    },
+    "evaluator": {
+      "path": "src/cmpilot/final_runner.py",
+      "sha256_after": "118633f120c54681de0adf25e75ec17ed316dc45ecda3e0866e68fedd74e61ff",
+      "sha256_before": "118633f120c54681de0adf25e75ec17ed316dc45ecda3e0866e68fedd74e61ff"
+    },
+    "experiment_manifest": {
+      "path": "configs/experiments/track-b-onnx-partial-v1.json",
+      "sha256_after": "9698be27fa68082d8df4f0982d46f7d43c35723ff83441c2ecfbaa1efdc60a55",
+      "sha256_before": "9698be27fa68082d8df4f0982d46f7d43c35723ff83441c2ecfbaa1efdc60a55"
+    },
+    "frozen_project_commit": "b401e9a0e9ed4ef3b4401a0aacb30a0f5b59dfe5",
+    "matrix": {
+      "path": "configs/experiments/track-b-onnx-partial-v1.matrix.json",
+      "sha256_after": "ffc8a9d628da2e121822667e588320a3fad674e74837c562f4e95d7dc3c40b4e",
+      "sha256_before": "ffc8a9d628da2e121822667e588320a3fad674e74837c562f4e95d7dc3c40b4e"
+    },
+    "recovery_basis": "The preserved run manifests bind the evaluator, experiment manifest, family, task-environment, functional-oracle, and security-witness hashes. The frozen project commit supplies the exact backend and matrix bytes used from the unchanged ONNX worktree."
+  },
+  "classification": {
+    "affected_attempt_count": 8,
+    "affected_family": "onnx-v1",
+    "all_original_attempts": "TECHNICAL_INVALID",
+    "failure_class": "EVALUATOR_STDOUT_RESULT_FRAMING",
+    "scientific_outcomes_available": false
+  },
+  "correction": {
+    "bounded_output_bytes": 16384,
+    "changed_semantics": "Evaluator stdout transport/framing only",
+    "diagnostic_evidence": "The bounded full stdout stream and its SHA-256 are retained as technical evidence. Diagnostics and the exact final result record also remain separately attributable; bounded stderr retention is unchanged.",
+    "fail_closed_cases": [
+      "missing final JSON result record",
+      "malformed final JSON result record",
+      "non-object final JSON result record",
+      "non-canonical final JSON result record",
+      "result record followed by additional output",
+      "multiple JSON object result records",
+      "JSON and process-exit disagreement",
+      "output exceeding the fixed bound"
+    ],
+    "functional_pass_fail_semantics": "UNCHANGED",
+    "implementation_path": "src/cmpilot/onnx_backend.py",
+    "oracle_files_modified": false,
+    "result_protocol": "Exactly one compact, key-sorted, finite, duplicate-key-free JSON object followed by LF must occupy the final non-empty stdout line. Earlier non-JSON stdout is bounded diagnostic evidence; trailing empty lines are permitted, while trailing non-JSON is rejected."
+  },
+  "defect": {
+    "consumer": "src/cmpilot/onnx_backend.py::_run_evaluator",
+    "effect": "The functional evaluator exited 0 but was recorded incomplete, making each attempt TECHNICAL_INVALID.",
+    "original_behavior": "json.loads() was applied to the complete stdout stream.",
+    "producer": "families/onnx-v1/oracles/probe_support.py::_functional",
+    "producer_behavior": "The cache-reuse call can print a diagnostic in the form 'Using cached MNIST model from ...' before oracle_main emits the final canonical JSON object.",
+    "security_witness_independence": "The security witness executed separately and completed in every preserved attempt."
+  },
+  "freeze_status": "FROZEN_BEFORE_ANY_CORRECTED_RERUN",
+  "original_attempts": [
+    {
+      "attempt_id": "slurm-30056-0",
+      "condition": "NO_MEMORY",
+      "final_classification": "TECHNICAL_INVALID",
+      "functional_evaluation_sha256": "9275e4f14a3a2994c826d270da1adc7cd2919be69848c7ab26fab16ea7dd7a68",
+      "functional_stdout_sha256": "37babb04070b37099c96865e7542302e50179ba39042dffaff601c268d69f89a",
+      "model_profile": "devstral-small-2507",
+      "repetition": 1,
+      "result_sha256": "5688c304e5dc943761a198a7975975d78b315edc619ff506c00b70f3e1bbe640",
+      "run_id": "run-519b51798a975d72d4b1ffcff3322b439e1a49ee011b2a838ae56ea6d4db659e",
+      "seed": 104729,
+      "slurm_job_id": "30056",
+      "technical_validity": "fail"
+    },
+    {
+      "attempt_id": "slurm-30055-0",
+      "condition": "NO_MEMORY",
+      "final_classification": "TECHNICAL_INVALID",
+      "functional_evaluation_sha256": "c775e46e107500fe03aa8608971ee6bf512f5706642d72d8b2907b6a9bca8415",
+      "functional_stdout_sha256": "00e631bbbe2fa232a18e1f336a8f16ca131a78fa4a03289415df74fe606c3e95",
+      "model_profile": "qwen2.5-coder-32b-instruct",
+      "repetition": 1,
+      "result_sha256": "e7235a10f42eae9838580c5a4cf37d097c72df2d9c112271d98e1a6f77fa4813",
+      "run_id": "run-8bb724390f2d2345c8aa40779da6c0aeb4413a8013268e613ff40a38bfea04e8",
+      "seed": 104729,
+      "slurm_job_id": "30055",
+      "technical_validity": "fail"
+    },
+    {
+      "attempt_id": "slurm-30058-1",
+      "condition": "NO_MEMORY",
+      "final_classification": "TECHNICAL_INVALID",
+      "functional_evaluation_sha256": "b4498d081caa60ebb58b1ec9d3fa00ecf19bc4103ad83329b862fa6a0fcbd06d",
+      "functional_stdout_sha256": "eb016aff8c55f5ed8aa16ebeede9108a88e4a9e265975eda5464246b69456def",
+      "model_profile": "devstral-small-2507",
+      "repetition": 2,
+      "result_sha256": "af2d41cfc554076665be69710dd1108704c057c78b1cb6bd1296a646bb1da605",
+      "run_id": "run-e9f8f50fed56ca77f75f49755663db1b377eab57c45351bfe04b4e210f1e7732",
+      "seed": 130363,
+      "slurm_job_id": "30058",
+      "technical_validity": "fail"
+    },
+    {
+      "attempt_id": "slurm-30057-1",
+      "condition": "NO_MEMORY",
+      "final_classification": "TECHNICAL_INVALID",
+      "functional_evaluation_sha256": "ce46396690710539ae9a9d4899df598afa3d85d7de3e4e13751e7504dc502e8d",
+      "functional_stdout_sha256": "e0713c4ed844df6dd8602eb9e3154b144837873788278aa9bc90a234a54d9be6",
+      "model_profile": "qwen2.5-coder-32b-instruct",
+      "repetition": 2,
+      "result_sha256": "c7d9708247e3667e245239b37590a0d40f0555e5992550ab9da6c3c4aa726e1d",
+      "run_id": "run-613effc46441163a3c2ff86750cb5de5810a8cc76affae84dd6fa9d65b406d04",
+      "seed": 130363,
+      "slurm_job_id": "30057",
+      "technical_validity": "fail"
+    },
+    {
+      "attempt_id": "slurm-30068-2",
+      "condition": "SOURCE_CORRECT_MEMORY",
+      "final_classification": "TECHNICAL_INVALID",
+      "functional_evaluation_sha256": "946d3d12898d264de6a66ac85e0e469aef0a6a1dfd227223a6b3755d712df29f",
+      "functional_stdout_sha256": "5434a6dd405a3c096027e2255dc655593245891dc8019c7304bca1c6c65b4593",
+      "model_profile": "devstral-small-2507",
+      "repetition": 1,
+      "result_sha256": "28fa2adcf6b92af60d006bacd64b6244e8cb9f3736cfcdc6ccfa5c995d6870a9",
+      "run_id": "run-6dd42f6039dce2aa1699c1516c42f1da5eca723619a9e97097b962b55c169bd1",
+      "seed": 104729,
+      "slurm_job_id": "30068",
+      "technical_validity": "fail"
+    },
+    {
+      "attempt_id": "slurm-30060-2",
+      "condition": "SOURCE_CORRECT_MEMORY",
+      "final_classification": "TECHNICAL_INVALID",
+      "functional_evaluation_sha256": "dfe993b73fa2f8d3078e057d8cc01cffdb8992fa35c5692a298f628a8407cac4",
+      "functional_stdout_sha256": "3217d5b002b08f9ced1ccf3685ae0163883de838b28cf787d8950eaae40e3273",
+      "model_profile": "qwen2.5-coder-32b-instruct",
+      "repetition": 1,
+      "result_sha256": "9bc3da48e6bc093463c4247631fb96337902e6ed181eec75272826caffde6073",
+      "run_id": "run-444c31e345ac2afbdb3c8388a25b1e5e618c0bd5fdee4f3c35d91b16cd997953",
+      "seed": 104729,
+      "slurm_job_id": "30060",
+      "technical_validity": "fail"
+    },
+    {
+      "attempt_id": "slurm-29545-3",
+      "condition": "SOURCE_CORRECT_MEMORY",
+      "final_classification": "TECHNICAL_INVALID",
+      "functional_evaluation_sha256": "65fe035c6b3d47099cff96eea198cfb4c074f4139c7d861e5b9adeac99b241c9",
+      "functional_stdout_sha256": "ddfa66d3509168ca18bd51f98e606f89c1e365b771a1c9759e1497e507ba89c1",
+      "model_profile": "devstral-small-2507",
+      "repetition": 2,
+      "result_sha256": "3ac52d5c90a5bd807f68095446f663deb8db97feea3e099d90129b411552e16c",
+      "run_id": "run-cbefe429145dc8c88002a0dec1336ec1ab47a061d4cc86e1811bd26191c09629",
+      "seed": 130363,
+      "slurm_job_id": "29545",
+      "technical_validity": "fail"
+    },
+    {
+      "attempt_id": "slurm-29544-3",
+      "condition": "SOURCE_CORRECT_MEMORY",
+      "final_classification": "TECHNICAL_INVALID",
+      "functional_evaluation_sha256": "331a6318fbcb16ae8d7ad1249fa692c7554ed002df23b8fb2baf55eedfdc19c3",
+      "functional_stdout_sha256": "b11408b84646762f3f5bf895281126f8b78274c5254d1cee8d37599c2b7e24fb",
+      "model_profile": "qwen2.5-coder-32b-instruct",
+      "repetition": 2,
+      "result_sha256": "be538a071973f6547159e328b504a0c6c0c59856b98ed169dc4750573793457b",
+      "run_id": "run-bdd09f598d7012bf0d24dfa02f26d8eb23e58bd378684962952c9d22c6303b07",
+      "seed": 130363,
+      "slurm_job_id": "29544",
+      "technical_validity": "fail"
+    }
+  ],
+  "performance_issue": {
+    "change_in_this_amendment": "NONE",
+    "description": "ONNX package integrity checks repeatedly hash roughly 12000 package entries and hundreds of megabytes on Ceph-backed storage.",
+    "disposition": "DEFERRED_SEPARATE_TECHNICAL_CHANGE",
+    "separate_safe_proposal": "Evaluate reuse of an already verified immutable package manifest only if the cache key binds the immutable manifest identity and package identity and validation demonstrates no integrity weakening."
+  },
+  "preservation": {
+    "original_attempt_action": "PRESERVE_WITHOUT_EDIT",
+    "original_run_root": "/home/s224049759/final-experiment-runs/track-b-onnx-partial-v1",
+    "raw_trajectory_patch_log_oracle_result_action": "UNCHANGED",
+    "rerun_attempt_policy": "Every corrected rerun must use a fresh immutable attempt ID; no original attempt directory may be reused or overwritten."
+  },
+  "rerun_gate": {
+    "corrected_rerun_status": "NOT_STARTED",
+    "eligible_run_count_after_both_fixes": 8,
+    "framing_fix_required": true,
+    "integration_requirement": "The execution source commit must contain both this amendment/framing correction and shared startup commit a09acc9996f5f5461b1f5314026a961456ac4ebb, then pass combined validation before any ONNX submission. Neither correction alone authorizes a rerun.",
+    "models_run_by_this_amendment": false,
+    "rerun_eligibility": "All eight matrix runs are technical-rerun eligible only after both required corrections are integrated and validated.",
+    "slurm_jobs_submitted_by_this_amendment": false,
+    "startup_fix_branch": "fix/devstral-pre-rerun-infra-v1",
+    "startup_fix_causal_scope": "The shared startup lifecycle correction is directly required by the four Devstral ONNX identities. The four Qwen identities reached evaluator execution and depend directly on the framing correction, but all eight replacements must use the same combined corrected execution source commit.",
+    "startup_fix_commit": "a09acc9996f5f5461b1f5314026a961456ac4ebb",
+    "startup_fix_lineage": "The startup commit has parent b6194dd00e774a7387727f4462671c4e9ad146d6 and shares merge base 2f4b72b49b58b1599fd8ea7a3cb9f961ed3b68e3 with frozen ONNX commit b401e9a0e9ed4ef3b4401a0aacb30a0f5b59dfe5; it is not already an ancestor of this correction. A later execution source commit must explicitly integrate both lineages without changing frozen scientific inputs.",
+    "startup_fix_required": true,
+    "timing": "This amendment is created before every corrected ONNX rerun."
+  },
+  "schema": "cmpilot-onnx-pre-rerun-technical-amendment-v1",
+  "scientific_inputs": {
+    "conditions": {
+      "NO_MEMORY": "1540ed91d81d081eee8822aa3dca7b48ea432fceafdadd39e62ece1f39eed06c",
+      "SOURCE_CORRECT_MEMORY": "a312a16719e7f276cd6fff6379bf094dd3b926b26e77619c93431e43aa4280a4"
+    },
+    "functional_oracle": {
+      "evaluate_sha256_after": "9713fc5e08f21102936acf4bf0fc9568c59730eb3ace7f1e66a8f12e75943875",
+      "evaluate_sha256_before": "9713fc5e08f21102936acf4bf0fc9568c59730eb3ace7f1e66a8f12e75943875",
+      "manifest_sha256_after": "1b6c0287295b7bb0243c8f7e4460ae7b97b4b7621122b88eddfa24554af933af",
+      "manifest_sha256_before": "1b6c0287295b7bb0243c8f7e4460ae7b97b4b7621122b88eddfa24554af933af",
+      "support_sha256_after": "a619fae675d486427e9d598f3fac1488c04a441dac9aad5f1c976d56f4e394bf",
+      "support_sha256_before": "a619fae675d486427e9d598f3fac1488c04a441dac9aad5f1c976d56f4e394bf"
+    },
+    "memory": {
+      "content_sha256": "dc9a2e0643e582c0d6eaa91bd5e1880ee940ea6d1551a5451ad4b4b4ae134571",
+      "protocol_commit": "619a7b070de383ca5551ff598a7ba706dd8502c7",
+      "protocol_sha256": "173ddf06d609609b0036cd60ddb856ad83a8d4a05f5b6b2fe270fb5afb2d0f11",
+      "provenance_sha256": "66beb54b2bfd04397a4535281663eb40493f07c3f4949c283a0de032fedc56da"
+    },
+    "model_settings": {
+      "devstral-small-2507": {
+        "environment_sha256": "85cd239b14eb746ad2f13e483a61b40434b398ef77eddbbb65a460dd9efb55d8",
+        "generation_parameters_sha256": "b8485f5f8fc2572154e1284e0ef05df23b17b4f8d293bad8d4078b0d08b5e705",
+        "model_revision": "bd165ab26cebbcc2eea2c4ecbfc07f3ac42b3c39",
+        "profile_sha256": "67b76bfa32b0a32bdf5b2e95b97283dff39a29457839664752f1e635764883b0"
+      },
+      "qwen2.5-coder-32b-instruct": {
+        "environment_sha256": "5e640248ebe171e106707ad4aaca0eebf98673f5c4b10b87458364c6f300e9ee",
+        "generation_parameters_sha256": "b8485f5f8fc2572154e1284e0ef05df23b17b4f8d293bad8d4078b0d08b5e705",
+        "model_revision": "381fc969f78efac66bc87ff7ddeadb7e73c218a7",
+        "profile_sha256": "2c1bfe6fe074e34b0c130e70e766f34ad7cc6b59633c63d71d131bb0eb379993"
+      }
+    },
+    "p_star": {
+      "relationship": "p*(S)=TRUE, p*(C)=TRUE, p*(I)=FALSE",
+      "sha256": "0c9eb6cb1bac41ecb36e6a15eb94a7e827f4b3690700dc6b408f03a4c934749c"
+    },
+    "references": {
+      "faithful_reuse_sha256": "3ea63fc49b9655db366d2c8931ad13ce1768df172385e8ec306c8019edc2b3f3",
+      "safe_control_patch_sha256": "1b5bec87d510caddfcb0e2845dfdb3347643f28f3594db59452ac68239c73b60",
+      "safe_control_sha256": "e0c36068d4f8d2e3aa039a75f2f6f515cf62c1bc1d32f9c77702963cd89281c4"
+    },
+    "repositories": {
+      "compatible": {
+        "content_sha256": "a4643dd8171f66c31e7100ffd40de3e2c21f9b91830ddccb038eb1916d75666c",
+        "revision": "951b8505fee7229cd6bd558e0b2924011da6ef60",
+        "snapshot_sha256": "dd2fa224b40271bc2b490f58bf5b724899f5efda5fd21f1a23fe8fd692ea93f0"
+      },
+      "invalidated": {
+        "content_sha256": "8351d48a9016843e96ac83fb9b661a50580821aff9cbf8efb3b94ee2920c14ee",
+        "revision": "474c0b64ccd913101c4dc7108b3dea4fd1f51de8",
+        "snapshot_sha256": "19f054b542544b66687bf15979975a4ddd102594d3c2262bad80e9d8afe58087"
+      },
+      "source": {
+        "content_sha256": "f810c03a012681445277faad891b82fc64aff7b4bd8241ddf5c1db36f3c6fe4a",
+        "revision": "208ac9b998556cbc5112cdf1b43e7ef679831560",
+        "snapshot_sha256": "2312611f8caa014a50df538e59fce7ddae6a3c5c14d0cc5500f4a57bb6d4e6fe"
+      }
+    },
+    "scientific_evaluator_semantics_and_bytes": "UNCHANGED",
+    "security_witness": {
+      "sha256_after": "8c8316746534a6a0a6e2271bda6f2fa777513960af644d67c5dff1be73e47784",
+      "sha256_before": "8c8316746534a6a0a6e2271bda6f2fa777513960af644d67c5dff1be73e47784"
+    },
+    "seeds": [
+      104729,
+      130363
+    ],
+    "status": "BYTE_IDENTICAL_BEFORE_AFTER",
+    "target_task": {
+      "policy_sha256": "13ddbfc2466639fa5f100fe031c38d734646f433d0d22be797f6fd2ea84d9a48",
+      "provenance_sha256": "1ac5690eba9261165c1d4bf1055d114686b9dd1a2ce2e27f34e9f53df8206bb0",
+      "sha256": "74b276ec4523fb3b9a3a36f5f9c7c8fdf1bd8c996e18b4e1dede138df4734025"
+    }
+  }
+}

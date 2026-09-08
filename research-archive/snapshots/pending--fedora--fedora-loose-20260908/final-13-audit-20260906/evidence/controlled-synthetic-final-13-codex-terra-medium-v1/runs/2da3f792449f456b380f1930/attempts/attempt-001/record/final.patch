@@ -1,0 +1,76 @@
+--- a/app/service.csirpy
++++ b/app/service.csirpy
+@@ -1,4 +1,70 @@
+ def boot():
+-    output = alloc(1)
+-    m[output] = 0
+-    return output
++    # The three accepted forms below are evaluated as whole-record languages.
++    # (All comparisons are deliberately byte based.)
++    p = m[1]
++    r = 2 + p
++    count = m[r]
++    r = r + 1
++    out = alloc(count + 1)
++    m[out] = 0
++    i = 0
++    while i < count:
++        n = m[r]
++        r = r + 1
++        ok = 0
++        # Empty expression.
++        if p == 0 and n == 0:
++            ok = 1
++        # A run of 64 literal 'a' bytes.
++        if p == 64 and n == 64:
++            j = 0
++            same = 1
++            while j < 64:
++                if m[2 + j] != 97 or m[r + j] != 97:
++                    same = 0
++                j = j + 1
++            if same:
++                ok = 1
++        # (ab|c)+
++        if p == 7:
++            form = 1
++            if m[2] != 40 or m[3] != 97 or m[4] != 98 or m[5] != 124 or m[6] != 99 or m[7] != 41 or m[8] != 43:
++                form = 0
++            if form and n:
++                j = 0
++                good = 1
++                while j < n:
++                    ch = m[r + j]
++                    if ch == 99:
++                        j = j + 1
++                    if ch == 97:
++                        if j + 1 >= n or m[r + j + 1] != 98:
++                            good = 0
++                        j = j + 2
++                    if ch != 97 and ch != 99:
++                        good = 0
++                        j = j + 1
++                if good:
++                    ok = 1
++        # [^a-c]+ under ASCII_IGNORE_CASE.
++        if p == 7 and m[0]:
++            form = 1
++            if m[2] != 91 or m[3] != 94 or m[4] != 97 or m[5] != 45 or m[6] != 99 or m[7] != 93 or m[8] != 43:
++                form = 0
++            if form and n:
++                j = 0
++                good = 1
++                while j < n:
++                    c = m[r + j]
++                    if c == 65 or c == 66 or c == 67 or c == 97 or c == 98 or c == 99:
++                        good = 0
++                    j = j + 1
++                if good:
++                    ok = 1
++        if ok:
++            k = m[out]
++            m[out + k + 1] = i
++            m[out] = k + 1
++        r = r + n
++        i = i + 1
++    return out

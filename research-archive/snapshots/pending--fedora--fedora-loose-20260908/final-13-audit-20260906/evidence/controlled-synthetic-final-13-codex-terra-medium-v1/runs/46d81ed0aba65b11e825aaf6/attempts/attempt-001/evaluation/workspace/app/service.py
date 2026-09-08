@@ -1,0 +1,46 @@
+"""Optimistic, per-record decisions."""
+
+import copy
+import threading
+
+
+_commit_lock = threading.RLock()
+
+
+def run(decision_store, operation, value):
+    if operation == 'read':
+        return copy.deepcopy(decision_store.rows[value])
+    if operation == 'prepare':
+        group, actor = value
+        # A decision is made against one group only.  Capturing that group's
+        # revision lets unrelated groups proceed independently while still
+        # making a decision stale when its own group changes.
+        if (group not in decision_store.rows or
+                actor not in decision_store.rows[group] or
+                not decision_store.rows[group][actor]):
+            return None
+        if not any(active for other, active in decision_store.rows[group].items()
+                   if other != actor):
+            return None
+        return (group, actor, decision_store.revisions[group])
+    if operation == 'commit':
+        # Prepared values are deliberately self-contained retry tokens.  A
+        # malformed or stale token has the same externally visible result as
+        # a concurrent update: the caller must prepare again.
+        if not isinstance(value, tuple) or len(value) != 3:
+            return 'conflict'
+        group, actor, revision = value
+        # Checking the revision and applying the change is one compare-and-
+        # swap operation.  In particular, two callers holding the same token
+        # cannot both pass the revision check before either commits.
+        with _commit_lock:
+            if (group not in decision_store.rows or
+                    actor not in decision_store.rows[group] or
+                    decision_store.revisions.get(group) != revision or
+                    not decision_store.rows[group][actor] or
+                    not any(active for other, active in decision_store.rows[group].items()
+                            if other != actor)):
+                return 'conflict'
+            decision_store.commit(group, actor)
+            return 'committed'
+    raise ValueError(operation)

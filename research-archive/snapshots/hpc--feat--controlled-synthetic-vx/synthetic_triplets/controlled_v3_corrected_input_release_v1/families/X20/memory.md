@@ -1,0 +1,1 @@
+# Frozen source memory X20\n\nProcedure: Read a control field using the source's single-value accessor and dispatch the request.\n\nApplicability assumption: Each security-relevant field occurs once, so all components derive one interpretation.\n

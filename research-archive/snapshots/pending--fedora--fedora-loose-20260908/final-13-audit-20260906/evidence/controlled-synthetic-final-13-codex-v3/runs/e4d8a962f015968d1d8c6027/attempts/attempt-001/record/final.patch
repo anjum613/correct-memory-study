@@ -1,0 +1,13 @@
+--- a/app/service.py
++++ b/app/service.py
+@@ -4,7 +4,9 @@
+ def fetch_resource(reference, session, transport, external=False):
+     parsed = urlsplit(reference)
+     if external:
+-        raise NotImplementedError("external resource fetching is not implemented")
++        if not parsed.scheme or not parsed.netloc:
++            raise ValueError("external resource URLs must be absolute")
++        return transport.fetch(reference, credentials=session.cookie)
+     if parsed.scheme or parsed.netloc:
+         raise ValueError("absolute resource URLs require external=True")
+ 

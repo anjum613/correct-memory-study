@@ -1,0 +1,287 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/correct-memory-study/candidate-source-capture-manifest-v0.3.schema.json",
+  "title": "Candidate source raw capture manifest v0.3",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "protocol_version",
+    "source_id",
+    "source_kind",
+    "source_revision",
+    "specification",
+    "status",
+    "started_at_utc",
+    "completed_at_utc",
+    "request_policy",
+    "requests",
+    "raw_artifacts",
+    "partition_nodes",
+    "source_object_accounting",
+    "normalization_started",
+    "credentials_recorded",
+    "experiment_accessed",
+    "treatment_results_consulted"
+  ],
+  "properties": {
+    "schema": {"const": "candidate-source-capture-manifest-v0.3"},
+    "protocol_version": {"const": "benchmark-selection-source-v0.3"},
+    "source_id": {"type": "string", "minLength": 1},
+    "source_kind": {
+      "enum": [
+        "REPOSITORY_REPAIR_BENCHMARK",
+        "SECURITY_ADVISORY_REPAIR",
+        "TRUST_BOUNDARY_ISSUE_PR_SEARCH"
+      ]
+    },
+    "source_revision": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "value"],
+          "properties": {
+            "kind": {"const": "GIT_COMMIT"},
+            "value": {"$ref": "#/$defs/sha1"}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "value"],
+          "properties": {
+            "kind": {"const": "FROZEN_QUERY_SPECIFICATION"},
+            "value": {"$ref": "#/$defs/sha256"}
+          }
+        }
+      ]
+    },
+    "specification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["project_commit", "base_hashes", "amendment_sha256"],
+      "properties": {
+        "project_commit": {"$ref": "#/$defs/sha1"},
+        "base_hashes": {
+          "type": "object",
+          "minProperties": 8,
+          "additionalProperties": {"$ref": "#/$defs/sha256"}
+        },
+        "amendment_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "status": {"enum": ["CAPTURE_COMPLETE", "CAPTURE_FAILED"]},
+    "failure_code": {"type": "string", "minLength": 1},
+    "started_at_utc": {"type": "string", "format": "date-time"},
+    "completed_at_utc": {"type": "string", "format": "date-time"},
+    "request_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "connect_timeout_seconds",
+        "read_timeout_seconds",
+        "total_timeout_seconds",
+        "maximum_attempts",
+        "retry_delays_seconds",
+        "redirect_limit"
+      ],
+      "properties": {
+        "connect_timeout_seconds": {"const": 10},
+        "read_timeout_seconds": {"const": 30},
+        "total_timeout_seconds": {"const": 45},
+        "maximum_attempts": {"const": 3},
+        "retry_delays_seconds": {
+          "type": "array",
+          "prefixItems": [{"const": 2}, {"const": 4}],
+          "items": false
+        },
+        "redirect_limit": {"const": 1}
+      }
+    },
+    "requests": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/logical_request"}
+    },
+    "raw_artifacts": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/raw_artifact"}
+    },
+    "partition_nodes": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/partition_node"}
+    },
+    "source_object_accounting": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "encountered_source_object_ids",
+        "disposition_phase"
+      ],
+      "properties": {
+        "encountered_source_object_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "disposition_phase": {"const": "NOT_STARTED"}
+      }
+    },
+    "normalization_started": {"const": false},
+    "credentials_recorded": {"const": false},
+    "experiment_accessed": {"const": false},
+    "treatment_results_consulted": {"const": false}
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {"status": {"const": "CAPTURE_FAILED"}},
+        "required": ["status"]
+      },
+      "then": {"required": ["failure_code"]}
+    },
+    {
+      "if": {
+        "properties": {"status": {"const": "CAPTURE_COMPLETE"}},
+        "required": ["status"]
+      },
+      "then": {"not": {"required": ["failure_code"]}}
+    }
+  ],
+  "$defs": {
+    "sha1": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "raw_artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256", "media_type", "size_bytes"],
+      "properties": {
+        "path": {
+          "type": "string",
+          "pattern": "^raw/sha256/[0-9a-f]{2}/[0-9a-f]{62}$"
+        },
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "media_type": {"type": "string", "minLength": 1},
+        "size_bytes": {"type": "integer", "minimum": 0}
+      }
+    },
+    "attempt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "attempt_number",
+        "retry_count",
+        "delay_before_attempt_seconds",
+        "started_at_utc",
+        "completed_at_utc",
+        "response_headers"
+      ],
+      "properties": {
+        "attempt_number": {"type": "integer", "minimum": 1, "maximum": 3},
+        "retry_count": {"type": "integer", "minimum": 0, "maximum": 2},
+        "delay_before_attempt_seconds": {"enum": [0, 2, 4]},
+        "started_at_utc": {"type": "string", "format": "date-time"},
+        "completed_at_utc": {"type": "string", "format": "date-time"},
+        "http_status": {"type": "integer", "minimum": 100, "maximum": 599},
+        "transport_error": {
+          "enum": ["CONNECT_TIMEOUT", "READ_TIMEOUT", "CONNECTION_RESET"]
+        },
+        "response_headers": {
+          "type": "object",
+          "additionalProperties": {"type": "string"}
+        },
+        "body": {"$ref": "#/$defs/raw_artifact"},
+        "total_count": {"type": "integer", "minimum": 0},
+        "incomplete_results": {"type": "boolean"}
+      },
+      "oneOf": [
+        {"required": ["http_status"]},
+        {"required": ["transport_error"]}
+      ]
+    },
+    "logical_request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "request_number",
+        "method",
+        "endpoint",
+        "api_version",
+        "accept",
+        "ordered_parameters",
+        "sort",
+        "order",
+        "attempts"
+      ],
+      "properties": {
+        "request_number": {"type": "integer", "minimum": 1},
+        "method": {"enum": ["GET", "POST"]},
+        "endpoint": {"type": "string", "pattern": "^https://api\\.github\\.com/"},
+        "api_version": {"const": "2022-11-28"},
+        "accept": {"const": "application/vnd.github+json"},
+        "exact_query": {"type": ["string", "null"]},
+        "ordered_parameters": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "prefixItems": [
+              {"type": "string", "minLength": 1},
+              {"type": "string"}
+            ],
+            "items": false
+          }
+        },
+        "partition_path": {"type": ["string", "null"]},
+        "partition_start_utc": {"type": ["string", "null"], "format": "date-time"},
+        "partition_end_utc": {"type": ["string", "null"], "format": "date-time"},
+        "page": {"type": ["integer", "null"], "minimum": 1},
+        "graphql_cursor": {"type": ["string", "null"]},
+        "sort": {"type": ["string", "null"]},
+        "order": {"type": ["string", "null"]},
+        "attempts": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 3,
+          "items": {"$ref": "#/$defs/attempt"}
+        }
+      }
+    },
+    "partition_node": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "query_id",
+        "path",
+        "start_utc",
+        "end_utc",
+        "total_count",
+        "incomplete_results",
+        "disposition"
+      ],
+      "properties": {
+        "query_id": {"type": "string", "pattern": "^TB-Q0[1-8]$"},
+        "path": {"type": "string", "pattern": "^[LR]*$"},
+        "start_utc": {"type": "string", "format": "date-time"},
+        "end_utc": {"type": "string", "format": "date-time"},
+        "total_count": {"type": "integer", "minimum": 0},
+        "incomplete_results": {"type": "boolean"},
+        "disposition": {"enum": ["SPLIT", "LEAF", "FAILED"]},
+        "left_path": {"type": "string", "pattern": "^[LR]+$"},
+        "right_path": {"type": "string", "pattern": "^[LR]+$"},
+        "failure_code": {"type": "string", "minLength": 1}
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {"disposition": {"enum": ["SPLIT", "LEAF"]}},
+            "required": ["disposition"]
+          },
+          "then": {
+            "properties": {"incomplete_results": {"const": false}}
+          }
+        }
+      ]
+    }
+  }
+}

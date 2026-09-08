@@ -1,0 +1,23 @@
+"""Multiple worker baseline for the fixed-key wire format."""
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+_FIXED_KEY = bytes(range(32))
+_AAD = b'controlled-X05-v1'
+
+
+def run(system, worker, payload_bytes):
+    # Reserve nonce for this worker
+    nonce = system.reserve_worker(worker)
+    if nonce is None:
+        return 'exhausted'
+    
+    # Generate IV from nonce
+    iv = nonce.to_bytes(12, 'big')
+    system.issued.append(nonce)
+    
+    # Encrypt using fixed key and AAD
+    if system.fail_next:
+        system.fail_next = False
+        return 'encryption-error'
+        
+    return iv + AESGCM(_FIXED_KEY).encrypt(iv, bytes(payload_bytes), _AAD)

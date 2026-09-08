@@ -1,0 +1,29 @@
+diff --git a/app/service.py b/app/service.py
+index 1f4001f..b93209c 100644
+--- a/app/service.py
++++ b/app/service.py
+@@ -1,15 +1,17 @@
+-"""Correlation-only diagnostic baseline."""
++"""Full diagnostic record handler."""
+ import json
+ 
+ 
+ def run(diagnostic_record, sink):
+-    record = {}
+-    if type(diagnostic_record) is dict and 'correlation' in diagnostic_record:
+-        value = diagnostic_record['correlation']
+-        if value is None or type(value) in (str, int, float, bool):
+-            record['correlation'] = value
+-        else:
++    # Preserve all fields from diagnostic_record
++    record = diagnostic_record.copy() if isinstance(diagnostic_record, dict) else {}
++    
++    # Ensure correlation field is properly handled if present
++    if 'correlation' in record:
++        value = record['correlation']
++        if value is not None and type(value) not in (str, int, float, bool):
+             record['correlation'] = None
++    
+     try:
+         sink.write(json.dumps(record))
+     except Exception:

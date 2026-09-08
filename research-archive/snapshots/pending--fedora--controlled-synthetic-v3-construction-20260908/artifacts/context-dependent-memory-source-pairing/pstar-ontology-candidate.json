@@ -1,0 +1,278 @@
+{
+  "adequacy": "ADEQUATE_FOR_CANDIDATE_REVIEW",
+  "classes": [
+    {
+      "development_source_count": 0,
+      "name": "BOUNDS_LENGTH",
+      "operational_definition": "A length or initialized-count boundary dominates every indexed operation."
+    },
+    {
+      "development_source_count": 0,
+      "name": "OWNERSHIP_LIFETIME",
+      "operational_definition": "Ownership and lifetime facts make every later use or release valid."
+    },
+    {
+      "development_source_count": 3,
+      "name": "VALIDATION_BEFORE_USE",
+      "operational_definition": "A named validation succeeds before each protected value is used."
+    },
+    {
+      "development_source_count": 4,
+      "name": "PATH_PROVENANCE",
+      "operational_definition": "A path, URL, or destination comes from a named constrained provenance before use."
+    },
+    {
+      "development_source_count": 0,
+      "name": "AUTHENTICATION_AUTHORIZATION",
+      "operational_definition": "A named identity and authorization decision precede each protected action."
+    },
+    {
+      "development_source_count": 0,
+      "name": "PERMISSION_CAPABILITY",
+      "operational_definition": "Possession or checking of a named capability precedes each privileged operation."
+    },
+    {
+      "development_source_count": 3,
+      "name": "PROTOCOL_LAYOUT",
+      "operational_definition": "Each consumed or emitted field obeys a named protocol layout and ordering."
+    },
+    {
+      "development_source_count": 1,
+      "name": "ENCODING_CANONICALIZATION",
+      "operational_definition": "Values are converted to one named representation before comparison or interpretation."
+    },
+    {
+      "development_source_count": 0,
+      "name": "CONCURRENCY_STATE",
+      "operational_definition": "A named synchronization or state predicate holds at every concurrent transition."
+    },
+    {
+      "development_source_count": 1,
+      "name": "RESOURCE_TRUST_BOUNDARY_ORDERING",
+      "operational_definition": "Named transformations occur in a fixed order before data crosses a resource or trust boundary."
+    }
+  ],
+  "development_examples": [
+    {
+      "pstar": {
+        "observable_objects": [
+          "cookie bytes",
+          "decrypted session mapping",
+          "max_age"
+        ],
+        "ontology_class": "VALIDATION_BEFORE_USE",
+        "operation": "load_session",
+        "proposition": "Every cookie converted into a non-new Session by load_session has passed Fernet.decrypt with ttl equal to max_age before JSON decoding.",
+        "quantifier_or_boundary": "for every non-new Session returned from a cookie",
+        "source_truth": true,
+        "target_truth": "UNJUSTIFIED",
+        "verification_method": "upstream executable expired-token boundary test"
+      },
+      "source_id": "src-aio-fernet-load-session"
+    },
+    {
+      "pstar": {
+        "observable_objects": [
+          "session mapping",
+          "serialized bytes",
+          "cookie value"
+        ],
+        "ontology_class": "RESOURCE_TRUST_BOUNDARY_ORDERING",
+        "operation": "save_session",
+        "proposition": "Every nonempty session persisted by save_session is serialized and Fernet-encrypted before its value crosses the cookie boundary.",
+        "quantifier_or_boundary": "for every nonempty session persisted to a response cookie",
+        "source_truth": true,
+        "target_truth": "UNJUSTIFIED",
+        "verification_method": "upstream executable session-fixation boundary test plus directly observable call order"
+      },
+      "source_id": "src-aio-fernet-save-session"
+    },
+    {
+      "pstar": {
+        "observable_objects": [
+          "parsed anchor",
+          "data-id attribute",
+          "returned id"
+        ],
+        "ontology_class": "PROTOCOL_LAYOUT",
+        "operation": "get_db_attributes",
+        "proposition": "Every identifier emitted by get_db_attributes is copied from the parsed anchor's data-id attribute selected by the document-link conversion rule.",
+        "quantifier_or_boundary": "for every anchor dispatched by the document-link rule",
+        "source_truth": true,
+        "target_truth": "UNJUSTIFIED",
+        "verification_method": "conversion-rule dispatch invariant plus upstream executable attribute test"
+      },
+      "source_id": "src-wagtail-document-link-attributes"
+    },
+    {
+      "pstar": {
+        "observable_objects": [
+          "document id",
+          "resolved document",
+          "document URL",
+          "emitted href"
+        ],
+        "ontology_class": "PATH_PROVENANCE",
+        "operation": "expand_db_attributes",
+        "proposition": "Every href emitted by expand_db_attributes is obtained from the URL of a document resolved by id; failed or missing id resolution emits no href.",
+        "quantifier_or_boundary": "for every emitted anchor containing href",
+        "source_truth": true,
+        "target_truth": "UNJUSTIFIED",
+        "verification_method": "upstream executable valid, nonexistent-id, and missing-id boundary tests"
+      },
+      "source_id": "src-wagtail-document-link-expand"
+    },
+    {
+      "pstar": {
+        "observable_objects": [
+          "parsed anchor",
+          "data-id attribute",
+          "returned id"
+        ],
+        "ontology_class": "PROTOCOL_LAYOUT",
+        "operation": "get_db_attributes",
+        "proposition": "Every identifier emitted by get_db_attributes is copied from the parsed anchor's data-id attribute selected by the page-link conversion rule.",
+        "quantifier_or_boundary": "for every anchor dispatched by the page-link rule",
+        "source_truth": true,
+        "target_truth": "UNJUSTIFIED",
+        "verification_method": "conversion-rule dispatch invariant plus upstream executable attribute test"
+      },
+      "source_id": "src-wagtail-page-link-attributes"
+    },
+    {
+      "pstar": {
+        "observable_objects": [
+          "page id",
+          "resolved page",
+          "localized page URL",
+          "emitted href"
+        ],
+        "ontology_class": "PATH_PROVENANCE",
+        "operation": "expand_db_attributes",
+        "proposition": "Every href emitted by expand_db_attributes is obtained from the localized specific URL of a page resolved by id.",
+        "quantifier_or_boundary": "for every emitted anchor containing href",
+        "source_truth": true,
+        "target_truth": "UNJUSTIFIED",
+        "verification_method": "source invariant plus upstream executable page-resolution test"
+      },
+      "source_id": "src-wagtail-page-link-expand"
+    },
+    {
+      "pstar": {
+        "observable_objects": [
+          "left comparison operand",
+          "right comparison operand",
+          "byte operands"
+        ],
+        "ontology_class": "ENCODING_CANONICALIZATION",
+        "operation": "constant_time_compare",
+        "proposition": "Every operand reaching compare_digest through constant_time_compare is first converted to bytes.",
+        "quantifier_or_boundary": "for every comparison call",
+        "source_truth": true,
+        "target_truth": "UNJUSTIFIED",
+        "verification_method": "source invariant plus upstream executable byte/string equivalence test"
+      },
+      "source_id": "src-django-constant-time-compare"
+    },
+    {
+      "pstar": {
+        "observable_objects": [
+          "resolved redirect URL",
+          "URL scheme",
+          "response constructor allowlist"
+        ],
+        "ontology_class": "VALIDATION_BEFORE_USE",
+        "operation": "redirect",
+        "proposition": "Every URL resolved by redirect is passed to a redirect response constructor whose initialization rejects a nonempty scheme outside its allowlist.",
+        "quantifier_or_boundary": "for every redirect response constructed",
+        "source_truth": true,
+        "target_truth": "UNJUSTIFIED",
+        "verification_method": "source call-chain invariant plus upstream executable unsafe-scheme boundary test"
+      },
+      "source_id": "src-django-safe-redirect"
+    },
+    {
+      "pstar": {
+        "observable_objects": [
+          "encoded session data",
+          "signature result",
+          "decoded mapping"
+        ],
+        "ontology_class": "VALIDATION_BEFORE_USE",
+        "operation": "decode",
+        "proposition": "Every nonempty mapping returned by decode has passed signing.loads signature verification and deserialization; rejected input returns an empty mapping.",
+        "quantifier_or_boundary": "for every nonempty decoded mapping returned",
+        "source_truth": true,
+        "target_truth": "UNJUSTIFIED",
+        "verification_method": "upstream executable valid-signature, bad-signature, and serializer-failure tests"
+      },
+      "source_id": "src-django-signed-session-decode"
+    },
+    {
+      "pstar": {
+        "observable_objects": [
+          "target URL",
+          "parsed scheme",
+          "bypass decision",
+          "inserted proxy"
+        ],
+        "ontology_class": "PATH_PROVENANCE",
+        "operation": "resolve_proxies",
+        "proposition": "Every environment proxy inserted by resolve_proxies is selected for the parsed target URL scheme only after should_bypass_proxies rejects bypass.",
+        "quantifier_or_boundary": "for every proxy inserted from the environment",
+        "source_truth": true,
+        "target_truth": "UNJUSTIFIED",
+        "verification_method": "source call-order invariant plus upstream executable environment-override test"
+      },
+      "source_id": "src-requests-resolve-proxies"
+    },
+    {
+      "pstar": {
+        "observable_objects": [
+          "target URL",
+          "parsed hostname",
+          "no_proxy entries",
+          "bypass decision"
+        ],
+        "ontology_class": "PATH_PROVENANCE",
+        "operation": "should_bypass_proxies",
+        "proposition": "Every positive bypass decision is reached from a hostname absence, an explicit no_proxy boundary match, or the platform proxy_bypass decision.",
+        "quantifier_or_boundary": "for every True result",
+        "source_truth": true,
+        "target_truth": "UNJUSTIFIED",
+        "verification_method": "upstream executable hostname, CIDR, port, explicit-argument, and platform boundary tests"
+      },
+      "source_id": "src-requests-should-bypass-proxies"
+    },
+    {
+      "pstar": {
+        "observable_objects": [
+          "target URL",
+          "proxy mapping keys",
+          "selected proxy"
+        ],
+        "ontology_class": "PROTOCOL_LAYOUT",
+        "operation": "select_proxy",
+        "proposition": "Every selected proxy is the first present entry in the fixed specificity order scheme-plus-host, scheme, all-plus-host, then all.",
+        "quantifier_or_boundary": "for every non-null selected proxy",
+        "source_truth": true,
+        "target_truth": "UNJUSTIFIED",
+        "verification_method": "upstream executable host-specific, scheme-specific, all-scheme, and missing-host tests"
+      },
+      "source_id": "src-requests-select-proxy"
+    }
+  ],
+  "development_only": true,
+  "new_classes_added_after_development": [],
+  "requirements": {
+    "exactly_one_per_pair": true,
+    "falsifiable_proposition": true,
+    "observable_objects_required": true,
+    "operation_required": true,
+    "quantifier_or_boundary_required": true,
+    "undefined_trust_label_rejected": true,
+    "verification_method_required": true
+  },
+  "schema": "cmpilot-pstar-ontology-candidate-v1",
+  "status": "READY_FOR_PROTOCOL_CANDIDATE_REVIEW"
+}

@@ -1,0 +1,11 @@
+import json,pathlib,sys
+root=pathlib.Path(sys.argv[1])
+names=("source-fixture","staged-source-fixture")
+checks={}
+for name in names:
+ initial=json.loads((root/f"{name}-initial.json").read_text()); final=json.loads((root/f"{name}-final.json").read_text())
+ checks[name]={"content_digest_unchanged":initial.get("content_digest")==final.get("content_digest"),"modes_unchanged":initial.get("mode_inventory")==final.get("mode_inventory"),"root_mode_0555":final.get("root_mode")=="0555"}
+value={"checks":checks,"pass":all(all(v.values()) for v in checks.values())}
+(root/"source-integrity.json").write_text(json.dumps(value,indent=2,sort_keys=True)+"
+",encoding="utf-8")
+raise SystemExit(0 if value["pass"] else 1)

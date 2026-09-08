@@ -1,0 +1,80 @@
+from __future__ import annotations
+
+import subprocess
+from unittest.mock import patch
+
+import pytest
+
+from cmpilot.mini_swe_adapter import ADAPTER_SOURCE, EXPECTED_VERSION, METADATA_VERSION_QUERY, mini_swe_info
+
+
+def completed_process(returncode: int = 0, stdout: str = "", stderr: str = "") -> subprocess.CompletedProcess[str]:
+    return subprocess.CompletedProcess([], returncode, stdout, stderr)
+
+
+def test_mini_swe_info_accepts_exact_distribution_version_with_metadata_query() -> None:
+    with patch(
+        "cmpilot.mini_swe_adapter.subprocess.run",
+        return_value=completed_process(stdout=f"{EXPECTED_VERSION}\n"),
+    ) as run:
+        info = mini_swe_info("/mini-swe/python")
+
+    assert info.available is True
+    assert info.version == EXPECTED_VERSION
+    assert info.diagnostic == f"mini-SWE-agent {EXPECTED_VERSION}"
+    command = run.call_args.args[0]
+    assert command == ["/mini-swe/python", "-c", METADATA_VERSION_QUERY]
+    assert "from importlib.metadata import PackageNotFoundError, version" in command[2]
+    assert "import minisweagent" not in command[2]
+    assert ".env" not in command[2]
+
+
+def test_mini_swe_info_rejects_a_different_distribution_version() -> None:
+    with patch("cmpilot.mini_swe_adapter.subprocess.run", return_value=completed_process(stdout="2.4.5\n")):
+        info = mini_swe_info("/mini-swe/python")
+
+    assert info.available is False
+    assert info.version == "2.4.5"
+    assert info.diagnostic == "mini-SWE-agent 2.4.6 required; found 2.4.5"
+
+
+def test_mini_swe_info_reports_a_missing_distribution() -> None:
+    with patch(
+        "cmpilot.mini_swe_adapter.subprocess.run",
+        return_value=completed_process(returncode=1, stderr="mini-SWE-agent distribution is not installed\n"),
+    ):
+        info = mini_swe_info("/mini-swe/python")
+
+    assert info.available is False
+    assert info.version == ""
+    assert info.diagnostic == "mini-SWE-agent distribution is not installed"
+
+
+def test_mini_swe_info_reports_a_nonzero_metadata_query() -> None:
+    with patch(
+        "cmpilot.mini_swe_adapter.subprocess.run",
+        return_value=completed_process(returncode=1, stderr="metadata query failed\n"),
+    ):
+        info = mini_swe_info("/mini-swe/python")
+
+    assert info.available is False
+    assert info.version == ""
+    assert info.diagnostic == "metadata query failed"
+
+
+@pytest.mark.parametrize("output", ["", "mini-SWE-agent 2.4.6\n", "2.4.6\nextra"])
+def test_mini_swe_info_rejects_empty_or_malformed_version_output(output: str) -> None:
+    with patch("cmpilot.mini_swe_adapter.subprocess.run", return_value=completed_process(stdout=output)):
+        info = mini_swe_info("/mini-swe/python")
+
+    assert info.available is False
+    assert "invalid semantic version" in info.diagnostic
+
+
+def test_adapter_matches_the_shipped_text_action_config_and_smoke_limits() -> None:
+    assert "LitellmTextbasedModel" in ADAPTER_SOURCE
+    assert "AuditedLocalEnvironment" in ADAPTER_SOURCE
+    assert 'CMPILOT_PATCH_HISTORY' in ADAPTER_SOURCE
+    assert 'CMPILOT_AGENT_CONFIG_SOURCE' in ADAPTER_SOURCE
+    assert '"api_key"' not in ADAPTER_SOURCE
+    assert "local-smoke-placeholder" not in ADAPTER_SOURCE

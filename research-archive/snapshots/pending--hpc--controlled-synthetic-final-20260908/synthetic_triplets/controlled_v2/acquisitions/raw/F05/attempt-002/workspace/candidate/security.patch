@@ -1,0 +1,11 @@
+--- a/app/service.py
++++ b/app/service.py
+@@ -3,4 +3,7 @@ def fetch_asset(cart, store, resolver, alias=None):
+         asset_id = cart.selected(0)
+     else:
+         asset_id = resolver.resolve(alias)
+-    return store.get(asset_id)
++    asset = store.get(asset_id)
++    if asset.owner != cart.owner:
++        raise PermissionError("asset does not belong to cart owner")
++    return asset

@@ -1,0 +1,2228 @@
+2026-08-16T05:37:37.078579Z ERROR codex_models_manager::manager: failed to refresh available models: timeout waiting for child process to exit
+2026-08-16T05:37:37.113785Z ERROR codex_models_manager::manager: failed to refresh available models: timeout waiting for child process to exit
+OpenAI Codex v0.147.0
+--------
+workdir: /home/anjum/candidate-discovery-casing-20260816
+model: gpt-5.6-sol
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 01a00913-555a-76f2-ab37-32477cafc953
+--------
+user
+current changes
+2026-08-16T05:37:42.291203Z ERROR codex_models_manager::manager: failed to refresh available models: timeout waiting for child process to exit
+2026-08-16T05:38:19.540550Z ERROR codex_models_manager::manager: failed to refresh available models: timeout waiting for child process to exit
+exec
+/usr/bin/bash -lc "git status --short && printf '\\n--- DIFF ---\\n' && git diff --no-ext-diff && printf '\\n--- CACHED ---\\n' && git diff --cached --no-ext-diff && printf '\\n--- UNTRACKED ---\\n' && git ls-files --others --exclude-standard" in /home/anjum/candidate-discovery-casing-20260816
+ succeeded in 1080ms:
+ M src/cmpilot/candidate_discovery_v03.py
+ M tests/test_candidate_discovery_v03.py
+
+--- DIFF ---
+diff --git a/src/cmpilot/candidate_discovery_v03.py b/src/cmpilot/candidate_discovery_v03.py
+index 2601fb444..c4b442d6c 100644
+--- a/src/cmpilot/candidate_discovery_v03.py
++++ b/src/cmpilot/candidate_discovery_v03.py
+@@ -2680,7 +2680,31 @@ def _captured_pr_episode(
+     )
+     final_owner = str(repository_value["owner"])
+     final_repository = str(repository_value["name"])
++    evidence_owner = final_owner
++    evidence_repository = final_repository
+     root = _api_repo_endpoint(final_owner, final_repository)
++    requested_root = _api_repo_endpoint(owner, repository)
++    if (
++        owner.casefold() == final_owner.casefold()
++        and repository.casefold() == final_repository.casefold()
++        and requested_root != root
++    ):
++        final_key = GitHubEvidence._key(
++            method="GET",
++            endpoint=f"{root}/pulls/{number}",
++            ordered_parameters=(),
++            json_body=None,
++        )
++        requested_key = GitHubEvidence._key(
++            method="GET",
++            endpoint=f"{requested_root}/pulls/{number}",
++            ordered_parameters=(),
++            json_body=None,
++        )
++        if final_key not in captured.entries and requested_key in captured.entries:
++            evidence_owner = owner
++            evidence_repository = repository
++            root = requested_root
+     payload = captured.get(
+         method="GET", endpoint=f"{root}/pulls/{number}", artifacts=artifacts
+     )
+@@ -2744,8 +2768,8 @@ def _captured_pr_episode(
+     merge_sha = _record_sha(payload.get("merge_commit_sha"), "PR merge commit SHA")
+     endpoint_commit = _captured_commit(
+         captured,
+-        owner=final_owner,
+-        repository=final_repository,
++        owner=evidence_owner,
++        repository=evidence_repository,
+         commit_sha=merge_sha,
+         artifacts=artifacts,
+     )
+@@ -2763,8 +2787,8 @@ def _captured_pr_episode(
+         raise SourceRecordRejected(error.code, str(error)) from error
+     _captured_commit(
+         captured,
+-        owner=final_owner,
+-        repository=final_repository,
++        owner=evidence_owner,
++        repository=evidence_repository,
+         commit_sha=episode.candidate_snapshot_commit_sha,
+         artifacts=artifacts,
+     )
+diff --git a/tests/test_candidate_discovery_v03.py b/tests/test_candidate_discovery_v03.py
+index 9cfef3677..2eb46b6e4 100644
+--- a/tests/test_candidate_discovery_v03.py
++++ b/tests/test_candidate_discovery_v03.py
+@@ -502,6 +502,256 @@ def test_issue_graphql_is_captured_before_unavailable_repository(
+     ]
+ 
+ 
++def _capture_and_materialize_linked_pr_case(
++    run_root: Path, *, graphql_name_with_owner: str
++) -> tuple[
++    CaptureContext,
++    GitHubEvidence,
++    list[dict[str, object]],
++    list[dict[str, object]],
++]:
++    context = CaptureContext.create(
++        run_root=run_root,
++        source_id=SEARCH_SOURCE_ID,
++        source_kind="TRUST_BOUNDARY_ISSUE_PR_SEARCH",
++        source_revision={
++            "kind": "FROZEN_QUERY_SPECIFICATION",
++            "value": "b" * 64,
++        },
++        token=FIXTURE_TOKEN,
++    )
++    snapshot, head, repair = "a" * 40, "b" * 40, "c" * 40
++    snapshot_tree, repair_tree = "d" * 40, "e" * 40
++
++    def transport(method, url, headers, body):  # type: ignore[no-untyped-def]
++        del headers
++        parsed = urlsplit(url)
++        if parsed.path == "/search/issues":
++            query = parse_qs(parsed.query)["q"][0]
++            items = (
++                [
++                    {
++                        "id": 86,
++                        "node_id": "issue-node-86",
++                        "number": 86,
++                        "repository_url": (
++                            "https://api.github.com/repos/issueowner/issues"
++                        ),
++                        "url": (
++                            "https://api.github.com/repos/issueowner/issues/issues/86"
++                        ),
++                        "html_url": "https://github.com/issueowner/issues/issues/86",
++                    }
++                ]
++                if '"fixture-0"' in query
++                else []
++            )
++            return _response(
++                {
++                    "total_count": len(items),
++                    "incomplete_results": False,
++                    "items": items,
++                }
++            )
++        if parsed.path == "/graphql":
++            assert method == "POST"
++            assert body is not None
++            return _response(
++                {
++                    "data": {
++                        "repository": {
++                            "databaseId": 11,
++                            "nameWithOwner": "issueowner/issues",
++                            "issue": {
++                                "closedByPullRequestsReferences": {
++                                    "nodes": [
++                                        {
++                                            "id": "pull-request-node-9",
++                                            "number": 9,
++                                            "merged": True,
++                                            "mergedAt": "2026-01-01T00:00:00Z",
++                                            "baseRefOid": "f" * 40,
++                                            "headRefOid": head,
++                                            "mergeCommit": {"oid": repair},
++                                            "repository": {
++                                                "databaseId": 7,
++                                                "nameWithOwner": graphql_name_with_owner,
++                                                "url": (
++                                                    "https://github.com/"
++                                                    f"{graphql_name_with_owner}"
++                                                ),
++                                                "visibility": "PUBLIC",
++                                            },
++                                        }
++                                    ],
++                                    "pageInfo": {
++                                        "hasNextPage": False,
++                                        "endCursor": None,
++                                    },
++                                }
++                            },
++                        }
++                    }
++                }
++            )
++        if parsed.path == "/repos/issueowner/issues":
++            return _response(
++                {
++                    "id": 11,
++                    "owner": {"login": "issueowner"},
++                    "name": "issues",
++                    "html_url": "https://github.com/issueowner/issues",
++                    "visibility": "public",
++                }
++            )
++        if parsed.path.casefold() == "/repos/exampleowner/examplerepository":
++            return _response(
++                {
++                    "id": 7,
++                    "owner": {"login": "exampleowner"},
++                    "name": "examplerepository",
++                    "html_url": (
++                        "https://github.com/exampleowner/examplerepository"
++                    ),
++                    "visibility": "public",
++                }
++            )
++        api_root = f"/repos/{graphql_name_with_owner}"
++        if parsed.path == f"{api_root}/pulls/9":
++            return _response(
++                {
++                    "number": 9,
++                    "merged": True,
++                    "merged_at": "2026-01-01T00:00:00Z",
++                    "commits": 2,
++                    "base": {"sha": "f" * 40},
++                    "head": {"sha": head},
++                    "merge_commit_sha": repair,
++                }
++            )
++        if parsed.path == f"{api_root}/pulls/9/commits":
++            return _response([{"sha": "1" * 40}, {"sha": head}])
++        if parsed.path == f"{api_root}/git/commits/{repair}":
++            return _response(
++                {
++                    "sha": repair,
++                    "tree": {"sha": repair_tree},
++                    "parents": [{"sha": snapshot}, {"sha": head}],
++                }
++            )
++        if parsed.path == f"{api_root}/git/trees/{repair_tree}":
++            return _response({"sha": repair_tree, "tree": []})
++        if parsed.path == f"{api_root}/git/commits/{snapshot}":
++            return _response(
++                {
++                    "sha": snapshot,
++                    "tree": {"sha": snapshot_tree},
++                    "parents": [],
++                }
++            )
++        if parsed.path == f"{api_root}/git/trees/{snapshot_tree}":
++            return _response({"sha": snapshot_tree, "tree": []})
++        raise AssertionError(f"unexpected offline request: {method} {url}")
++
++    context.api.transport = transport
++    context.api.clock = lambda: "2026-08-16T00:00:00Z"
++    evidence = GitHubEvidence(context)
++    search_spec = {
++        "queries": [
++            {
++                "query_id": f"TB-Q{index + 1:02d}",
++                "query": (
++                    f'"fixture-{index}" is:issue '
++                    "created:2020-01-01..2026-08-12"
++                ),
++                "object_type": "ISSUE",
++            }
++            for index in range(8)
++        ]
++    }
++    discovery_v03.capture_searches(context, evidence, search_spec=search_spec)
++    _, capture_digest = context.finalize(
++        status="CAPTURE_COMPLETE", evidence=evidence
++    )
++    manifest, _, index = load_verified_capture(context.root)
++    records, occurrences = discovery_v03.materialize_searches(
++        source_root=context.root,
++        manifest=manifest,
++        capture_digest=capture_digest,
++        index=index,
++        search_spec=search_spec,
++    )
++    return context, evidence, records, occurrences
++
++
++def test_linked_pr_repository_casing_matches_rest_materialization(
++    tmp_path: Path,
++) -> None:
++    mixed_context, mixed_evidence, mixed_records, mixed_occurrences = (
++        _capture_and_materialize_linked_pr_case(
++            tmp_path / "mixed",
++            graphql_name_with_owner="ExampleOwner/ExampleRepository",
++        )
++    )
++    _, control_evidence, control_records, control_occurrences = (
++        _capture_and_materialize_linked_pr_case(
++            tmp_path / "control",
++            graphql_name_with_owner="exampleowner/examplerepository",
++        )
++    )
++
++    assert len(mixed_records) == len(control_records) == 1
++    assert mixed_records[0]["disposition"] == "MATERIALIZED"
++    assert mixed_records[0]["rejection_reason_codes"] == []
++    assert mixed_records[0]["candidate_links"] == control_records[0]["candidate_links"]
++    assert len(mixed_occurrences) == len(control_occurrences) == 1
++    for field in (
++        "canonical_candidate_id",
++        "github_repository_id",
++        "candidate_snapshot_commit_sha",
++        "repair_commit_sha",
++        "pull_request_number",
++        "repository_capture_metadata",
++        "topology",
++    ):
++        assert mixed_occurrences[0][field] == control_occurrences[0][field]
++
++    linked_pr_path = "/repos/ExampleOwner/ExampleRepository/pulls/9"
++    mixed_linked_requests = [
++        request
++        for request in mixed_context.api.requests
++        if urlsplit(str(request["endpoint"])).path.casefold()
++        == linked_pr_path.casefold()
++    ]
++    assert len(mixed_linked_requests) == 1
++    assert urlsplit(str(mixed_linked_requests[0]["endpoint"])).path == linked_pr_path
++    assert len(mixed_evidence.entries) == len(control_evidence.entries)
++    assert len({entry["evidence_key"] for entry in mixed_evidence.entries}) == len(
++        mixed_evidence.entries
++    )
++
++    repository_paths = [
++        urlsplit(str(request["endpoint"])).path
++        for request in mixed_context.api.requests
++    ]
++    assert "/repos/ExampleOwner/ExampleRepository" in repository_paths
++    graphql_entry = next(
++        entry
++        for entry in mixed_evidence.entries
++        if entry.get("request_body") is not None
++    )
++    graphql_payload = mixed_evidence.read_payload(
++        root=mixed_context.root, entry=graphql_entry
++    )
++    assert isinstance(graphql_payload, dict)
++    linked_repository = graphql_payload["data"]["repository"]["issue"][
++        "closedByPullRequestsReferences"
++    ]["nodes"][0]["repository"]
++    assert linked_repository["nameWithOwner"] == (
++        "ExampleOwner/ExampleRepository"
++    )
++
++
+ def _record(record_id: str, candidate_id: str, episode: dict[str, object]) -> dict[str, object]:
+     return {
+         "source_record_id": record_id,
+
+--- CACHED ---
+
+--- UNTRACKED ---
+
+2026-08-16T05:38:29.341939Z ERROR codex_models_manager::manager: failed to refresh available models: timeout waiting for child process to exit
+exec
+/usr/bin/bash -lc "sed -n '2580,2825p' src/cmpilot/candidate_discovery_v03.py && printf '\\n--- capture callers ---\\n' && grep -R \"_captured_pr_episode\" -n src tests | head -20 && printf '\\n--- evidence ---\\n' && grep -n \"class GitHubEvidence\\|def _captured_commit\\|def _api_repo_endpoint\" src/cmpilot/candidate_discovery_v03.py" in /home/anjum/candidate-discovery-casing-20260816
+ succeeded in 0ms:
+    *,
+    owner: str,
+    repository: str,
+    artifacts: list[dict[str, Any]],
+    expected_id: int | None = None,
+) -> dict[str, Any]:
+    payload = captured.get(
+        method="GET",
+        endpoint=_api_repo_endpoint(owner, repository),
+        artifacts=artifacts,
+    )
+    if payload is None:
+        raise SourceRecordRejected(
+            "GITHUB_REPOSITORY_UNAVAILABLE", "repository returned 404 or 410"
+        )
+    if not isinstance(payload, Mapping):
+        raise SourceRecordRejected(
+            "SOURCE_SCHEMA_DRIFT", "repository detail is not an object"
+        )
+    normalized = _normalized_repository_payload(payload)
+    if expected_id is not None and normalized["id"] != expected_id:
+        raise SourceRecordRejected(
+            "GITHUB_REPOSITORY_IDENTITY_CHANGED",
+            "repository redirect or detail changed numeric identity",
+        )
+    return normalized
+
+
+def _captured_commit(
+    captured: CapturedGitHubEvidence,
+    *,
+    owner: str,
+    repository: str,
+    commit_sha: str,
+    artifacts: list[dict[str, Any]],
+) -> Mapping[str, Any]:
+    root = _api_repo_endpoint(owner, repository)
+    payload = captured.get(
+        method="GET",
+        endpoint=f"{root}/git/commits/{commit_sha}",
+        artifacts=artifacts,
+    )
+    if payload is None:
+        raise SourceRecordRejected(
+            "GITHUB_COMMIT_UNAVAILABLE", f"commit {commit_sha} is unavailable"
+        )
+    if not isinstance(payload, Mapping) or payload.get("sha") != commit_sha:
+        raise SourceRecordRejected(
+            "SOURCE_SCHEMA_DRIFT", "commit response does not match exact SHA"
+        )
+    tree = payload.get("tree")
+    tree_sha = tree.get("sha") if isinstance(tree, Mapping) else None
+    if not isinstance(tree_sha, str) or SHA1_PATTERN.fullmatch(tree_sha) is None:
+        raise SourceRecordRejected("SOURCE_SCHEMA_DRIFT", "commit tree is missing")
+    tree_payload = captured.get(
+        method="GET",
+        endpoint=f"{root}/git/trees/{tree_sha}",
+        artifacts=artifacts,
+    )
+    if (
+        not isinstance(tree_payload, Mapping)
+        or tree_payload.get("sha") != tree_sha
+        or not isinstance(tree_payload.get("tree"), list)
+    ):
+        raise SourceRecordRejected("SOURCE_SCHEMA_DRIFT", "tree response is malformed")
+    return payload
+
+
+def _parent_shas(commit: Mapping[str, Any]) -> list[str]:
+    parents = commit.get("parents")
+    if not isinstance(parents, list):
+        raise SourceRecordRejected("SOURCE_SCHEMA_DRIFT", "commit parents missing")
+    values: list[str] = []
+    for index, parent in enumerate(parents):
+        if not isinstance(parent, Mapping):
+            raise SourceRecordRejected("SOURCE_SCHEMA_DRIFT", "commit parent malformed")
+        value = parent.get("sha")
+        if not isinstance(value, str) or SHA1_PATTERN.fullmatch(value) is None:
+            raise SourceRecordRejected(
+                "SOURCE_SCHEMA_DRIFT", f"commit parent {index} is malformed"
+            )
+        values.append(value)
+    return values
+
+
+def _captured_pr_episode(
+    captured: CapturedGitHubEvidence,
+    *,
+    owner: str,
+    repository: str,
+    number: int,
+    artifacts: list[dict[str, Any]],
+    expected_repository_id: int | None = None,
+) -> tuple[Any, dict[str, Any], Mapping[str, Any]]:
+    repository_value = _captured_repository(
+        captured,
+        owner=owner,
+        repository=repository,
+        artifacts=artifacts,
+        expected_id=expected_repository_id,
+    )
+    final_owner = str(repository_value["owner"])
+    final_repository = str(repository_value["name"])
+    evidence_owner = final_owner
+    evidence_repository = final_repository
+    root = _api_repo_endpoint(final_owner, final_repository)
+    requested_root = _api_repo_endpoint(owner, repository)
+    if (
+        owner.casefold() == final_owner.casefold()
+        and repository.casefold() == final_repository.casefold()
+        and requested_root != root
+    ):
+        final_key = GitHubEvidence._key(
+            method="GET",
+            endpoint=f"{root}/pulls/{number}",
+            ordered_parameters=(),
+            json_body=None,
+        )
+        requested_key = GitHubEvidence._key(
+            method="GET",
+            endpoint=f"{requested_root}/pulls/{number}",
+            ordered_parameters=(),
+            json_body=None,
+        )
+        if final_key not in captured.entries and requested_key in captured.entries:
+            evidence_owner = owner
+            evidence_repository = repository
+            root = requested_root
+    payload = captured.get(
+        method="GET", endpoint=f"{root}/pulls/{number}", artifacts=artifacts
+    )
+    if payload is None:
+        raise SourceRecordRejected(
+            "GITHUB_ISSUE_OR_PR_UNAVAILABLE", "pull request is unavailable"
+        )
+    if not isinstance(payload, Mapping):
+        raise SourceRecordRejected(
+            "GITHUB_PR_DETAIL_INCOMPLETE", "pull request detail is not object"
+        )
+    if payload.get("number") != number:
+        raise SourceRecordRejected(
+            "GITHUB_PR_DETAIL_INCOMPLETE", "pull request number mismatch"
+        )
+    if payload.get("merged") is not True or not isinstance(
+        payload.get("merged_at"), str
+    ):
+        raise SourceRecordRejected("GITHUB_PR_NOT_MERGED", "pull request is not merged")
+    commit_count = payload.get("commits")
+    if (
+        isinstance(commit_count, bool)
+        or not isinstance(commit_count, int)
+        or commit_count <= 0
+    ):
+        raise SourceRecordRejected(
+            "GITHUB_PR_DETAIL_INCOMPLETE", "positive PR commit count is required"
+        )
+    captured_commit_shas: list[str] = []
+    for page in range(1, math.ceil(commit_count / 100) + 1):
+        commits_payload = captured.get(
+            method="GET",
+            endpoint=f"{root}/pulls/{number}/commits",
+            ordered_parameters=(("per_page", "100"), ("page", str(page))),
+            artifacts=artifacts,
+        )
+        if not isinstance(commits_payload, list):
+            raise SourceRecordRejected(
+                "GITHUB_PR_DETAIL_INCOMPLETE", "PR commit page is unavailable"
+            )
+        for commit in commits_payload:
+            if not isinstance(commit, Mapping):
+                raise SourceRecordRejected(
+                    "GITHUB_PR_DETAIL_INCOMPLETE", "PR commit entry malformed"
+                )
+            captured_commit_shas.append(
+                _record_sha(commit.get("sha"), "PR commit SHA")
+            )
+    if len(captured_commit_shas) != commit_count:
+        raise SourceRecordRejected(
+            "GITHUB_PR_DETAIL_INCOMPLETE", "complete PR commit list count mismatch"
+        )
+    head = payload.get("head")
+    base = payload.get("base")
+    if not isinstance(head, Mapping) or not isinstance(base, Mapping):
+        raise SourceRecordRejected(
+            "GITHUB_PR_DETAIL_INCOMPLETE", "PR base/head objects are missing"
+        )
+    head_sha = _record_sha(head.get("sha"), "PR head SHA")
+    base_sha = _record_sha(base.get("sha"), "PR base SHA")
+    merge_sha = _record_sha(payload.get("merge_commit_sha"), "PR merge commit SHA")
+    endpoint_commit = _captured_commit(
+        captured,
+        owner=evidence_owner,
+        repository=evidence_repository,
+        commit_sha=merge_sha,
+        artifacts=artifacts,
+    )
+    try:
+        episode = resolve_merged_pr_episode(
+            repository_id=repository_value["id"],
+            merged=True,
+            merged_at_utc=str(payload["merged_at"]),
+            head_sha=head_sha,
+            repair_endpoint_sha=merge_sha,
+            endpoint_parent_shas=_parent_shas(endpoint_commit),
+            pr_commit_count=commit_count,
+        )
+    except CandidateSourceV03Error as error:
+        raise SourceRecordRejected(error.code, str(error)) from error
+    _captured_commit(
+        captured,
+        owner=evidence_owner,
+        repository=evidence_repository,
+        commit_sha=episode.candidate_snapshot_commit_sha,
+        artifacts=artifacts,
+    )
+    return episode, repository_value, {
+        "number": number,
+        "base_sha": base_sha,
+        "head_sha": head_sha,
+        "merge_commit_sha": merge_sha,
+        "merged_at": payload["merged_at"],
+        "commit_shas": captured_commit_shas,
+    }
+
+
+def _record_sha(value: Any, label: str) -> str:
+    if not isinstance(value, str) or SHA1_PATTERN.fullmatch(value) is None:
+        raise SourceRecordRejected(
+            "GITHUB_PR_DETAIL_INCOMPLETE", f"{label} must be lowercase 40-hex"
+        )
+    return value
+
+
+def _candidate_link(episode: Any, *, pull_request_number: int | None = None) -> dict[str, Any]:
+    value = {
+        "canonical_candidate_id": episode.canonical_candidate_id,
+        "github_repository_id": episode.github_repository_id,
+        "candidate_snapshot_commit_sha": episode.candidate_snapshot_commit_sha,
+        "repair_commit_sha": episode.repair_commit_sha,
+        "deduplication_decision": "NEW_CANONICAL",
+    }
+    if pull_request_number is not None:
+        value["pull_request_number"] = pull_request_number
+    return value
+
+
+
+--- capture callers ---
+grep: src/cmpilot/__pycache__/candidate_discovery_v03.cpython-314.pyc: binary file matches
+grep: tests/__pycache__/test_candidate_discovery_v03.cpython-314-pytest-8.3.5.pyc: binary file matches
+src/cmpilot/candidate_discovery_v03.py:2665:def _captured_pr_episode(
+src/cmpilot/candidate_discovery_v03.py:3188:                        episode, repository_value, _ = _captured_pr_episode(
+src/cmpilot/candidate_discovery_v03.py:3505:                episode, repository_value, metadata = _captured_pr_episode(
+src/cmpilot/candidate_discovery_v03.py:3561:                    episode, repository_value, metadata = _captured_pr_episode(
+tests/test_candidate_discovery_v03.py:28:    _captured_pr_episode,
+tests/test_candidate_discovery_v03.py:1025:    episode, _, metadata = _captured_pr_episode(
+
+--- evidence ---
+483:class GitHubEvidence:
+611:def _api_repo_endpoint(owner: str, repository: str) -> str:
+2608:def _captured_commit(
+
+exec
+/usr/bin/bash -lc "sed -n '430,670p' src/cmpilot/candidate_discovery_v03.py && sed -n '3090,3235p' src/cmpilot/candidate_discovery_v03.py && sed -n '3400,3605p' src/cmpilot/candidate_discovery_v03.py" in /home/anjum/candidate-discovery-casing-20260816
+ succeeded in 0ms:
+            )
+        commit_bytes = _run_git(
+            ["git", "-C", str(bare), "cat-file", "commit", revision]
+        )
+        tree_bytes = _run_git(
+            ["git", "-C", str(bare), "ls-tree", "-r", "-z", revision]
+        )
+        commit_descriptor = context.raw_store.put(
+            commit_bytes, media_type=GIT_COMMIT_MEDIA_TYPE
+        )
+        tree_descriptor = context.raw_store.put(
+            tree_bytes, media_type=GIT_TREE_MEDIA_TYPE
+        )
+        entries = parse_git_ls_tree(tree_bytes)
+        requested_paths = set(secondary_paths)
+        selected = [
+            entry
+            for entry in entries
+            if entry.object_type == "blob"
+            and (include_path(entry.path) or entry.path in requested_paths)
+        ]
+        blobs: dict[str, dict[str, Any]] = {}
+        for entry in selected:
+            blob = _run_git(
+                ["git", "-C", str(bare), "cat-file", "blob", entry.object_sha]
+            )
+            descriptor = context.raw_store.put(blob, media_type=SOURCE_BLOB_MEDIA_TYPE)
+            blobs[entry.path] = {
+                "mode": entry.mode,
+                "object_type": entry.object_type,
+                "object_sha": entry.object_sha,
+                "artifact": descriptor,
+            }
+    return {
+        "repository": repository,
+        "revision": revision,
+        "commit_object": commit_descriptor,
+        "tree_listing": tree_descriptor,
+        "selected_blob_count": len(blobs),
+        "blobs": blobs,
+    }
+
+
+def _last_attempt_record(request: Mapping[str, Any]) -> Mapping[str, Any]:
+    attempts = request.get("attempts")
+    if not isinstance(attempts, list) or not attempts:
+        raise DiscoveryExecutionError("RAW_CAPTURE_INCOMPLETE", "request has no attempts")
+    value = attempts[-1]
+    if not isinstance(value, Mapping):
+        raise DiscoveryExecutionError("RAW_CAPTURE_INCOMPLETE", "attempt is malformed")
+    return value
+
+
+class GitHubEvidence:
+    """Deduplicated API capture index with no scientific interpretation."""
+
+    def __init__(self, context: CaptureContext | None = None) -> None:
+        self.context = context
+        self.entries: list[dict[str, Any]] = []
+        self._cache: dict[str, tuple[Any | None, dict[str, Any]]] = {}
+
+    @staticmethod
+    def _key(
+        *,
+        method: str,
+        endpoint: str,
+        ordered_parameters: Sequence[tuple[str, str]],
+        json_body: Mapping[str, Any] | None,
+        capture_scope: str | None = None,
+    ) -> str:
+        key_material: dict[str, Any] = {
+            "method": method,
+            "endpoint": endpoint,
+            "ordered_parameters": [list(item) for item in ordered_parameters],
+            "json_body": json_body,
+        }
+        if capture_scope is not None:
+            key_material["capture_scope"] = capture_scope
+        return "CMVP-API-03-" + sha256_bytes(
+            canonical_document_bytes(key_material)
+        )
+
+    def capture(
+        self,
+        *,
+        method: str,
+        endpoint: str,
+        ordered_parameters: Sequence[tuple[str, str]] = (),
+        json_body: Mapping[str, Any] | None = None,
+        exact_query: str | None = None,
+        partition_path: str | None = None,
+        partition_start_utc: str | None = None,
+        partition_end_utc: str | None = None,
+        page: int | None = None,
+        graphql_cursor: str | None = None,
+        sort: str | None = None,
+        order: str | None = None,
+        allow_one_redirect: bool = True,
+        capture_scope: str | None = None,
+    ) -> tuple[Any | None, dict[str, Any]]:
+        if self.context is None:
+            raise DiscoveryExecutionError("CAPTURE_CONTEXT_MISSING", endpoint)
+        key = self._key(
+            method=method,
+            endpoint=endpoint,
+            ordered_parameters=ordered_parameters,
+            json_body=json_body,
+            capture_scope=capture_scope,
+        )
+        cached = self._cache.get(key)
+        if cached is not None:
+            return cached
+        try:
+            payload, request = self.context.api.request_json(
+                method=method,
+                endpoint=endpoint,
+                ordered_parameters=ordered_parameters,
+                exact_query=exact_query,
+                partition_path=partition_path,
+                partition_start_utc=partition_start_utc,
+                partition_end_utc=partition_end_utc,
+                page=page,
+                graphql_cursor=graphql_cursor,
+                sort=sort,
+                order=order,
+                json_body=json_body,
+                allow_one_redirect=allow_one_redirect,
+            )
+            last = _last_attempt_record(request)
+            entry = {
+                "evidence_key": key,
+                "request_number": request["request_number"],
+                "status": "AVAILABLE",
+                "http_status": last["http_status"],
+                "raw_artifact": last["body"],
+                "request_body": json_body,
+            }
+            result = (payload, entry)
+        except DiscoveryExecutionError as error:
+            if error.http_status not in {404, 410}:
+                raise
+            request = self.context.api.requests[-1]
+            last = _last_attempt_record(request)
+            entry = {
+                "evidence_key": key,
+                "request_number": request["request_number"],
+                "status": "UNAVAILABLE",
+                "http_status": error.http_status,
+                "raw_artifact": last["body"],
+                "request_body": json_body,
+            }
+            result = (None, entry)
+        if capture_scope is not None:
+            entry["capture_scope"] = capture_scope
+        self.entries.append(entry)
+        self._cache[key] = result
+        return result
+
+    def read_payload(
+        self, *, root: Path, entry: Mapping[str, Any]
+    ) -> Mapping[str, Any] | list[Any] | None:
+        if entry.get("status") == "UNAVAILABLE":
+            return None
+        descriptor = entry.get("raw_artifact")
+        if not isinstance(descriptor, Mapping):
+            raise DiscoveryExecutionError("RAW_CAPTURE_INCOMPLETE", "missing API body")
+        path = root / str(descriptor.get("path"))
+        data = path.read_bytes()
+        if sha256_bytes(data) != descriptor.get("sha256"):
+            raise DiscoveryExecutionError(
+                "RAW_ARTIFACT_HASH_MISMATCH", f"API evidence mismatch: {path}"
+            )
+        try:
+            payload = json.loads(data)
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise DiscoveryExecutionError("SOURCE_SCHEMA_DRIFT", str(error)) from error
+        if not isinstance(payload, (Mapping, list)):
+            raise DiscoveryExecutionError("SOURCE_SCHEMA_DRIFT", "API JSON is scalar")
+        return payload
+
+
+def _api_repo_endpoint(owner: str, repository: str) -> str:
+    return (
+        "https://api.github.com/repos/"
+        f"{quote(owner, safe='')}/{quote(repository, safe='')}"
+    )
+
+
+def _repository_coordinates_from_api_url(value: Any) -> tuple[str, str]:
+    if not isinstance(value, str):
+        raise DiscoveryExecutionError(
+            "SOURCE_SCHEMA_DRIFT", "repository_url must be a string"
+        )
+    match = API_REPOSITORY_PATTERN.fullmatch(value)
+    if match is None:
+        raise DiscoveryExecutionError(
+            "SOURCE_SCHEMA_DRIFT", "repository_url is not canonical GitHub API URL"
+        )
+    return match.group(1), match.group(2)
+
+
+def _mapping(value: Any, label: str) -> Mapping[str, Any]:
+    if not isinstance(value, Mapping):
+        raise DiscoveryExecutionError("SOURCE_SCHEMA_DRIFT", f"{label} must be object")
+    return value
+
+
+def _positive_int(value: Any, label: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise DiscoveryExecutionError(
+            "SOURCE_SCHEMA_DRIFT", f"{label} must be positive integer"
+        )
+    return value
+
+
+def _sha(value: Any, label: str) -> str:
+    if not isinstance(value, str) or SHA1_PATTERN.fullmatch(value) is None:
+        raise DiscoveryExecutionError(
+            "SOURCE_SCHEMA_DRIFT", f"{label} must be lowercase 40-hex"
+        )
+    return value
+
+
+def _capture_repository(
+    evidence: GitHubEvidence, owner: str, repository: str
+) -> tuple[Mapping[str, Any] | None, dict[str, Any]]:
+    payload, entry = evidence.capture(
+        method="GET", endpoint=_api_repo_endpoint(owner, repository)
+    )
+    return (payload if isinstance(payload, Mapping) else None), entry
+
+
+def _capture_git_commit(
+    evidence: GitHubEvidence, owner: str, repository: str, commit_sha: str
+) -> tuple[Mapping[str, Any] | None, dict[str, Any]]:
+    endpoint = f"{_api_repo_endpoint(owner, repository)}/git/commits/{commit_sha}"
+    payload, entry = evidence.capture(method="GET", endpoint=endpoint)
+    if isinstance(payload, Mapping):
+        tree = payload.get("tree")
+        if isinstance(tree, Mapping) and isinstance(tree.get("sha"), str):
+            evidence.capture(
+    if not isinstance(references, list):
+        raise SourceRecordRejected("ADVISORY_MALFORMED", "references must be array")
+    accepted: list[Any] = []
+    for item in references:
+        if not isinstance(item, Mapping) or not isinstance(item.get("url"), str):
+            raise SourceRecordRejected(
+                "ADVISORY_MALFORMED", "reference must contain a URL string"
+            )
+        url = str(item["url"])
+        try:
+            hostname = (urlsplit(url).hostname or "").casefold()
+        except ValueError as error:
+            raise SourceRecordRejected(
+                "ADVISORY_GITHUB_REFERENCE_MALFORMED", str(error)
+            ) from error
+        if hostname != "github.com":
+            continue
+        try:
+            reference = parse_github_reference(url)
+        except SourceRecordRejected as error:
+            raise SourceRecordRejected(
+                "ADVISORY_GITHUB_REFERENCE_MALFORMED", str(error)
+            ) from error
+        if reference.kind in {"COMMIT", "PULL_REQUEST"}:
+            accepted.append(reference)
+    if not accepted:
+        raise SourceRecordRejected(
+            "ADVISORY_NO_ACCEPTED_REPAIR_REFERENCE", "no explicit GitHub repair anchor"
+        )
+    return advisory_id, tuple(sorted(packages)), accepted
+
+
+def materialize_advisories(
+    *, source_root: Path, manifest: Mapping[str, Any], index: Mapping[str, Any]
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Materialize advisory×repository episodes from explicit captured anchors."""
+
+    captured = CapturedGitHubEvidence(source_root=source_root, index=index)
+    revision = manifest["source_revision"]
+    records: list[dict[str, Any]] = []
+    occurrences: list[dict[str, Any]] = []
+    for raw_object in index["source_objects"]:
+        source_object = _mapping(raw_object, "advisory source object")
+        native = _mapping(source_object.get("source_native_identity"), "native identity")
+        descriptor = _mapping(source_object.get("advisory_blob"), "advisory blob")
+        artifacts: list[dict[str, Any]] = [dict(descriptor)]
+        rejection: list[str] = []
+        grouped: dict[str, dict[str, Any]] = {}
+        packages: tuple[str, ...] = ()
+        advisory_id: str | None = None
+        try:
+            try:
+                raw_advisory = json.loads(_read_artifact(source_root, descriptor))
+            except (UnicodeDecodeError, json.JSONDecodeError) as error:
+                raise SourceRecordRejected("ADVISORY_MALFORMED", str(error)) from error
+            if not isinstance(raw_advisory, Mapping):
+                raise SourceRecordRejected("ADVISORY_MALFORMED", "advisory is not object")
+            advisory_id, packages, references = _advisory_structure(
+                raw_advisory, advisory_path=str(source_object["advisory_path"])
+            )
+            reference_errors: list[str] = []
+            for reference in references:
+                try:
+                    repository_value = _captured_repository(
+                        captured,
+                        owner=reference.owner,
+                        repository=reference.repository,
+                        artifacts=artifacts,
+                    )
+                    owner = str(repository_value["owner"])
+                    repository = str(repository_value["name"])
+                    pr_number: int | None = None
+                    if reference.kind == "COMMIT":
+                        repair_sha = str(reference.value)
+                        commit = _captured_commit(
+                            captured,
+                            owner=owner,
+                            repository=repository,
+                            commit_sha=repair_sha,
+                            artifacts=artifacts,
+                        )
+                        try:
+                            episode = resolve_explicit_commit_episode(
+                                repository_id=repository_value["id"],
+                                repair_commit_sha=repair_sha,
+                                parent_shas=_parent_shas(commit),
+                            )
+                        except CandidateSourceV03Error as error:
+                            raise SourceRecordRejected(error.code, str(error)) from error
+                        _captured_commit(
+                            captured,
+                            owner=owner,
+                            repository=repository,
+                            commit_sha=episode.candidate_snapshot_commit_sha,
+                            artifacts=artifacts,
+                        )
+                    else:
+                        pr_number = int(reference.value)
+                        episode, repository_value, _ = _captured_pr_episode(
+                            captured,
+                            owner=reference.owner,
+                            repository=reference.repository,
+                            number=pr_number,
+                            artifacts=artifacts,
+                        )
+                    existing = grouped.get(episode.canonical_candidate_id)
+                    if existing is None:
+                        grouped[episode.canonical_candidate_id] = {
+                            "episode": episode,
+                            "repository": repository_value,
+                            "reference_urls": {reference.canonical_url},
+                            "pull_request_numbers": (
+                                set() if pr_number is None else {pr_number}
+                            ),
+                        }
+                    else:
+                        if (
+                            existing["episode"].candidate_snapshot_commit_sha
+                            != episode.candidate_snapshot_commit_sha
+                            or existing["episode"].repair_commit_sha
+                            != episode.repair_commit_sha
+                        ):
+                            raise SourceRecordRejected(
+                                "ADVISORY_REPAIR_EPISODE_CONFLICT",
+                                "equal candidate ID resolved to conflicting range",
+                            )
+                        existing["reference_urls"].add(reference.canonical_url)
+                        if pr_number is not None:
+                            existing["pull_request_numbers"].add(pr_number)
+                except SourceRecordRejected as error:
+                    reference_errors.append(error.code)
+            if reference_errors:
+                rejection.extend(reference_errors)
+                grouped.clear()
+        except SourceRecordRejected as error:
+            rejection.append(error.code)
+        links = []
+        for candidate_id in sorted(grouped):
+            value = grouped[candidate_id]
+            pr_numbers = sorted(value["pull_request_numbers"])
+            links.append(
+                _candidate_link(
+                    value["episode"],
+                    pull_request_number=pr_numbers[0] if pr_numbers else None,
+                )
+            )
+            )
+        if any(not isinstance(node, Mapping) for node in page_nodes):
+            raise SourceRecordRejected(
+                "GITHUB_ISSUE_RELATION_INCOMPLETE", "closing PR node malformed"
+            )
+        nodes.extend(node for node in page_nodes if node.get("merged") is True)
+        has_next = page_info.get("hasNextPage")
+        end_cursor = page_info.get("endCursor")
+        if has_next is False:
+            break
+        if has_next is not True or not isinstance(end_cursor, str) or not end_cursor:
+            raise SourceRecordRejected(
+                "GITHUB_ISSUE_RELATION_INCOMPLETE", "connection cursor malformed"
+            )
+        cursor = end_cursor
+    assert repository_id is not None
+    if not nodes:
+        raise SourceRecordRejected(
+            "GITHUB_ISSUE_LEAD_NO_MERGED_PR", "issue has no linked merged PR"
+        )
+    return repository_id, nodes
+
+
+def _validate_graphql_pr_node(
+    node: Mapping[str, Any], *, pr_metadata: Mapping[str, Any]
+) -> tuple[int, int]:
+    number = node.get("number")
+    repository_node = node.get("repository")
+    if (
+        isinstance(number, bool)
+        or not isinstance(number, int)
+        or number <= 0
+        or not isinstance(repository_node, Mapping)
+    ):
+        raise SourceRecordRejected(
+            "GITHUB_ISSUE_RELATION_INCOMPLETE", "merged PR node lacks identity"
+        )
+    repository_id = repository_node.get("databaseId")
+    if (
+        isinstance(repository_id, bool)
+        or not isinstance(repository_id, int)
+        or repository_id <= 0
+    ):
+        raise SourceRecordRejected(
+            "GITHUB_REPOSITORY_ID_MISSING", "linked PR repository ID is missing"
+        )
+    merge_commit = node.get("mergeCommit")
+    merge_oid = merge_commit.get("oid") if isinstance(merge_commit, Mapping) else None
+    if (
+        node.get("merged") is not True
+        or node.get("mergedAt") != pr_metadata.get("merged_at")
+        or node.get("baseRefOid") != pr_metadata.get("base_sha")
+        or node.get("headRefOid") != pr_metadata.get("head_sha")
+        or merge_oid != pr_metadata.get("merge_commit_sha")
+    ):
+        raise SourceRecordRejected(
+            "GITHUB_PR_DETAIL_INCOMPLETE",
+            "GraphQL and REST immutable PR fields disagree",
+        )
+    return number, repository_id
+
+
+def materialize_searches(
+    *,
+    source_root: Path,
+    manifest: Mapping[str, Any],
+    capture_digest: str,
+    index: Mapping[str, Any],
+    search_spec: Mapping[str, Any],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Materialize direct PRs and issue-resolved merged PRs from raw capture."""
+
+    del manifest
+    captured = CapturedGitHubEvidence(source_root=source_root, index=index)
+    revision = {"kind": "VERSIONED_API_CAPTURE", "value": capture_digest}
+    query_list = search_spec.get("queries")
+    if not isinstance(query_list, list):
+        raise DiscoveryExecutionError("RAW_CAPTURE_INCOMPLETE", "queries missing")
+    queries = {
+        query["query_id"]: query
+        for query in query_list
+        if isinstance(query, Mapping) and isinstance(query.get("query_id"), str)
+    }
+    records: list[dict[str, Any]] = []
+    occurrences: list[dict[str, Any]] = []
+    for raw_object in index["source_objects"]:
+        source_object = _mapping(raw_object, "search source object")
+        native = _mapping(source_object.get("source_native_identity"), "native identity")
+        artifacts: list[dict[str, Any]] = []
+        rejection: list[str] = []
+        episodes: list[tuple[Any, dict[str, Any], int, dict[str, Any]]] = []
+        try:
+            item = _captured_search_item(captured, source_object, artifacts)
+            query = queries.get(source_object.get("query_id"))
+            if not isinstance(query, Mapping):
+                raise SourceRecordRejected("SOURCE_SCHEMA_DRIFT", "query ID missing")
+            owner, repository = _repository_coordinates_from_api_url(
+                item.get("repository_url")
+            )
+            number = _positive_int(item.get("number"), "search item number")
+            if query.get("object_type") == "PULL_REQUEST":
+                if not isinstance(item.get("pull_request"), Mapping):
+                    raise SourceRecordRejected(
+                        "GITHUB_PR_DETAIL_INCOMPLETE", "direct PR marker is missing"
+                    )
+                episode, repository_value, metadata = _captured_pr_episode(
+                    captured,
+                    owner=owner,
+                    repository=repository,
+                    number=number,
+                    artifacts=artifacts,
+                )
+                episodes.append((episode, repository_value, number, dict(metadata)))
+            elif query.get("object_type") == "ISSUE":
+                issue_repository_id, nodes = _captured_issue_nodes(
+                    captured,
+                    owner=owner,
+                    repository=repository,
+                    number=number,
+                    artifacts=artifacts,
+                )
+                _captured_repository(
+                    captured,
+                    owner=owner,
+                    repository=repository,
+                    artifacts=artifacts,
+                    expected_id=issue_repository_id,
+                )
+                for node in nodes:
+                    repository_node = node.get("repository")
+                    name_with_owner = (
+                        repository_node.get("nameWithOwner")
+                        if isinstance(repository_node, Mapping)
+                        else None
+                    )
+                    if not isinstance(name_with_owner, str) or name_with_owner.count("/") != 1:
+                        raise SourceRecordRejected(
+                            "GITHUB_ISSUE_RELATION_INCOMPLETE",
+                            "linked PR repository name is missing",
+                        )
+                    pr_owner, pr_repository = name_with_owner.split("/", 1)
+                    raw_pr_number = node.get("number")
+                    if (
+                        isinstance(raw_pr_number, bool)
+                        or not isinstance(raw_pr_number, int)
+                        or raw_pr_number <= 0
+                    ):
+                        raise SourceRecordRejected(
+                            "GITHUB_ISSUE_RELATION_INCOMPLETE",
+                            "linked PR number is missing",
+                        )
+                    expected_repository_id = repository_node.get("databaseId")
+                    if (
+                        isinstance(expected_repository_id, bool)
+                        or not isinstance(expected_repository_id, int)
+                        or expected_repository_id <= 0
+                    ):
+                        raise SourceRecordRejected(
+                            "GITHUB_REPOSITORY_ID_MISSING",
+                            "linked PR repository ID is missing",
+                        )
+                    episode, repository_value, metadata = _captured_pr_episode(
+                        captured,
+                        owner=pr_owner,
+                        repository=pr_repository,
+                        number=raw_pr_number,
+                        artifacts=artifacts,
+                        expected_repository_id=expected_repository_id,
+                    )
+                    _validate_graphql_pr_node(node, pr_metadata=metadata)
+                    episodes.append(
+                        (episode, repository_value, raw_pr_number, dict(metadata))
+                    )
+            else:
+                raise SourceRecordRejected("SOURCE_SCHEMA_DRIFT", "object_type invalid")
+        except SourceRecordRejected as error:
+            rejection.append(error.code)
+            episodes.clear()
+        except DiscoveryExecutionError as error:
+            if error.code in {
+                "SOURCE_SCHEMA_DRIFT",
+                "GITHUB_SEARCH_RESPONSE_MALFORMED",
+            }:
+                rejection.append(error.code)
+                episodes.clear()
+            else:
+                raise
+        unique: dict[str, tuple[Any, dict[str, Any], int, dict[str, Any]]] = {}
+        for value in episodes:
+            candidate_id = value[0].canonical_candidate_id
+            existing = unique.get(candidate_id)
+            if existing is not None and existing[2] != value[2]:
+                # Same exact range via multiple PRs remains one candidate with all
+                # source provenance; the first numeric PR is presentation-only.
+                if value[2] < existing[2]:
+                    unique[candidate_id] = value
+            else:
+                unique[candidate_id] = value
+        links = [
+            _candidate_link(value[0], pull_request_number=value[2])
+            for _, value in sorted(unique.items())
+        ]
+        record = _source_record(
+            source_id_value=SEARCH_SOURCE_ID,
+            source_revision_value=revision,
+            native_identity=native,
+
+exec
+/usr/bin/bash -lc "sed -n '650,820p' src/cmpilot/candidate_discovery_v03.py && grep -n \"def capture_searches\\|_capture_pr\" src/cmpilot/candidate_discovery_v03.py | head -30 && sed -n '2150,2390p' src/cmpilot/candidate_discovery_v03.py && grep -n \"class CapturedGitHubEvidence\" -A120 src/cmpilot/candidate_discovery_v03.py" in /home/anjum/candidate-discovery-casing-20260816
+ succeeded in 0ms:
+    return value
+
+
+def _capture_repository(
+    evidence: GitHubEvidence, owner: str, repository: str
+) -> tuple[Mapping[str, Any] | None, dict[str, Any]]:
+    payload, entry = evidence.capture(
+        method="GET", endpoint=_api_repo_endpoint(owner, repository)
+    )
+    return (payload if isinstance(payload, Mapping) else None), entry
+
+
+def _capture_git_commit(
+    evidence: GitHubEvidence, owner: str, repository: str, commit_sha: str
+) -> tuple[Mapping[str, Any] | None, dict[str, Any]]:
+    endpoint = f"{_api_repo_endpoint(owner, repository)}/git/commits/{commit_sha}"
+    payload, entry = evidence.capture(method="GET", endpoint=endpoint)
+    if isinstance(payload, Mapping):
+        tree = payload.get("tree")
+        if isinstance(tree, Mapping) and isinstance(tree.get("sha"), str):
+            evidence.capture(
+                method="GET",
+                endpoint=(
+                    f"{_api_repo_endpoint(owner, repository)}/git/trees/"
+                    f"{tree['sha']}"
+                ),
+            )
+    return (payload if isinstance(payload, Mapping) else None), entry
+
+
+def _capture_compare(
+    evidence: GitHubEvidence,
+    owner: str,
+    repository: str,
+    base_sha: str,
+    head_sha: str,
+) -> tuple[Mapping[str, Any] | None, dict[str, Any]]:
+    endpoint = (
+        f"{_api_repo_endpoint(owner, repository)}/compare/{base_sha}...{head_sha}"
+    )
+    payload, entry = evidence.capture(method="GET", endpoint=endpoint)
+    return (payload if isinstance(payload, Mapping) else None), entry
+
+
+def _capture_pull_request(
+    evidence: GitHubEvidence, owner: str, repository: str, number: int
+) -> tuple[Mapping[str, Any] | None, dict[str, Any]]:
+    root = _api_repo_endpoint(owner, repository)
+    payload, entry = evidence.capture(
+        method="GET", endpoint=f"{root}/pulls/{number}"
+    )
+    if not isinstance(payload, Mapping):
+        return None, entry
+    commit_count = payload.get("commits")
+    if (
+        isinstance(commit_count, int)
+        and not isinstance(commit_count, bool)
+        and commit_count > 0
+    ):
+        for page in range(1, math.ceil(commit_count / 100) + 1):
+            evidence.capture(
+                method="GET",
+                endpoint=f"{root}/pulls/{number}/commits",
+                ordered_parameters=(
+                    ("per_page", "100"),
+                    ("page", str(page)),
+                ),
+                page=page,
+            )
+    merge_sha = payload.get("merge_commit_sha")
+    head = payload.get("head")
+    head_sha = head.get("sha") if isinstance(head, Mapping) else None
+    if isinstance(merge_sha, str) and SHA1_PATTERN.fullmatch(merge_sha):
+        endpoint_payload, _ = _capture_git_commit(
+            evidence, owner, repository, merge_sha
+        )
+        if isinstance(endpoint_payload, Mapping):
+            parents = endpoint_payload.get("parents")
+            parent_shas = (
+                [item.get("sha") for item in parents if isinstance(item, Mapping)]
+                if isinstance(parents, list)
+                else []
+            )
+            snapshot: str | None = None
+            if (
+                len(parent_shas) == 2
+                and isinstance(head_sha, str)
+                and parent_shas[1] == head_sha
+            ):
+                snapshot = parent_shas[0]
+            elif len(parent_shas) == 1 and commit_count == 1:
+                snapshot = parent_shas[0]
+            if isinstance(snapshot, str) and SHA1_PATTERN.fullmatch(snapshot):
+                _capture_git_commit(evidence, owner, repository, snapshot)
+    return payload, entry
+
+
+def _read_artifact(root: Path, descriptor: Mapping[str, Any]) -> bytes:
+    path = root / str(descriptor.get("path"))
+    data = path.read_bytes()
+    if (
+        sha256_bytes(data) != descriptor.get("sha256")
+        or len(data) != descriptor.get("size_bytes")
+    ):
+        raise DiscoveryExecutionError(
+            "RAW_ARTIFACT_HASH_MISMATCH", f"raw artifact mismatch: {path}"
+        )
+    return data
+
+
+def _parse_assignment_metadata(
+    text: str, *, allowed: frozenset[str], required: frozenset[str]
+) -> dict[str, str]:
+    """Apply the frozen non-executable grammar to non-bug metadata."""
+
+    if "\x00" in text:
+        raise SourceRecordRejected("BUGSINPY_MALFORMED_LINE", "metadata contains NUL")
+    values: dict[str, str] = {}
+    for line_number, line in enumerate(text.splitlines(), start=1):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        match = ASSIGNMENT_PATTERN.fullmatch(line)
+        if match is None:
+            raise SourceRecordRejected(
+                "BUGSINPY_MALFORMED_LINE", f"malformed line {line_number}"
+            )
+        key = match.group("key")
+        if key not in allowed:
+            raise SourceRecordRejected(
+                "BUGSINPY_UNKNOWN_FIELD", f"unknown field {key!r}"
+            )
+        if key in values:
+            raise SourceRecordRejected(
+                "BUGSINPY_DUPLICATE_FIELD", f"duplicate field {key!r}"
+            )
+        raw_value = match.group("value")
+        value = raw_value[1:-1] if raw_value[:1] in {"'", '"'} else raw_value
+        if not value or any(character in value for character in ("$", "`", "\\")):
+            raise SourceRecordRejected(
+                "BUGSINPY_UNSAFE_VALUE", f"unsafe value on line {line_number}"
+            )
+        values[key] = value
+    missing = sorted(required - values.keys())
+    if missing:
+        raise SourceRecordRejected(
+            "BUGSINPY_REQUIRED_FIELD_MISSING", "missing fields: " + ", ".join(missing)
+        )
+    return values
+
+
+def _decode_utf8(data: bytes, *, code: str) -> str:
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise SourceRecordRejected(code, "source blob is not UTF-8") from error
+
+
+def _normalized_repository_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
+    owner = payload.get("owner")
+    owner_login = owner.get("login") if isinstance(owner, Mapping) else None
+    return normalize_github_repository(
+        {
+            "id": payload.get("id"),
+            "owner": owner_login,
+            "name": payload.get("name"),
+            "html_url": payload.get("html_url"),
+            "visibility": payload.get("visibility"),
+        }
+    )
+
+2267:def capture_searches(
+        ],
+        "count_item_mismatch_count": len(mismatches),
+        "count_item_mismatch_signed_sizes": [
+            value["signed_mismatch_returned_minus_reported"]
+            for value in mismatches
+        ],
+        "count_item_mismatch_absolute_sizes": [
+            value["absolute_mismatch"] for value in mismatches
+        ],
+        "cross_leaf_duplicate_identity_count": len(cross_leaf),
+        "cross_leaf_duplicate_observation_count": sum(
+            int(value["observed_occurrence_count"]) - 1 for value in cross_leaf
+        ),
+        "incomplete_result_response_count": len(incomplete),
+        "returned_item_occurrence_count": returned_occurrence_count,
+        "observed_unique_item_identity_count": len(observed_identities),
+        "search_api_capture_started_at_utc": search_capture.get(
+            "search_api_capture_started_at_utc"
+        ),
+        "search_api_capture_completed_at_utc": search_capture.get(
+            "search_api_capture_completed_at_utc"
+        ),
+        "query_coverage_proofs": coverage_proofs,
+        "raw_search_response_sha256": sorted(response_hashes),
+        "manual_screening_used": False,
+        "scientific_ranking_or_filtering_used": False,
+        "candidate_selection_decision_occurred": False,
+    }
+
+
+def _item_from_capture(
+    context: CaptureContext,
+    evidence: GitHubEvidence,
+    item_ref: Mapping[str, Any],
+) -> Mapping[str, Any]:
+    entry = next(
+        (
+            candidate
+            for candidate in evidence.entries
+            if candidate["evidence_key"] == item_ref["search_evidence_key"]
+        ),
+        None,
+    )
+    if entry is None:
+        raise DiscoveryExecutionError("RAW_CAPTURE_INCOMPLETE", "missing search page")
+    payload = evidence.read_payload(root=context.root, entry=entry)
+    if not isinstance(payload, Mapping) or not isinstance(payload.get("items"), list):
+        raise DiscoveryExecutionError("SOURCE_SCHEMA_DRIFT", "search page malformed")
+    index = item_ref["item_index"]
+    try:
+        item = payload["items"][index]
+    except (IndexError, TypeError) as error:
+        raise DiscoveryExecutionError("RAW_CAPTURE_INCOMPLETE", str(error)) from error
+    return _mapping(item, "search item")
+
+
+def _capture_issue_relations(
+    evidence: GitHubEvidence,
+    *,
+    owner: str,
+    repository: str,
+    number: int,
+) -> list[Mapping[str, Any]]:
+    cursor: str | None = None
+    merged_nodes: list[Mapping[str, Any]] = []
+    while True:
+        variables = {
+            "owner": owner,
+            "repository": repository,
+            "number": number,
+            "cursor": cursor,
+        }
+        payload, _ = evidence.capture(
+            method="POST",
+            endpoint="https://api.github.com/graphql",
+            json_body={"query": GRAPHQL_DOCUMENT, "variables": variables},
+            exact_query=GRAPHQL_DOCUMENT,
+            graphql_cursor=cursor,
+            allow_one_redirect=False,
+        )
+        if not isinstance(payload, Mapping):
+            return []
+        if payload.get("errors"):
+            raise DiscoveryExecutionError(
+                "SOURCE_SCHEMA_DRIFT", "GraphQL response contains errors"
+            )
+        data = payload.get("data")
+        repository_node = data.get("repository") if isinstance(data, Mapping) else None
+        issue = (
+            repository_node.get("issue")
+            if isinstance(repository_node, Mapping)
+            else None
+        )
+        connection = (
+            issue.get("closedByPullRequestsReferences")
+            if isinstance(issue, Mapping)
+            else None
+        )
+        if not isinstance(connection, Mapping):
+            return []
+        nodes = connection.get("nodes")
+        page_info = connection.get("pageInfo")
+        if not isinstance(nodes, list) or not isinstance(page_info, Mapping):
+            return []
+        if any(not isinstance(node, Mapping) for node in nodes):
+            return []
+        merged_nodes.extend(node for node in nodes if node.get("merged") is True)
+        has_next = page_info.get("hasNextPage")
+        end_cursor = page_info.get("endCursor")
+        if has_next is False:
+            break
+        if has_next is not True or not isinstance(end_cursor, str) or not end_cursor:
+            return []
+        cursor = end_cursor
+    return merged_nodes
+
+
+def capture_searches(
+    context: CaptureContext,
+    evidence: GitHubEvidence,
+    *,
+    search_spec: Mapping[str, Any],
+) -> None:
+    """Capture all eight queries atomically, then their immutable PR evidence."""
+
+    queries = search_spec.get("queries")
+    if not isinstance(queries, list) or len(queries) != 8:
+        raise DiscoveryExecutionError(
+            "SOURCE_SCHEMA_DRIFT", "frozen search specification must have eight queries"
+        )
+    item_refs: list[dict[str, Any]] = []
+    query_by_id: dict[str, Mapping[str, Any]] = {}
+    for query in queries:
+        query_value = _mapping(query, "query specification")
+        query_id = query_value.get("query_id")
+        root_query = query_value.get("query")
+        if not isinstance(query_id, str) or not isinstance(root_query, str):
+            raise DiscoveryExecutionError("SOURCE_SCHEMA_DRIFT", "query is malformed")
+        query_by_id[query_id] = query_value
+        item_refs.extend(
+            _capture_query_partitions_v04(
+                context,
+                evidence,
+                query_id=query_id,
+                root_query=root_query,
+            )
+        )
+    observed_identities, cross_leaf_diagnostics = _group_observed_search_items(
+        item_refs
+    )
+    search_capture = context.source_capture.get(SEARCH_CAPTURE_KEY_V04)
+    if not isinstance(search_capture, dict) or not isinstance(
+        search_capture.get("diagnostics"), dict
+    ):
+        raise DiscoveryExecutionError(
+            "EXECUTION_CONFIGURATION_INVALID", "Search observation index is missing"
+        )
+    search_capture["diagnostics"]["cross_leaf_duplicates"] = (
+        cross_leaf_diagnostics
+    )
+    _finalize_search_observation_summary(
+        context=context,
+        observed_identities=observed_identities,
+        returned_occurrence_count=len(item_refs),
+    )
+    for observed_identity in observed_identities:
+        item_ref = _mapping(
+            observed_identity.get("primary_occurrence"),
+            "primary Search observation",
+        )
+        query = query_by_id[str(item_ref["query_id"])]
+        observed_query_ids = observed_identity.get("observed_query_ids")
+        if not isinstance(observed_query_ids, list) or not observed_query_ids:
+            raise DiscoveryExecutionError(
+                "SOURCE_IDENTITY_FIELD_MISSING",
+                "Search source identity has no query provenance",
+            )
+        observed_object_types = {
+            query_by_id[str(observed_query_id)].get("object_type")
+            for observed_query_id in observed_query_ids
+        }
+        if len(observed_object_types) != 1:
+            raise DiscoveryExecutionError(
+                "SOURCE_IDENTITY_CONFLICT",
+                "one Search node ID was observed under conflicting object types",
+            )
+        item = _item_from_capture(context, evidence, item_ref)
+        native = {
+            "api_version": API_VERSION,
+            "github_search_node_id": item_ref["node_id"],
+        }
+        context.add_source_object(
+            {
+                "source_object_id": f"GITHUB_SEARCH:{item_ref['node_id']}",
+                "source_native_identity": native,
+                **item_ref,
+                "observed_query_ids": observed_query_ids,
+                "observed_leaf_provenance": observed_identity[
+                    "observed_leaf_provenance"
+                ],
+            }
+        )
+        try:
+            owner, repository = _repository_coordinates_from_api_url(
+                item.get("repository_url")
+            )
+            number = _positive_int(item.get("number"), "search item number")
+        except DiscoveryExecutionError:
+            continue
+        if query.get("object_type") == "PULL_REQUEST":
+            repository_payload, _ = _capture_repository(evidence, owner, repository)
+            if repository_payload is None:
+                continue
+            try:
+                normalized = _normalized_repository_payload(repository_payload)
+            except SourceRecordRejected:
+                continue
+            _capture_pull_request(
+                evidence,
+                str(normalized["owner"]),
+                str(normalized["name"]),
+                number,
+            )
+        elif query.get("object_type") == "ISSUE":
+            nodes = _capture_issue_relations(
+                evidence,
+                owner=owner,
+                repository=repository,
+                number=number,
+            )
+            repository_payload, _ = _capture_repository(evidence, owner, repository)
+            if repository_payload is None:
+                continue
+            for node in nodes:
+                repository_node = node.get("repository")
+                name_with_owner = (
+                    repository_node.get("nameWithOwner")
+                    if isinstance(repository_node, Mapping)
+                    else None
+                )
+                pr_number = node.get("number")
+2488:class CapturedGitHubEvidence:
+2489-    """Read exact API evidence only from a verified complete capture."""
+2490-
+2491-    def __init__(self, *, source_root: Path, index: Mapping[str, Any]) -> None:
+2492-        self.source_root = source_root
+2493-        raw_entries = index.get("api_evidence")
+2494-        if not isinstance(raw_entries, list):
+2495-            raise DiscoveryExecutionError("RAW_CAPTURE_INCOMPLETE", "API index missing")
+2496-        self.entries: dict[str, Mapping[str, Any]] = {}
+2497-        for entry in raw_entries:
+2498-            if not isinstance(entry, Mapping):
+2499-                raise DiscoveryExecutionError("RAW_CAPTURE_INCOMPLETE", "API entry malformed")
+2500-            key = entry.get("evidence_key")
+2501-            if not isinstance(key, str) or key in self.entries:
+2502-                raise DiscoveryExecutionError(
+2503-                    "RAW_CAPTURE_INCOMPLETE", "API evidence key conflict"
+2504-                )
+2505-            self.entries[key] = entry
+2506-
+2507-    def get(
+2508-        self,
+2509-        *,
+2510-        method: str,
+2511-        endpoint: str,
+2512-        ordered_parameters: Sequence[tuple[str, str]] = (),
+2513-        json_body: Mapping[str, Any] | None = None,
+2514-        artifacts: list[dict[str, Any]] | None = None,
+2515-    ) -> Mapping[str, Any] | list[Any] | None:
+2516-        key = GitHubEvidence._key(
+2517-            method=method,
+2518-            endpoint=endpoint,
+2519-            ordered_parameters=ordered_parameters,
+2520-            json_body=json_body,
+2521-        )
+2522-        entry = self.entries.get(key)
+2523-        if entry is None:
+2524-            raise DiscoveryExecutionError(
+2525-                "RAW_CAPTURE_INCOMPLETE", f"required API evidence absent: {endpoint}"
+2526-            )
+2527-        descriptor = entry.get("raw_artifact")
+2528-        if not isinstance(descriptor, Mapping):
+2529-            raise DiscoveryExecutionError("RAW_CAPTURE_INCOMPLETE", "API artifact missing")
+2530-        if artifacts is not None:
+2531-            artifacts.append(dict(descriptor))
+2532-        if entry.get("status") == "UNAVAILABLE":
+2533-            return None
+2534-        try:
+2535-            payload = json.loads(_read_artifact(self.source_root, descriptor))
+2536-        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+2537-            raise DiscoveryExecutionError("SOURCE_SCHEMA_DRIFT", str(error)) from error
+2538-        if not isinstance(payload, (Mapping, list)):
+2539-            raise DiscoveryExecutionError("SOURCE_SCHEMA_DRIFT", "API payload is scalar")
+2540-        return payload
+2541-
+2542-    def get_by_key(
+2543-        self,
+2544-        evidence_key: str,
+2545-        *,
+2546-        artifacts: list[dict[str, Any]] | None = None,
+2547-    ) -> Mapping[str, Any] | list[Any] | None:
+2548-        entry = self.entries.get(evidence_key)
+2549-        if entry is None:
+2550-            raise DiscoveryExecutionError(
+2551-                "RAW_CAPTURE_INCOMPLETE", f"API evidence absent: {evidence_key}"
+2552-            )
+2553-        descriptor = entry.get("raw_artifact")
+2554-        if not isinstance(descriptor, Mapping):
+2555-            raise DiscoveryExecutionError("RAW_CAPTURE_INCOMPLETE", "API artifact missing")
+2556-        if artifacts is not None:
+2557-            artifacts.append(dict(descriptor))
+2558-        if entry.get("status") == "UNAVAILABLE":
+2559-            return None
+2560-        try:
+2561-            payload = json.loads(_read_artifact(self.source_root, descriptor))
+2562-        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+2563-            raise DiscoveryExecutionError("SOURCE_SCHEMA_DRIFT", str(error)) from error
+2564-        if not isinstance(payload, (Mapping, list)):
+2565-            raise DiscoveryExecutionError("SOURCE_SCHEMA_DRIFT", "API payload is scalar")
+2566-        return payload
+2567-
+2568-
+2569-def _unique_artifacts(values: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
+2570-    by_digest: dict[str, dict[str, Any]] = {}
+2571-    for value in values:
+2572-        digest = value.get("sha256")
+2573-        if isinstance(digest, str):
+2574-            by_digest[digest] = dict(value)
+2575-    return [by_digest[digest] for digest in sorted(by_digest)]
+2576-
+2577-
+2578-def _captured_repository(
+2579-    captured: CapturedGitHubEvidence,
+2580-    *,
+2581-    owner: str,
+2582-    repository: str,
+2583-    artifacts: list[dict[str, Any]],
+2584-    expected_id: int | None = None,
+2585-) -> dict[str, Any]:
+2586-    payload = captured.get(
+2587-        method="GET",
+2588-        endpoint=_api_repo_endpoint(owner, repository),
+2589-        artifacts=artifacts,
+2590-    )
+2591-    if payload is None:
+2592-        raise SourceRecordRejected(
+2593-            "GITHUB_REPOSITORY_UNAVAILABLE", "repository returned 404 or 410"
+2594-        )
+2595-    if not isinstance(payload, Mapping):
+2596-        raise SourceRecordRejected(
+2597-            "SOURCE_SCHEMA_DRIFT", "repository detail is not an object"
+2598-        )
+2599-    normalized = _normalized_repository_payload(payload)
+2600-    if expected_id is not None and normalized["id"] != expected_id:
+2601-        raise SourceRecordRejected(
+2602-            "GITHUB_REPOSITORY_IDENTITY_CHANGED",
+2603-            "repository redirect or detail changed numeric identity",
+2604-        )
+2605-    return normalized
+2606-
+2607-
+2608-def _captured_commit(
+
+exec
+/usr/bin/bash -lc "sed -n '2360,2450p' src/cmpilot/candidate_discovery_v03.py && find .. -name AGENTS.md -o -name AGENTS.override.md | sort" in /home/anjum/candidate-discovery-casing-20260816
+ succeeded in 12734ms:
+find: ‘../Documents/research/correct-memory-study/.hpc-worktree’: Input/output error
+find: ‘../Documents/research/correct-memory-study/.hpc-benchmark-worktree’: Input/output error
+../.codex/.tmp/plugins/plugins/build-web-apps/skills/react-best-practices/AGENTS.md
+../.codex/.tmp/plugins/plugins/build-web-apps/skills/supabase-best-practices/AGENTS.md
+../.codex/.tmp/plugins/plugins/zoom/AGENTS.md
+../.local/share/Trash/files/.codex-remote-edit/AGENTS.md
+../Documents/Projects/AI_prototyping_stockviz/AGENTS.md
+../Documents/Projects/Keystone/AGENTS.md
+../Documents/Projects/xportal/.agents/skills/supabase-postgres-best-practices/AGENTS.md
+../Documents/Projects/xportal/.agents/skills/vercel-composition-patterns/AGENTS.md
+../Documents/Projects/xportal/.agents/skills/vercel-react-best-practices/AGENTS.md
+../Documents/research/correct-memory-study/AGENTS.md
+../candidate-discovery-audit-20260813T151433Z/AGENTS.md
+../candidate-discovery-audit-20260814T123116Z/AGENTS.md
+../candidate-discovery-casing-20260816/AGENTS.md
+../hpc-smoke3.u34YsZ/AGENTS.md
+
+exec
+/usr/bin/bash -lc 'pytest -q tests/test_candidate_discovery_v03.py' in /home/anjum/candidate-discovery-casing-20260816
+ exited 1 in 205ms:
+Traceback (most recent call last):
+  File "/usr/bin/pytest", line 8, in <module>
+    sys.exit(console_main())
+             ~~~~~~~~~~~~^^
+  File "/usr/lib/python3.14/site-packages/_pytest/config/__init__.py", line 201, in console_main
+    code = main()
+  File "/usr/lib/python3.14/site-packages/_pytest/config/__init__.py", line 156, in main
+    config = _prepareconfig(args, plugins)
+  File "/usr/lib/python3.14/site-packages/_pytest/config/__init__.py", line 341, in _prepareconfig
+    config = pluginmanager.hook.pytest_cmdline_parse(
+        pluginmanager=pluginmanager, args=args
+    )
+  File "/usr/lib/python3.14/site-packages/pluggy/_hooks.py", line 512, in __call__
+    return self._hookexec(self.name, self._hookimpls.copy(), kwargs, firstresult)
+           ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/site-packages/pluggy/_manager.py", line 120, in _hookexec
+    return self._inner_hookexec(hook_name, methods, kwargs, firstresult)
+           ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/site-packages/pluggy/_callers.py", line 167, in _multicall
+    raise exception
+  File "/usr/lib/python3.14/site-packages/pluggy/_callers.py", line 139, in _multicall
+    teardown.throw(exception)
+    ~~~~~~~~~~~~~~^^^^^^^^^^^
+  File "/usr/lib/python3.14/site-packages/_pytest/helpconfig.py", line 105, in pytest_cmdline_parse
+    config = yield
+             ^^^^^
+  File "/usr/lib/python3.14/site-packages/pluggy/_callers.py", line 121, in _multicall
+    res = hook_impl.function(*args)
+  File "/usr/lib/python3.14/site-packages/_pytest/config/__init__.py", line 1140, in pytest_cmdline_parse
+    self.parse(args)
+    ~~~~~~~~~~^^^^^^
+  File "/usr/lib/python3.14/site-packages/_pytest/config/__init__.py", line 1494, in parse
+    self._preparse(args, addopts=addopts)
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/site-packages/_pytest/config/__init__.py", line 1398, in _preparse
+    self.hook.pytest_load_initial_conftests(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        early_config=self, args=args, parser=self._parser
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/usr/lib/python3.14/site-packages/pluggy/_hooks.py", line 512, in __call__
+    return self._hookexec(self.name, self._hookimpls.copy(), kwargs, firstresult)
+           ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/site-packages/pluggy/_manager.py", line 120, in _hookexec
+    return self._inner_hookexec(hook_name, methods, kwargs, firstresult)
+           ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/site-packages/pluggy/_callers.py", line 167, in _multicall
+    raise exception
+  File "/usr/lib/python3.14/site-packages/pluggy/_callers.py", line 139, in _multicall
+    teardown.throw(exception)
+    ~~~~~~~~~~~~~~^^^^^^^^^^^
+  File "/usr/lib/python3.14/site-packages/_pytest/warnings.py", line 151, in pytest_load_initial_conftests
+    return (yield)
+            ^^^^^
+  File "/usr/lib/python3.14/site-packages/pluggy/_callers.py", line 116, in _multicall
+    next(function_gen)  # first yield
+    ~~~~^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/site-packages/_pytest/capture.py", line 169, in pytest_load_initial_conftests
+    capman.start_global_capturing()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/usr/lib/python3.14/site-packages/_pytest/capture.py", line 771, in start_global_capturing
+    self._global_capturing = _get_multicapture(self._method)
+                             ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/site-packages/_pytest/capture.py", line 712, in _get_multicapture
+    return MultiCapture(in_=FDCapture(0), out=FDCapture(1), err=FDCapture(2))
+                                              ~~~~~~~~~^^^
+  File "/usr/lib/python3.14/site-packages/_pytest/capture.py", line 491, in __init__
+    TemporaryFile(buffering=0),
+    ~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "/usr/lib64/python3.14/tempfile.py", line 652, in TemporaryFile
+    prefix, suffix, dir, output_type = _sanitize_params(prefix, suffix, dir)
+                                       ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib64/python3.14/tempfile.py", line 127, in _sanitize_params
+    dir = gettempdir()
+  File "/usr/lib64/python3.14/tempfile.py", line 312, in gettempdir
+    return _os.fsdecode(_gettempdir())
+                        ~~~~~~~~~~~^^
+  File "/usr/lib64/python3.14/tempfile.py", line 305, in _gettempdir
+    tempdir = _get_default_tempdir()
+  File "/usr/lib64/python3.14/tempfile.py", line 222, in _get_default_tempdir
+    raise FileNotFoundError(_errno.ENOENT,
+                            "No usable temporary directory found in %s" %
+                            dirlist)
+FileNotFoundError: [Errno 2] No usable temporary directory found in ['/tmp', '/var/tmp', '/usr/tmp', '/home/anjum/candidate-discovery-casing-20260816']
+
+exec
+/usr/bin/bash -lc 'grep -n "def capture_advisories" -A150 src/cmpilot/candidate_discovery_v03.py && git diff --check && git log -5 --oneline' in /home/anjum/candidate-discovery-casing-20260816
+ succeeded in 155ms:
+7649b145e fix(candidate-discovery): capture closing PRs before repository metadata
+292fe438f research: schedule GitHub primary quota windows
+6d500bca5 research: preserve stopped candidate discovery v0.3 run
+1d3777343 research: add discovery v0.4.1 rate-limit handling
+df92d2432 research: preserve stopped candidate discovery v0.3 run
+
+exec
+/usr/bin/bash -lc "git show --stat --oneline HEAD && git show HEAD -- src/cmpilot/candidate_discovery_v03.py tests/test_candidate_discovery_v03.py | sed -n '1,260p'" in /home/anjum/candidate-discovery-casing-20260816
+ succeeded in 0ms:
+7649b145e fix(candidate-discovery): capture closing PRs before repository metadata
+ src/cmpilot/candidate_discovery_v03.py |   6 +-
+ tests/test_candidate_discovery_v03.py  | 163 +++++++++++++++++++++++++++++++++
+ 2 files changed, 166 insertions(+), 3 deletions(-)
+commit 7649b145ee9dc96a185c9b8c1adc0b8f22b11fb6
+Author: anjum613 <anjumasiya613@gmail.com>
+Date:   Sun Aug 16 13:06:38 2026 +1000
+
+    fix(candidate-discovery): capture closing PRs before repository metadata
+
+diff --git a/src/cmpilot/candidate_discovery_v03.py b/src/cmpilot/candidate_discovery_v03.py
+index 799f0cd6c..2601fb444 100644
+--- a/src/cmpilot/candidate_discovery_v03.py
++++ b/src/cmpilot/candidate_discovery_v03.py
+@@ -2371,15 +2371,15 @@ def capture_searches(
+                 number,
+             )
+         elif query.get("object_type") == "ISSUE":
+-            repository_payload, _ = _capture_repository(evidence, owner, repository)
+-            if repository_payload is None:
+-                continue
+             nodes = _capture_issue_relations(
+                 evidence,
+                 owner=owner,
+                 repository=repository,
+                 number=number,
+             )
++            repository_payload, _ = _capture_repository(evidence, owner, repository)
++            if repository_payload is None:
++                continue
+             for node in nodes:
+                 repository_node = node.get("repository")
+                 name_with_owner = (
+diff --git a/tests/test_candidate_discovery_v03.py b/tests/test_candidate_discovery_v03.py
+index 3ae904080..9cfef3677 100644
+--- a/tests/test_candidate_discovery_v03.py
++++ b/tests/test_candidate_discovery_v03.py
+@@ -339,6 +339,169 @@ def test_search_leaf_capture_accounts_every_item_without_ranking(tmp_path: Path)
+     assert "trust_family" not in json.dumps(items)
+ 
+ 
++def test_issue_graphql_is_captured_before_unavailable_repository(
++    tmp_path: Path,
++) -> None:
++    run_root = tmp_path / "run"
++    context = CaptureContext.create(
++        run_root=run_root,
++        source_id=SEARCH_SOURCE_ID,
++        source_kind="TRUST_BOUNDARY_ISSUE_PR_SEARCH",
++        source_revision={
++            "kind": "FROZEN_QUERY_SPECIFICATION",
++            "value": "b" * 64,
++        },
++        token=FIXTURE_TOKEN,
++    )
++    calls: list[tuple[str, str]] = []
++
++    def transport(method, url, headers, body):  # type: ignore[no-untyped-def]
++        del headers
++        parsed = urlsplit(url)
++        calls.append((method, parsed.path))
++        if parsed.path == "/search/issues":
++            query = parse_qs(parsed.query)["q"][0]
++            items = (
++                [
++                    {
++                        "id": 4418020886,
++                        "node_id": "I_kwDORxnDcM8AAAABB1WmFg",
++                        "number": 86,
++                        "repository_url": (
++                            "https://api.github.com/repos/nickatnight96/BTagent"
++                        ),
++                        "url": (
++                            "https://api.github.com/repos/"
++                            "nickatnight96/BTagent/issues/86"
++                        ),
++                        "html_url": (
++                            "https://github.com/nickatnight96/BTagent/issues/86"
++                        ),
++                    }
++                ]
++                if '"fixture-0"' in query
++                else []
++            )
++            return _response(
++                {
++                    "total_count": len(items),
++                    "incomplete_results": False,
++                    "items": items,
++                }
++            )
++        if parsed.path == "/graphql":
++            assert method == "POST"
++            assert body is not None
++            request_body = json.loads(body)
++            assert request_body == {
++                "query": discovery_v03.GRAPHQL_DOCUMENT,
++                "variables": {
++                    "owner": "nickatnight96",
++                    "repository": "BTagent",
++                    "number": 86,
++                    "cursor": None,
++                },
++            }
++            return _response(
++                {
++                    "data": {
++                        "repository": {
++                            "databaseId": 7,
++                            "issue": {
++                                "closedByPullRequestsReferences": {
++                                    "nodes": [{"merged": True}],
++                                    "pageInfo": {
++                                        "hasNextPage": False,
++                                        "endCursor": None,
++                                    },
++                                }
++                            },
++                        }
++                    }
++                }
++            )
++        if parsed.path == "/repos/nickatnight96/BTagent":
++            assert method == "GET"
++            return _response(
++                {
++                    "message": "Not Found",
++                    "documentation_url": (
++                        "https://docs.github.com/rest/repos/repos#get-a-repository"
++                    ),
++                },
++                status=404,
++            )
++        raise AssertionError(f"unexpected offline request: {method} {url}")
++
++    context.api.transport = transport
++    context.api.clock = lambda: "2026-08-14T19:05:08Z"
++    evidence = GitHubEvidence(context)
++    search_spec = {
++        "queries": [
++            {
++                "query_id": f"TB-Q{index + 1:02d}",
++                "query": (
++                    f'"fixture-{index}" is:issue '
++                    "created:2020-01-01..2026-08-12"
++                ),
++                "object_type": "ISSUE",
++            }
++            for index in range(8)
++        ]
++    }
++
++    discovery_v03.capture_searches(context, evidence, search_spec=search_spec)
++
++    assert calls[-2:] == [
++        ("POST", "/graphql"),
++        ("GET", "/repos/nickatnight96/BTagent"),
++    ]
++    expected_graphql_key = GitHubEvidence._key(
++        method="POST",
++        endpoint="https://api.github.com/graphql",
++        ordered_parameters=(),
++        json_body={
++            "query": discovery_v03.GRAPHQL_DOCUMENT,
++            "variables": {
++                "owner": "nickatnight96",
++                "repository": "BTagent",
++                "number": 86,
++                "cursor": None,
++            },
++        },
++    )
++    expected_repository_key = GitHubEvidence._key(
++        method="GET",
++        endpoint="https://api.github.com/repos/nickatnight96/BTagent",
++        ordered_parameters=(),
++        json_body=None,
++    )
++    entries = {entry["evidence_key"]: entry for entry in evidence.entries}
++    assert entries[expected_graphql_key]["status"] == "AVAILABLE"
++    assert entries[expected_repository_key]["status"] == "UNAVAILABLE"
++
++    _, capture_digest = context.finalize(
++        status="CAPTURE_COMPLETE", evidence=evidence
++    )
++    manifest, verified_digest, index = load_verified_capture(context.root)
++    assert verified_digest == capture_digest
++
++    records, occurrences = discovery_v03.materialize_searches(
++        source_root=context.root,
++        manifest=manifest,
++        capture_digest=capture_digest,
++        index=index,
++        search_spec=search_spec,
++    )
++
++    assert occurrences == []
++    assert len(records) == 1
++    assert records[0]["disposition"] == "SOURCE_REJECTED"
++    assert records[0]["rejection_reason_codes"] == [
++        "GITHUB_REPOSITORY_UNAVAILABLE"
++    ]
++
++
+ def _record(record_id: str, candidate_id: str, episode: dict[str, object]) -> dict[str, object]:
+     return {
+         "source_record_id": record_id,
+
+exec
+/usr/bin/bash -lc "sed -n '3605,3695p' src/cmpilot/candidate_discovery_v03.py && nl -ba src/cmpilot/candidate_discovery_v03.py | sed -n '2674,2720p'" in /home/anjum/candidate-discovery-casing-20260816
+ succeeded in 0ms:
+            native_identity=native,
+            artifacts=artifacts,
+            candidate_links=links,
+            rejection_codes=rejection,
+        )
+        records.append(record)
+        if record["disposition"] == "MATERIALIZED":
+            for candidate_id, value in sorted(unique.items()):
+                episode, repository_value, pr_number, metadata = value
+                occurrences.append(
+                    _candidate_occurrence(
+                        episode=episode,
+                        source_record_id_value=record["source_record_id"],
+                        source_id_value=SEARCH_SOURCE_ID,
+                        repository=repository_value,
+                        topology=episode.topology,
+                        pull_request_number=pr_number,
+                        source_metadata={
+                            "query_id": source_object["query_id"],
+                            "observed_query_ids": source_object.get(
+                                "observed_query_ids", [source_object["query_id"]]
+                            ),
+                            "observed_leaf_provenance": source_object.get(
+                                "observed_leaf_provenance", []
+                            ),
+                            "github_search_node_id": source_object["node_id"],
+                            "pull_request": metadata,
+                        },
+                    )
+                )
+    return records, occurrences
+
+
+SOURCE_PRIORITY = {
+    ADVISORY_SOURCE_ID: 0,
+    BUGSINPY_SOURCE_ID: 1,
+    SEARCH_SOURCE_ID: 2,
+}
+
+
+def apply_global_deduplication(
+    *,
+    source_records: Mapping[str, list[dict[str, Any]]],
+    occurrences: Sequence[Mapping[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], int, list[dict[str, str]]]:
+    """Apply only positive immutable exact collapse and explicit possible links."""
+
+    record_by_id = {
+        record["source_record_id"]: record
+        for records in source_records.values()
+        for record in records
+    }
+    grouped: dict[str, list[Mapping[str, Any]]] = defaultdict(list)
+    for occurrence in occurrences:
+        candidate_id = occurrence.get("canonical_candidate_id")
+        if not isinstance(candidate_id, str) or CANDIDATE_ID_PATTERN.fullmatch(
+            candidate_id
+        ) is None:
+            raise DiscoveryExecutionError("CANDIDATE_ID_INVALID", str(candidate_id))
+        grouped[candidate_id].append(occurrence)
+
+    exact_duplicates = 0
+    pool: list[dict[str, Any]] = []
+    pr_identity: dict[tuple[int, int], str] = {}
+    possible_pairs: set[tuple[str, str]] = set()
+    by_repository_repair: dict[tuple[int, str], list[str]] = defaultdict(list)
+    for candidate_id in sorted(grouped):
+        values = sorted(
+            grouped[candidate_id],
+            key=lambda value: (
+                SOURCE_PRIORITY[str(value["source_id"])],
+                str(value["source_record_id"]),
+            ),
+        )
+        identity = (
+            values[0]["github_repository_id"],
+            values[0]["candidate_snapshot_commit_sha"],
+            values[0]["repair_commit_sha"],
+        )
+        if any(
+            (
+                value["github_repository_id"],
+                value["candidate_snapshot_commit_sha"],
+                value["repair_commit_sha"],
+            )
+            != identity
+            for value in values
+        ):
+            raise DiscoveryExecutionError(
+                "IDENTITY_CONFLICT", f"candidate identity conflict: {candidate_id}"
+            )
+  2674	    repository_value = _captured_repository(
+  2675	        captured,
+  2676	        owner=owner,
+  2677	        repository=repository,
+  2678	        artifacts=artifacts,
+  2679	        expected_id=expected_repository_id,
+  2680	    )
+  2681	    final_owner = str(repository_value["owner"])
+  2682	    final_repository = str(repository_value["name"])
+  2683	    evidence_owner = final_owner
+  2684	    evidence_repository = final_repository
+  2685	    root = _api_repo_endpoint(final_owner, final_repository)
+  2686	    requested_root = _api_repo_endpoint(owner, repository)
+  2687	    if (
+  2688	        owner.casefold() == final_owner.casefold()
+  2689	        and repository.casefold() == final_repository.casefold()
+  2690	        and requested_root != root
+  2691	    ):
+  2692	        final_key = GitHubEvidence._key(
+  2693	            method="GET",
+  2694	            endpoint=f"{root}/pulls/{number}",
+  2695	            ordered_parameters=(),
+  2696	            json_body=None,
+  2697	        )
+  2698	        requested_key = GitHubEvidence._key(
+  2699	            method="GET",
+  2700	            endpoint=f"{requested_root}/pulls/{number}",
+  2701	            ordered_parameters=(),
+  2702	            json_body=None,
+  2703	        )
+  2704	        if final_key not in captured.entries and requested_key in captured.entries:
+  2705	            evidence_owner = owner
+  2706	            evidence_repository = repository
+  2707	            root = requested_root
+  2708	    payload = captured.get(
+  2709	        method="GET", endpoint=f"{root}/pulls/{number}", artifacts=artifacts
+  2710	    )
+  2711	    if payload is None:
+  2712	        raise SourceRecordRejected(
+  2713	            "GITHUB_ISSUE_OR_PR_UNAVAILABLE", "pull request is unavailable"
+  2714	        )
+  2715	    if not isinstance(payload, Mapping):
+  2716	        raise SourceRecordRejected(
+  2717	            "GITHUB_PR_DETAIL_INCOMPLETE", "pull request detail is not object"
+  2718	        )
+  2719	    if payload.get("number") != number:
+  2720	        raise SourceRecordRejected(
+
+exec
+/usr/bin/bash -lc 'find . -name AGENTS.md -o -name AGENTS.override.md' in /home/anjum/candidate-discovery-casing-20260816
+ succeeded in 188ms:
+./AGENTS.md
+
+codex
+The change consistently falls back to the casing used during capture when canonical REST casing differs, while preserving canonical repository metadata. No actionable correctness issues were found.
+The change consistently falls back to the casing used during capture when canonical REST casing differs, while preserving canonical repository metadata. No actionable correctness issues were found.

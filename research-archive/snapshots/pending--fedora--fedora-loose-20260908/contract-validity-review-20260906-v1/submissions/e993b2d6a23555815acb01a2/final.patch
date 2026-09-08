@@ -1,0 +1,26 @@
+--- a/app/service.py
++++ b/app/service.py
+@@ -12,9 +12,21 @@
+     updated = _x28_update(store, operation, item)
+     if updated is not None:
+         return updated
+-    if operation != 'check' or store.approximate:
++    if operation != 'check':
+         return False
+-    if store.preliminary(item):
++
++    # A prefilter miss is definitive and avoids an authoritative-store read.
++    # Its encoding is intentionally narrower than that of the store, though,
++    # so keys it cannot represent are checked directly against the store.
++    try:
++        candidate = store.preliminary(item)
++    except (AttributeError, UnicodeEncodeError):
++        candidate = True
++
++    if not candidate:
++        return False
++
++    if item in store.read_page(store.page_for(item)):
+         store.grants.append(item)
+         return True
+     return False

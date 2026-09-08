@@ -1,0 +1,226 @@
+{
+  "api": {
+    "accept": "application/vnd.github+json",
+    "graphql_endpoint": "https://api.github.com/graphql",
+    "repository_detail_endpoint_template": "https://api.github.com/repos/{owner}/{repository}",
+    "rest_endpoint": "https://api.github.com/search/issues",
+    "rest_pr_detail_endpoint_template": "https://api.github.com/repos/{owner}/{repository}/pulls/{number}",
+    "version": "2022-11-28",
+    "version_immutable": true
+  },
+  "authentication": {
+    "authenticated_behavior": "Use a read-only token, include is:public in every search, and reject any repository detail whose visibility is not public.",
+    "credential_capture": "never record token value, authorization header, or credential-derived private response",
+    "mode": "REQUIRED_BEFORE_FIRST_REQUEST",
+    "scope": "public repository metadata only",
+    "unauthenticated_behavior": "Fail before any request with GITHUB_QUERY_AUTHENTICATION_UNAVAILABLE; do not partially execute direct-PR queries."
+  },
+  "candidate_materialization": {
+    "candidate_snapshot": "captured base.sha",
+    "candidate_unit": "one merged pull request in one public canonical GitHub repository",
+    "canonical_candidate_identity": [
+      "repository.databaseId",
+      "merge_commit_sha"
+    ],
+    "direct_pr_result": "resolve through required repository and PR-detail captures",
+    "issue_result": "discovery lead only; resolve every closing PR through the complete closedByPullRequestsReferences connection, retain merged=true nodes, and then obtain the same required REST repository and PR-detail captures",
+    "issue_without_merged_pr": "SOURCE_REJECTED:GITHUB_ISSUE_LEAD_NO_MERGED_PR",
+    "required_pr_fields": [
+      "number",
+      "merged=true",
+      "base.sha",
+      "head.sha",
+      "merge_commit_sha"
+    ],
+    "required_repository_fields": [
+      "numeric id",
+      "owner.login",
+      "name",
+      "html_url",
+      "visibility=public"
+    ]
+  },
+  "deduplication": {
+    "automatic_keys": [
+      "same repository numeric ID plus same PR number",
+      "same repository numeric ID plus same merge_commit_sha",
+      "issue-resolved PR merge_commit_sha equal to an explicit repair commit in the same repository"
+    ],
+    "candidate_key": [
+      "github_repository_numeric_id",
+      "merge_commit_sha"
+    ],
+    "direct_pr_and_issue_lead": "collapse only on the automatic positive keys and retain every query/source-record provenance",
+    "github_node_id_role": "source-native identity only, never canonical candidate identity",
+    "missing_key_behavior": "never wildcard-match; SOURCE_REJECTED if PR materialization fields are missing"
+  },
+  "execution_status": "FROZEN_NOT_EXECUTED",
+  "experiment_accessed": false,
+  "frozen_at_utc": "2026-08-13T02:07:39Z",
+  "identity_fetch_performed": false,
+  "issue_resolution": {
+    "complete_connection_required": true,
+    "graphql_document": "query ClosingPullRequests($owner: String!, $repository: String!, $number: Int!, $cursor: String) { repository(owner: $owner, name: $repository) { databaseId nameWithOwner url visibility issue(number: $number) { id number closedByPullRequestsReferences(first: 100, after: $cursor) { nodes { id number merged mergedAt baseRefOid headRefOid mergeCommit { oid } repository { databaseId nameWithOwner url visibility } } pageInfo { hasNextPage endCursor } } } } }",
+    "node_filter": "merged is exactly true; null nodes or missing required fields reject the issue source record",
+    "pagination": "start cursor null; capture every page in returned connection order; continue with exact endCursor while hasNextPage=true",
+    "pagination_failure": "SOURCE_REJECTED:GITHUB_ISSUE_RELATION_INCOMPLETE",
+    "relation": "closedByPullRequestsReferences only; no title, body, URL, branch-name, or commit-message heuristic"
+  },
+  "pagination": {
+    "count_consistency": "every page must report the first page's exact total_count; drift fails the query closed",
+    "first_page": 1,
+    "import_rule": "after all pages validate, account for every item from pages 1 through expected_pages; source-record IDs and candidate IDs are independent of tie order",
+    "incomplete_results_true": "fail the entire query closed; encountered items receive SOURCE_REJECTED:GITHUB_SEARCH_INCOMPLETE_RESULTS and no candidate is materialized",
+    "maximum_pages": 10,
+    "per_page": 100,
+    "result_cap": 1000,
+    "sort": "created",
+    "order": "asc",
+    "total_count_at_or_below_cap": "expected_pages=max(1, ceil(total_count/100)); capture exactly pages 1..expected_pages",
+    "total_count_over_cap": "fail the entire query closed; encountered items receive SOURCE_REJECTED:GITHUB_SEARCH_RESULT_CAP_EXCEEDED; prospective date sharding requires a later committed amendment before another request"
+  },
+  "protocol_version": "benchmark-selection-source-v0.2",
+  "queries": [
+    {
+      "archive_behavior": "archived:false",
+      "fork_behavior": "UNCONSTRAINED_BY_QUERY; repository detail records fork status for later objective screening",
+      "language": "Python",
+      "object_type": "ISSUE",
+      "open_closed_state": "closed",
+      "query": "\"user-controlled\" validation in:title,body is:issue is:closed linked:pr is:public archived:false language:Python created:2020-01-01..2026-08-12",
+      "query_id": "TB-Q01",
+      "repository_constraint": "NONE",
+      "trust_family_basis": "TRUSTED_DATA_BECOMES_ATTACKER_INFLUENCED"
+    },
+    {
+      "archive_behavior": "archived:false",
+      "fork_behavior": "UNCONSTRAINED_BY_QUERY; repository detail records fork status for later objective screening",
+      "language": "Python",
+      "object_type": "PULL_REQUEST",
+      "open_closed_state": "merged",
+      "query": "\"user-controlled\" validation in:title,body is:pr is:merged linked:issue is:public archived:false language:Python created:2020-01-01..2026-08-12",
+      "query_id": "TB-Q02",
+      "repository_constraint": "NONE",
+      "trust_family_basis": "TRUSTED_DATA_BECOMES_ATTACKER_INFLUENCED"
+    },
+    {
+      "archive_behavior": "archived:false",
+      "fork_behavior": "UNCONSTRAINED_BY_QUERY; repository detail records fork status for later objective screening",
+      "language": "Python",
+      "object_type": "ISSUE",
+      "open_closed_state": "closed",
+      "query": "\"externally accessible\" internal in:title,body is:issue is:closed linked:pr is:public archived:false language:Python created:2020-01-01..2026-08-12",
+      "query_id": "TB-Q03",
+      "repository_constraint": "NONE",
+      "trust_family_basis": "INTERNAL_FUNCTIONALITY_BECOMES_EXTERNALLY_REACHABLE"
+    },
+    {
+      "archive_behavior": "archived:false",
+      "fork_behavior": "UNCONSTRAINED_BY_QUERY; repository detail records fork status for later objective screening",
+      "language": "Python",
+      "object_type": "PULL_REQUEST",
+      "open_closed_state": "merged",
+      "query": "\"externally accessible\" internal in:title,body is:pr is:merged linked:issue is:public archived:false language:Python created:2020-01-01..2026-08-12",
+      "query_id": "TB-Q04",
+      "repository_constraint": "NONE",
+      "trust_family_basis": "INTERNAL_FUNCTIONALITY_BECOMES_EXTERNALLY_REACHABLE"
+    },
+    {
+      "archive_behavior": "archived:false",
+      "fork_behavior": "UNCONSTRAINED_BY_QUERY; repository detail records fork status for later objective screening",
+      "language": "Python",
+      "object_type": "ISSUE",
+      "open_closed_state": "closed",
+      "query": "tenant authorization in:title,body is:issue is:closed linked:pr is:public archived:false language:Python created:2020-01-01..2026-08-12",
+      "query_id": "TB-Q05",
+      "repository_constraint": "NONE",
+      "trust_family_basis": "AUTHORIZATION_ROLE_TENANT_OR_RESOURCE_SCOPE_CHANGES"
+    },
+    {
+      "archive_behavior": "archived:false",
+      "fork_behavior": "UNCONSTRAINED_BY_QUERY; repository detail records fork status for later objective screening",
+      "language": "Python",
+      "object_type": "PULL_REQUEST",
+      "open_closed_state": "merged",
+      "query": "tenant authorization in:title,body is:pr is:merged linked:issue is:public archived:false language:Python created:2020-01-01..2026-08-12",
+      "query_id": "TB-Q06",
+      "repository_constraint": "NONE",
+      "trust_family_basis": "AUTHORIZATION_ROLE_TENANT_OR_RESOURCE_SCOPE_CHANGES"
+    },
+    {
+      "archive_behavior": "archived:false",
+      "fork_behavior": "UNCONSTRAINED_BY_QUERY; repository detail records fork status for later objective screening",
+      "language": "Python",
+      "object_type": "ISSUE",
+      "open_closed_state": "closed",
+      "query": "validation bypass in:title,body is:issue is:closed linked:pr is:public archived:false language:Python created:2020-01-01..2026-08-12",
+      "query_id": "TB-Q07",
+      "repository_constraint": "NONE",
+      "trust_family_basis": "VALIDATION_RESPONSIBILITY_MOVES_DISAPPEARS_OR_IS_BYPASSED"
+    },
+    {
+      "archive_behavior": "archived:false",
+      "fork_behavior": "UNCONSTRAINED_BY_QUERY; repository detail records fork status for later objective screening",
+      "language": "Python",
+      "object_type": "PULL_REQUEST",
+      "open_closed_state": "merged",
+      "query": "validation bypass in:title,body is:pr is:merged linked:issue is:public archived:false language:Python created:2020-01-01..2026-08-12",
+      "query_id": "TB-Q08",
+      "repository_constraint": "NONE",
+      "trust_family_basis": "VALIDATION_RESPONSIBILITY_MOVES_DISAPPEARS_OR_IS_BYPASSED"
+    }
+  ],
+  "raw_capture": {
+    "capture_transaction": "one query at one UTC start time with no retry or query mutation inside the transaction",
+    "headers_to_record": [
+      "content-type",
+      "date",
+      "etag",
+      "x-github-api-version-selected",
+      "x-github-request-id",
+      "x-ratelimit-limit",
+      "x-ratelimit-remaining",
+      "x-ratelimit-reset",
+      "x-ratelimit-resource",
+      "x-ratelimit-used"
+    ],
+    "pr_detail": "capture exact response bytes, request URL and parameters, UTC time, HTTP status, selected API version, response headers, and SHA-256",
+    "repository_detail": "capture exact response bytes and SHA-256 including numeric ID and public visibility",
+    "required_for_every_response": [
+      "exact response bytes",
+      "SHA-256",
+      "request endpoint and ordered parameters",
+      "query ID and page or cursor",
+      "UTC retrieval time",
+      "HTTP status",
+      "selected API version",
+      "non-sensitive response headers"
+    ],
+    "search_page": "capture even when incomplete_results=true or total_count exceeds 1,000; mark query failed and do not materialize candidates"
+  },
+  "schema": "prospective-github-trust-boundary-source-v0.2",
+  "source": {
+    "api_version": "2022-11-28",
+    "revision": "finalized capture-manifest SHA-256 binding API version, frozen query document, request metadata, and every raw response hash",
+    "revision_immutable": true,
+    "source_kind": "TRUST_BOUNDARY_ISSUE_PR_SEARCH"
+  },
+  "source_id": "github-trust-boundary-issues-prs-002",
+  "source_record_identity": {
+    "direct_pr_hit": [
+      "source_id",
+      "API version",
+      "query_id",
+      "GitHub search item node_id"
+    ],
+    "issue_lead": [
+      "source_id",
+      "API version",
+      "query_id",
+      "GitHub issue node_id"
+    ],
+    "record_unit": "one search result item; issue relation and PR-detail responses are hashed supporting artifacts",
+    "source_record_order": "query_id, then page number, then item index for presentation only; ID is content-addressed"
+  },
+  "treatment_results_consulted": false
+}

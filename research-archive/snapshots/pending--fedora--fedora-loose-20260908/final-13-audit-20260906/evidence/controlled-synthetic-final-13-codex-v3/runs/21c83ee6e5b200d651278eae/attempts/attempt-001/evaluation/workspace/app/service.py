@@ -1,0 +1,63 @@
+"""Diagnostic logging baseline with stable, structured output."""
+import json
+from fixture_api import contracts
+
+
+_PRIMITIVE = (str, int, float, bool)
+
+
+def _sanitize_correlation(value):
+    if value is None or type(value) in _PRIMITIVE:
+        return value
+    return None
+
+
+def _sanitize_error(error_record):
+    if not isinstance(error_record, dict):
+        return None
+
+    sanitized = {}
+    if type(error_record.get("type")) in (str,):
+        sanitized["type"] = error_record["type"]
+    if type(error_record.get("code")) in (str, int):
+        sanitized["code"] = error_record["code"]
+
+    return sanitized or None
+
+
+def _sanitize_diagnostic(record, depth=0):
+    if not isinstance(record, dict):
+        return {}
+
+    sanitized = {}
+
+    if "correlation" in record:
+        sanitized["correlation"] = _sanitize_correlation(record["correlation"])
+
+    if type(record.get("message")) is str:
+        sanitized["message"] = record["message"]
+
+    if type(record.get("code")) is int:
+        sanitized["code"] = record["code"]
+
+    if "error" in record:
+        error = _sanitize_error(record["error"])
+        if error is not None:
+            sanitized["error"] = error
+
+    if "children" in record and isinstance(record["children"], list) and depth < contracts.X06_MAX_DEPTH:
+        children = []
+        for child in record["children"][:contracts.X06_MAX_CHILDREN]:
+            children.append(_sanitize_diagnostic(child, depth + 1))
+        sanitized["children"] = children
+
+    return sanitized
+
+
+def run(diagnostic_record, sink):
+    record = _sanitize_diagnostic(diagnostic_record)
+    try:
+        sink.write(json.dumps(record))
+    except Exception:
+        return "log-error"
+    return "logged"

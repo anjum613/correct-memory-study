@@ -1,0 +1,14 @@
+Implemented `run(decision_store, operation, value)` in [app/service.py](/workspace/app/service.py) to support concurrent multi-record-safe updates.
+
+- `read` now returns a deep copy of the requested record, preserving existing read behavior.
+- `prepare` now uses the fixture prepare logic (`_x24_prepare`) and returns the prepared token tuple when valid, `None` otherwise.
+- `commit` now validates:
+  - record/actor exist
+  - revision matches the prepared revision
+  - actor is still active  
+  If valid, it calls `decision_store.commit(...)` and returns `'committed'`; otherwise returns `'conflict'`.
+- Unsupported operations still raise `ValueError`.
+
+This keeps ordinary behavior (`read`, conflict responses, retryable conflict semantics via revision checks) and allows safe concurrent commits across independent records/groups.
+
+If you want, I can run `public_tests.py` next.

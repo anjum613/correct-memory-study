@@ -1,0 +1,39 @@
+# Missing `build_IR` Method Implementation for `RawCall` Builtin Function
+
+## Current Issue
+
+The `RawCall` builtin function class in `vyper/builtins/functions.py` is missing its core `build_IR` method implementation. This method is essential for generating the intermediate representation (IR) code that enables the `raw_call` functionality in Vyper contracts.
+
+Without this implementation, the `raw_call` builtin function cannot:
+- Generate proper IR code for external contract calls
+- Handle different call types (regular calls, delegate calls, static calls)
+- Process call parameters like gas limits, value transfers, and output size specifications
+- Return appropriate values based on call success/failure and output requirements
+- Support the special `~calldata` forwarding mechanism
+
+This results in compilation failures when Vyper contracts attempt to use the `raw_call` function, which is a critical feature for interacting with external contracts and performing low-level calls.
+
+## Expected Implementation
+
+The `build_IR` method should be implemented to:
+
+1. **Process call parameters**: Extract and validate the `to` address, `data` payload, and keyword arguments including `gas`, `value`, `max_outsize`, `is_delegate_call`, `is_static_call`, and `revert_on_failure`.
+
+2. **Handle call type validation**: Ensure mutually exclusive use of `is_delegate_call` and `is_static_call` flags, and enforce static call requirements in constant contexts.
+
+3. **Support calldata forwarding**: Handle the special `~calldata` value for the data parameter to forward the entire calldata to the target contract.
+
+4. **Generate appropriate IR for different call types**:
+   - Regular calls using the `call` opcode with gas, address, value, and data parameters
+   - Delegate calls using the `delegatecall` opcode without value parameter
+   - Static calls using the `staticcall` opcode without value parameter
+
+5. **Handle return data processing**: When `max_outsize` is specified, properly allocate memory for return data, handle the minimum of actual return data size and specified maximum, and return the appropriate data structure.
+
+6. **Return correct types based on configuration**:
+   - When `revert_on_failure=True` and `max_outsize=0`: Return `None`
+   - When `revert_on_failure=True` and `max_outsize>0`: Return `BytesT` with the call result
+   - When `revert_on_failure=False` and `max_outsize=0`: Return `BoolT` indicating call success
+   - When `revert_on_failure=False` and `max_outsize>0`: Return `TupleT[BoolT, BytesT]` with success status and result data
+
+The method must be decorated with `@process_inputs` and follow the signature `build_IR(self, expr, args, kwargs, context)` to maintain compatibility with the builtin function framework.

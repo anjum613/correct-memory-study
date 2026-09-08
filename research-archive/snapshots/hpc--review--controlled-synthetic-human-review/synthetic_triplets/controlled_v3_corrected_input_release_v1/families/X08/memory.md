@@ -1,0 +1,1 @@
+# Frozen source memory X08\n\nProcedure: Read each archive entry and total its declared expanded size before publication.\n\nApplicability assumption: Declared sizes accurately bound actual expansion before materialization.\n

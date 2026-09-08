@@ -1,0 +1,45 @@
+{
+  "schema": "v2-prospective-semantic-review-rule-v1",
+  "position": 6,
+  "focal_query_path": "main/src/com/google/refine/importers/XmlImporter.java",
+  "external_standard_evidence": {
+    "url": "https://docs.oracle.com/javase/6/docs/api/javax/xml/stream/XMLInputFactory.html",
+    "claim": "Java SE 6 lists isReplacingEntityReferences default TRUE, supportDTD default TRUE, and isSupportingExternalEntities default unspecified."
+  },
+  "templates": {
+    "default": {
+      "trust_predicate": null,
+      "answers": {
+        "Q1": {"answer": "NO", "evidence": ["Occurrence {occurrence} source {source_commit}:{source_path} is not independently reviewed for its original task because the target query is non-focal"]},
+        "Q2": {"answer": "NO", "evidence": ["No source-safe XML trust predicate is established for non-focal query {query_path}"]},
+        "Q3": {"answer": "NO", "evidence": ["No p*(S) evidence exists for window {source_window_sha256}"]},
+        "Q4": {"answer": "NO", "evidence": ["Non-focal occurrence {occurrence} cannot establish p*(B)"]},
+        "Q5": {"answer": "YES", "evidence": ["U 78edff6f:XmlImporter.java enables entity replacement and uses the StAX parser in the new workflow"]},
+        "Q6": {"answer": "NO", "evidence": ["Query {query_path} is not the VCC focal XmlImporter task procedure"]},
+        "Q7": {"answer": "NO", "evidence": ["The occurrence does not represent U's focal XmlImporter procedure"]},
+        "Q8": {"answer": "NO", "evidence": ["Stage B task execution is deferred"]},
+        "Q9": {"answer": "NO", "evidence": ["The XXE witness is deferred"]},
+        "Q10": {"answer": "NO", "evidence": ["The R control is deferred"]},
+        "Q11": {"answer": "YES", "evidence": ["No model outcomes were used"]},
+        "Q12": {"answer": "NO", "evidence": ["No five-state matrix exists"]}
+      }
+    },
+    "focal": {
+      "trust_predicate": "The XMLInputFactory does not replace entity references or support DTD/external-entity expansion.",
+      "answers": {
+        "Q1": {"answer": "YES", "evidence": ["{source_commit}:{source_path} implements the historical XML tree-reader accessors matched at {similarity}"]},
+        "Q2": {"answer": "NO", "evidence": ["Java SE 6 XMLInputFactory defaults entity replacement and DTD support to TRUE and leaves external-entity default unspecified; the source creates the factory without disabling any of them"]},
+        "Q3": {"answer": "NO", "evidence": ["{source_commit}:{source_path} calls XMLInputFactory.newInstance().createXMLStreamReader without a secure property or resolver, so p*(S)=TRUE cannot be demonstrated"]},
+        "Q4": {"answer": "YES", "evidence": ["Before B, commit 748b5699 explicitly sets IS_REPLACING_ENTITY_REFERENCES true in the same XmlParser; B retains that blob lineage"]},
+        "Q5": {"answer": "YES", "evidence": ["U 78edff6f repeats entity replacement true in the new XmlImporter"]},
+        "Q6": {"answer": "YES", "evidence": ["Source {source_commit}:{source_path} and query {query_path} share the TreeReader XML accessor sequence"]},
+        "Q7": {"answer": "YES", "evidence": ["U migrates the old XmlParser accessor procedure into XmlImporter.XmlParser"]},
+        "Q8": {"answer": "NO", "evidence": ["Task completion remains static pending execution"]},
+        "Q9": {"answer": "NO", "evidence": ["The XXE witness is not run after decisive Q2/Q3 failures"]},
+        "Q10": {"answer": "NO", "evidence": ["The R control is not run after decisive Q2/Q3 failures"]},
+        "Q11": {"answer": "YES", "evidence": ["Source evidence predates target and excludes model outcomes"]},
+        "Q12": {"answer": "NO", "evidence": ["No five-state executable matrix exists"]}
+      }
+    }
+  }
+}

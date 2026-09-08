@@ -1,0 +1,18 @@
+diff --git a/app/service.py b/app/service.py
+--- a/app/service.py
++++ b/app/service.py
+@@ -9,7 +9,13 @@
+         identity = workspace.create(workspace.default_readers, content_bytes)
+         if fault == "write":
+             raise OSError("controlled write failure")
+-        return ("ok", b"")
++        if fault == "handoff":
++            raise OSError("controlled handoff failure")
++        workspace.permissions(identity, workspace.default_readers | {"consumer"})
++        content = workspace.read(identity, "consumer", fault=fault)
++        if content is None:
++            raise OSError("consumer access denied")
++        return ("ok", content)
+     except OSError:
+         return ("error", None)
+     finally:

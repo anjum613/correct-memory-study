@@ -1,0 +1,84 @@
+diff --git a/mcp_pinot/config.py b/mcp_pinot/config.py
+index 51b74cd..7e6e37f 100644
+--- a/mcp_pinot/config.py
++++ b/mcp_pinot/config.py
+@@ -34,6 +34,7 @@ class ServerConfig:
+     ssl_keyfile: str | None = None
+     ssl_certfile: str | None = None
+     endpoint: str = "/sse"
++    auth_token: str | None = None
+ 
+ 
+ def _parse_broker_url(broker_url: str) -> tuple[str, int, str]:
+@@ -129,4 +130,5 @@ def load_server_config() -> ServerConfig:
+         ssl_keyfile=os.getenv("MCP_SSL_KEYFILE"),
+         ssl_certfile=os.getenv("MCP_SSL_CERTFILE"),
+         endpoint=os.getenv("MCP_ENDPOINT", "/sse"),
++        auth_token=os.getenv("MCP_AUTH_TOKEN"),
+     )
+diff --git a/mcp_pinot/server.py b/mcp_pinot/server.py
+index 0cd982a..d7e545e 100644
+--- a/mcp_pinot/server.py
++++ b/mcp_pinot/server.py
+@@ -2,6 +2,7 @@
+ # File: mcp_pinot/server.py
+ # --------------------------
+ import asyncio
++import hmac
+ import json
+ import ssl
+ from typing import Any
+@@ -521,6 +522,42 @@ async def handle_rest_api_list_tools(scope, receive, send, server):
+         )
+ 
+ 
++def _http_request_is_authorized(scope) -> bool:
++    """Return whether the request presents the configured bearer token."""
++    expected_token = server_config.auth_token
++    if not expected_token:
++        return False
++    expected_header = (
++        expected_token
++        if expected_token.startswith("Bearer ")
++        else f"Bearer {expected_token}"
++    )
++    for name, value in scope.get("headers", []):
++        if name.lower() == b"authorization":
++            provided_header = value.decode("latin-1")
++            return hmac.compare_digest(provided_header, expected_header)
++    return False
++
++
++async def _send_http_unauthorized(send) -> None:
++    await send(
++        {
++            "type": "http.response.start",
++            "status": 401,
++            "headers": [
++                [b"content-type", b"application/json"],
++                [b"www-authenticate", b"Bearer"],
++            ],
++        }
++    )
++    await send(
++        {
++            "type": "http.response.body",
++            "body": json.dumps({"error": "Unauthorized"}).encode(),
++        }
++    )
++
++
+ async def run_http_server():
+     """Run the MCP server with HTTP/SSE transport"""
+     logger.info(
+@@ -533,6 +570,10 @@ async def run_http_server():
+     # Create ASGI application
+     async def app(scope, receive, send):
+         if scope["type"] == "http":
++            if not _http_request_is_authorized(scope):
++                await _send_http_unauthorized(send)
++                return
++
+             path = scope["path"]
+             method = scope["method"]
+ 

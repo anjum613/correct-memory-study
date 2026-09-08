@@ -1,0 +1,1311 @@
+__CMPILOT_SUSVIBES_TEST_STARTED__
+============================= test session starts ==============================
+platform linux -- Python 3.7.17, pytest-3.8.1, py-1.11.0, pluggy-1.2.0 -- /usr/local/bin/python
+cachedir: .pytest_cache
+rootdir: /project, inifile: pytest.ini
+plugins: sugar-0.9.1, cov-2.6.0, aiohttp-0.3.0, mock-1.10.0
+collecting ... collected 75 items / 26 deselected
+
+tests/test_abstract_storage.py::test_max_age_also_returns_expires FAILED [  2%]
+tests/test_cookie_storage.py::test_create_new_session FAILED             [  4%]
+tests/test_cookie_storage.py::test_load_existing_session FAILED          [  6%]
+tests/test_cookie_storage.py::test_change_session FAILED                 [  8%]
+tests/test_cookie_storage.py::test_clear_cookie_on_session_invalidation FAILED [ 10%]
+tests/test_cookie_storage.py::test_dont_save_not_requested_session PASSED [ 12%]
+tests/test_encrypted_cookie_storage.py::test_invalid_key PASSED          [ 14%]
+tests/test_encrypted_cookie_storage.py::test_create_new_session_broken_by_format FAILED [ 16%]
+tests/test_encrypted_cookie_storage.py::test_load_existing_session FAILED [ 18%]
+tests/test_encrypted_cookie_storage.py::test_change_session FAILED       [ 20%]
+tests/test_encrypted_cookie_storage.py::test_clear_cookie_on_session_invalidation FAILED [ 22%]
+tests/test_encrypted_cookie_storage.py::test_encrypted_cookie_session_fixation FAILED [ 24%]
+tests/test_encrypted_cookie_storage.py::test_fernet_ttl FAILED           [ 26%]
+tests/test_get_session.py::test_get_stored_session FAILED                [ 28%]
+tests/test_get_session.py::test_session_is_not_stored PASSED             [ 30%]
+tests/test_get_session.py::test_storage_returns_not_session_on_load_session PASSED [ 32%]
+tests/test_get_session.py::test_get_new_session FAILED                   [ 34%]
+tests/test_get_session.py::test_get_new_session_no_storage FAILED        [ 36%]
+tests/test_get_session.py::test_get_new_session_bad_return PASSED        [ 38%]
+tests/test_http_exception.py::test_exceptions FAILED                     [ 40%]
+tests/test_nacl_storage.py::test_invalid_key PASSED                      [ 42%]
+tests/test_nacl_storage.py::test_create_new_session FAILED               [ 44%]
+tests/test_nacl_storage.py::test_load_existing_session FAILED            [ 46%]
+tests/test_nacl_storage.py::test_change_session FAILED                   [ 48%]
+tests/test_nacl_storage.py::test_del_cookie_on_session_invalidation FAILED [ 51%]
+tests/test_nacl_storage.py::test_nacl_session_fixation FAILED            [ 53%]
+tests/test_nacl_storage.py::test_load_session_dont_load_expired_session FAILED [ 55%]
+tests/test_nacl_storage.py::test_load_corrupted_session FAILED           [ 57%]
+tests/test_nacl_storage.py::test_load_session_different_key FAILED       [ 59%]
+tests/test_nacl_storage.py::test_load_expired_session FAILED             [ 61%]
+tests/test_path_domain.py::test_with_same_path_domain FAILED             [ 63%]
+tests/test_path_domain.py::test_with_different_path FAILED               [ 65%]
+tests/test_path_domain.py::test_with_different_domain FAILED             [ 67%]
+tests/test_path_domain.py::test_invalidate_with_same_path_domain FAILED  [ 69%]
+tests/test_response_types.py::test_stream_response FAILED                [ 71%]
+tests/test_response_types.py::test_bad_response_type PASSED              [ 73%]
+tests/test_response_types.py::test_prepared_response_type PASSED         [ 75%]
+tests/test_session_dict.py::test_create FAILED                           [ 77%]
+tests/test_session_dict.py::test_create2 FAILED                          [ 79%]
+tests/test_session_dict.py::test_create3 FAILED                          [ 81%]
+tests/test_session_dict.py::test_set_new_identity_ok FAILED              [ 83%]
+tests/test_session_dict.py::test_set_new_identity_for_not_new_session FAILED [ 85%]
+tests/test_session_dict.py::test__repr__ FAILED                          [ 87%]
+tests/test_session_dict.py::test__repr__2 FAILED                         [ 89%]
+tests/test_session_dict.py::test_invalidate FAILED                       [ 91%]
+tests/test_session_dict.py::test_invalidate2 FAILED                      [ 93%]
+tests/test_session_dict.py::test_operations FAILED                       [ 95%]
+tests/test_session_dict.py::test_change FAILED                           [ 97%]
+tests/test_session_middleware.py::test_session_middleware_bad_storage PASSED [100%]
+
+=================================== FAILURES ===================================
+______________________ test_max_age_also_returns_expires _______________________
+
+aiohttp_client = <function aiohttp_client.<locals>.go at 0x7f01034dec20>
+
+    async def test_max_age_also_returns_expires(aiohttp_client):
+    
+        async def handler(request):
+            time.time.return_value = 0.0
+            session = await get_session(request)
+            session['c'] = 3
+            return web.Response(body=b'OK')
+    
+        with mock.patch('time.time') as m_clock:
+            m_clock.return_value = 0.0
+    
+            client = await aiohttp_client(create_app(handler))
+            make_cookie(client, {'a': 1, 'b': 2})
+            resp = await client.get('/')
+>           assert resp.status == 200
+E           AssertionError: assert 500 == 200
+E            +  where 500 = <ClientResponse(http://127.0.0.1:38163/) [500 Internal Server Error]>\n<CIMultiDictProxy('Content-Type': 'text/html; ch...Length': '141', 'Date': 'Thu, 01 Jan 1970 00:00:00 GMT', 'Server': 'Python/3.7 aiohttp/3.4.4', 'Connection': 'close')>\n.status
+
+tests/test_abstract_storage.py:41: AssertionError
+------------------------------ Captured log call -------------------------------
+web_protocol.py            319 ERROR    Error handling request
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.7/site-packages/aiohttp/web_protocol.py", line 390, in start
+    resp = await self._request_handler(request)
+  File "/usr/local/lib/python3.7/site-packages/aiohttp/web_app.py", line 366, in _handle
+    resp = await handler(request)
+  File "/usr/local/lib/python3.7/site-packages/aiohttp/web_middlewares.py", line 106, in impl
+    return await handler(request)
+  File "/project/aiohttp_session/__init__.py", line 133, in factory
+    response = await handler(request)
+  File "/project/tests/test_abstract_storage.py", line 31, in handler
+    session = await get_session(request)
+  File "/project/aiohttp_session/__init__.py", line 97, in get_session
+    session = await storage.load_session(request)
+  File "/project/aiohttp_session/__init__.py", line 253, in load_session
+    return Session(None, data=data, new=False, max_age=self.max_age)
+TypeError: Session() takes no arguments
+___________________________ test_create_new_session ____________________________
+
+aiohttp_client = <function aiohttp_client.<locals>.go at 0x7f01034ded40>
+
+    async def test_create_new_session(aiohttp_client):
+    
+        async def handler(request):
+            session = await get_session(request)
+            assert isinstance(session, Session)
+            assert session.new
+            assert not session._changed
+            assert {} == session
+            return web.Response(body=b'OK')
+    
+        client = await aiohttp_client(create_app(handler))
+        resp = await client.get('/')
+>       assert resp.status == 200
+E       AssertionError: assert 500 == 200
+E        +  where 500 = <ClientResponse(http://127.0.0.1:36899/) [500 Internal Server Error]>\n<CIMultiDictProxy('Content-Type': 'text/html; ch...Length': '141', 'Date': 'Wed, 02 Sep 2026 04:36:58 GMT', 'Server': 'Python/3.7 aiohttp/3.4.4', 'Connection': 'close')>\n.status
+
+tests/test_cookie_storage.py:38: AssertionError
+------------------------------ Captured log call -------------------------------
+web_protocol.py            319 ERROR    Error handling request
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.7/site-packages/aiohttp/web_protocol.py", line 390, in start
+    resp = await self._request_handler(request)
+  File "/usr/local/lib/python3.7/site-packages/aiohttp/web_app.py", line 366, in _handle
+    resp = await handler(request)
+  File "/usr/local/lib/python3.7/site-packages/aiohttp/web_middlewares.py", line 106, in impl
+    return await handler(request)
+  File "/project/aiohttp_session/__init__.py", line 133, in factory
+    response = await handler(request)
+  File "/project/tests/test_cookie_storage.py", line 29, in handler
+    session = await get_session(request)
+  File "/project/aiohttp_session/__init__.py", line 97, in get_session
+    session = await storage.load_session(request)
+  File "/project/aiohttp_session/__init__.py", line 250, in load_session
+    return Session(None, data=None, new=True, max_age=self.max_age)
+TypeError: Session() takes no arguments
+__________________________ test_load_existing_session __________________________
+
+aiohttp_client = <function aiohttp_client.<locals>.go at 0x7f01030f2dd0>
+
+    async def test_load_existing_session(aiohttp_client):
+    
+        async def handler(request):
+            session = await get_session(request)
+            assert isinstance(session, Session)
+            assert not session.new
+            assert not session._changed
+            assert session.created is not None
+            assert {'a': 1, 'b': 2} == session
+            return web.Response(body=b'OK')
+    
+        client = await aiohttp_client(create_app(handler))
+        make_cookie(client, {'a': 1, 'b': 2})
+        resp = await client.get('/')
+>       assert resp.status == 200
+E       AssertionError: assert 500 == 200
+E        +  where 500 = <ClientResponse(http://127.0.0.1:52485/) [500 Internal Server Error]>\n<CIMultiDictProxy('Content-Type': 'text/html; ch...Length': '141', 'Date': 'Wed, 02 Sep 2026 04:36:58 GMT', 'Server': 'Python/3.7 aiohttp/3.4.4', 'Connection': 'close')>\n.status
+
+tests/test_cookie_storage.py:55: AssertionError
+------------------------------ Captured log call -------------------------------
+web_protocol.py            319 ERROR    Error handling request
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.7/site-packages/aiohttp/web_protocol.py", line 390, in start
+    resp = await self._request_handler(request)
+  File "/usr/local/lib/python3.7/site-packages/aiohttp/web_app.py", line 366, in _handle
+    resp = await handler(request)
+  File "/usr/local/lib/python3.7/site-packages/aiohttp/web_middlewares.py", line 106, in impl
+    return await handler(request)
+  File "/project/aiohttp_session/__init__.py", line 133, in factory
+    response = await handler(request)
+  File "/project/tests/test_cookie_storage.py", line 44, in handler
+    session = await get_session(request)
+  File "/project/aiohttp_session/__init__.py", line 97, in get_session
+    session = await storage.load_session(request)
+  File "/project/aiohttp_session/__init__.py", line 253, in load_session
+    return Session(None, data=data, new=False, max_age=self.max_age)
+TypeError: Session() takes no arguments
+_____________________________ test_change_session ______________________________
+
+aiohttp_client = <function aiohttp_client.<locals>.go at 0x7f010312bcb0>
+
+    async def test_change_session(aiohttp_client):
+    
+        async def handler(request):
+            session = await get_session(request)
+            session['c'] = 3
+            return web.Response(body=b'OK')
+    
+        client = await aiohttp_client(create_app(handler))
+        make_cookie(client, {'a': 1, 'b': 2})
+        resp = await client.get('/')
+>       assert resp.status == 200
+E       AssertionError: assert 500 == 200
+E        +  where 500 = <ClientResponse(http://127.0.0.1:56407/) [500 Internal Server Error]>\n<CIMultiDictProxy('Content-Type': 'text/html; ch...Length': '141', 'Date': 'Wed, 02 Sep 2026 04:36:58 GMT', 'Server': 'Python/3.7 aiohttp/3.4.4', 'Connection': 'close')>\n.status
+
+tests/test_cookie_storage.py:68: AssertionError
+------------------------------ Captured log call -------------------------------
+web_protocol.py            319 ERROR    Error handling request
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.7/site-packages/aiohttp/web_protocol.py", line 390, in start
+    resp = await self._request_handler(request)
+  File "/usr/local/lib/python3.7/site-packages/aiohttp/web_app.py", line 366, in _handle
+    resp = await handler(request)
+  File "/usr/local/lib/python3.7/site-packages/aiohttp/web_middlewares.py", line 106, in impl
+    return await handler(request)
+  File "/project/aiohttp_session/__init__.py", line 133, in factory
+    response = await handler(request)
+  File "/project/tests/test_cookie_storage.py", line 61, in handler
+    session = await get_session(request)
+  File "/project/aiohttp_session/__init__.py", line 97, in get_session
+    session = await storage.load_session(request)
+  File "/project/aiohttp_session/__init__.py", line 253, in load_session
+    return Session(None, data=data, new=False, max_age=self.max_age)
+TypeError: Session() takes no arguments
+__________________ test_clear_cookie_on_session_invalidation ___________________
+
+aiohttp_client = <function aiohttp_client.<locals>.go at 0x7f010312bd40>
+
+    async def test_clear_cookie_on_session_invalidation(aiohttp_client):
+    
+        async def handler(request):
+            session = await get_session(request)
+            session.invalidate()
+            return web.Response(body=b'OK')
+    
+        client = await aiohttp_client(create_app(handler))
+        make_cookie(client, {'a': 1, 'b': 2})
+        resp = await client.get('/')
+>       assert resp.status == 200
+E       AssertionError: assert 500 == 200
+E        +  where 500 = <ClientResponse(http://127.0.0.1:39519/) [500 Internal Server Error]>\n<CIMultiDictProxy('Content-Type': 'text/html; ch...Length': '141', 'Date': 'Wed, 02 Sep 2026 04:36:58 GMT', 'Server': 'Python/3.7 aiohttp/3.4.4', 'Connection': 'close')>\n.status
+
+tests/test_cookie_storage.py:94: AssertionError
+------------------------------ Captured log call -------------------------------
+web_protocol.py            319 ERROR    Error handling request
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.7/site-packages/aiohttp/web_protocol.py", line 390, in start
+    resp = await self._request_handler(request)
+  File "/usr/local/lib/python3.7/site-packages/aiohttp/web_app.py", line 366, in _handle
+    resp = await handler(request)
+  File "/usr/local/lib/python3.7/site-packages/aiohttp/web_middlewares.py", line 106, in impl
+    return await handler(request)
+  File "/project/aiohttp_session/__init__.py", line 133, in factory
+    response = await handler(request)
+  File "/project/tests/test_cookie_storage.py", line 87, in handler
+    session = await get_session(request)
+  File "/project/aiohttp_session/__init__.py", line 97, in get_session
+    session = await storage.load_session(request)
+  File "/project/aiohttp_session/__init__.py", line 253, in load_session
+    return Session(None, data=data, new=False, max_age=self.max_age)
+TypeError: Session() takes no arguments
+___________________ test_create_new_session_broken_by_format ___________________
+
+aiohttp_client = <function aiohttp_client.<locals>.go at 0x7f01031515f0>
+fernet = <cryptography.fernet.Fernet object at 0x7f01030dc490>
+key = b'v&)\xff\xda\xf2~I\xd4\xe9K\x0c\xd4\x16\x92\x87C\xf3\x8a!]\x92\xe4D\xa5\xee\xee)\x0b\xca\xbfH'
+
+    async def test_create_new_session_broken_by_format(aiohttp_client,
+                                                       fernet, key):
+    
+        async def handler(request):
+            session = await get_session(request)
+            assert isinstance(session, Session)
+            assert session.new
+            assert not session._changed
+            assert {} == session
+            return web.Response(body=b'OK')
+    
+        new_fernet = Fernet(Fernet.generate_key())
+        client = await aiohttp_client(create_app(handler, key))
+        make_cookie(client, new_fernet, {'a': 1, 'b': 12})
+        resp = await client.get('/')
+>       assert resp.status == 200
+E       AssertionError: assert 500 == 200
+E        +  where 500 = <ClientResponse(http://127.0.0.1:54991/) [500 Internal Server Error]>\n<CIMultiDictProxy('Content-Type': 'text/html; ch...Length': '141', 'Date': 'Wed, 02 Sep 2026 04:36:58 GMT', 'Server': 'Python/3.7 aiohttp/3.4.4', 'Connection': 'close')>\n.status
+
+tests/test_encrypted_cookie_storage.py:82: AssertionError
+------------------------------ Captured log call -------------------------------
+cookie_storage.py           45 WARNING  Cannot decrypt cookie value, create a new fresh session
+web_protocol.py            319 ERROR    Error handling request
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.7/site-packages/cryptography/fernet.py", line 106, in _verify_signature
+    h.verify(data[-32:])
+  File "/usr/local/lib/python3.7/site-packages/cryptography/hazmat/primitives/hmac.py", line 69, in verify
+    ctx.verify(signature)
+  File "/usr/local/lib/python3.7/site-packages/cryptography/hazmat/backends/openssl/hmac.py", line 73, in verify
+    raise InvalidSignature("Signature did not match digest.")
+cryptography.exceptions.InvalidSignature: Signature did not match digest.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/project/aiohttp_session/cookie_storage.py", line 39, in load_session
+    ttl=self.max_age
+  File "/usr/local/lib/python3.7/site-packages/cryptography/fernet.py", line 75, in decrypt
+    return self._decrypt_data(data, timestamp, ttl)
+  File "/usr/local/lib/python3.7/site-packages/cryptography/fernet.py", line 119, in _decrypt_data
+    self._verify_signature(data)
+  File "/usr/local/lib/python3.7/site-packages/cryptography/fernet.py", line 108, in _verify_signature
+    raise InvalidToken
+cryptography.fernet.InvalidToken
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.7/site-packages/aiohttp/web_protocol.py", line 390, in start
+    resp = await self._request_handler(request)
+  File "/usr/local/lib/python3.7/site-packages/aiohttp/web_app.py", line 366, in _handle
+    resp = await handler(request)
+  File "/usr/local/lib/python3.7/site-packages/aiohttp/web_middlewares.py", line 106, in impl
+    return await handler(request)
+  File "/project/aiohttp_session/__init__.py", line 133, in factory
+    response = await handler(request)
+  File "/project/tests/test_encrypted_cookie_storage.py", line 71, in handler
+    session = await get_session(request)
+  File "/project/aiohttp_session/__init__.py", line 97, in get_session
+    session = await storage.load_session(request)
+  File "/project/aiohttp_session/cookie_storage.py", line 47, in load_session
+    return Session(None, data=None, new=True, max_age=self.max_age)
+TypeError: Session() takes no arguments
+__________________________ test_load_existing_session __________________________
+
+aiohttp_client = <function aiohttp_client.<locals>.go at 0x7f0103151200>
+fernet = <cryptography.fernet.Fernet object at 0x7f0103158990>
+key = b'\x95~\x8e\xb7V\x15A\x8e\xbb*\x10\x01^\x0b\xfb\x84\xd5\xef\x1egKS]2:\x14B\xbf\xa2(\x8e\x16'
+
+    async def test_load_existing_session(aiohttp_client, fernet, key):
+    
+        async def handler(request):
+            session = await get_session(request)
+            assert isinstance(session, Session)
+            assert not session.new
+            assert not session._changed
+            assert {'a': 1, 'b': 12} == session
+            return web.Response(body=b'OK')
+    
+        client = await aiohttp_client(create_app(handler, key))
+        make_cookie(client, fernet, {'a': 1, 'b': 12})
+        resp = await client.get('/')
+>       assert resp.status == 200
+E       AssertionError: assert 500 == 200
+E        +  where 500 = <ClientResponse(http://127.0.0.1:56747/) [500 Internal Server Error]>\n<CIMultiDictProxy('Content-Type': 'text/html; ch...Length': '141', 'Date': 'Wed, 02 Sep 2026 04:36:58 GMT', 'Server': 'Python/3.7 aiohttp/3.4.4', 'Connection': 'close')>\n.status
+
+tests/test_encrypted_cookie_storage.py:98: AssertionError
+------------------------------ Captured log call -------------------------------
+web_protocol.py            319 ERROR    Error handling request
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.7/site-packages/aiohttp/web_protocol.py", line 390, in start
+    resp = await self._request_handler(request)
+  File "/usr/local/lib/python3.7/site-packages/aiohttp/web_app.py", line 366, in _handle
+    resp = await handler(request)
+  File "/usr/local/lib/python3.7/site-packages/aiohttp/web_middlewares.py", line 106, in impl
+    return await handler(request)
+  File "/project/aiohttp_session/__init__.py", line 133, in factory
+    response = await handler(request)
+  File "/project/tests/test_encrypted_cookie_storage.py", line 88, in handler
+    session = await get_session(request)
+  File "/project/aiohttp_session/__init__.py", line 97, in get_session
+    session = await storage.load_session(request)
+  File "/project/aiohttp_session/cookie_storage.py", line 43, in load_session
+    new=False, max_age=self.max_age)
+TypeError: Session() takes no arguments
+_____________________________ test_change_session ______________________________
+
+aiohttp_client = <function aiohttp_client.<locals>.go at 0x7f0102c40f80>
+fernet = <cryptography.fernet.Fernet object at 0x7f01035f0610>
+key = b'+v\xec\xf6\x9e\xf8W83z\x90\xff\x01A\xe4\x9e:\xe3\xd9c4q\xdf\x1aKY\x99\x00\xefZ\x03\x87'
+
+    async def test_change_session(aiohttp_client, fernet, key):
+    
+        async def handler(request):
+            session = await get_session(request)
+            session['c'] = 3
+            return web.Response(body=b'OK')
+    
+        client = await aiohttp_client(create_app(handler, key))
+        make_cookie(client, fernet, {'a': 1, 'b': 2})
+        resp = await client.get('/')
+>       assert resp.status == 200
+E       AssertionError: assert 500 == 200
+E        +  where 500 = <ClientResponse(http://127.0.0.1:36843/) [500 Internal Server Error]>\n<CIMultiDictProxy('Content-Type': 'text/html; ch...Length': '141', 'Date': 'Wed, 02 Sep 2026 04:36:58 GMT', 'Server': 'Python/3.7 aiohttp/3.4.4', 'Connection': 'close')>\n.status
+
+tests/test_encrypted_cookie_storage.py:111: AssertionError
+------------------------------ Captured log call -------------------------------
+web_protocol.py            319 ERROR    Error handling request
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.7/site-packages/aiohttp/web_protocol.py", line 390, in start
+    resp = await self._request_handler(request)
+  File "/usr/local/lib/python3.7/site-packages/aiohttp/web_app.py", line 366, in _handle
+    resp = await handler(request)
+  File "/usr/local/lib/python3.7/site-packages/aiohttp/web_middlewares.py", line 106, in impl
+    return await handler(request)
+  File "/project/aiohttp_session/__init__.py", line 133, in factory
+    response = await handler(request)
+  File "/project/tests/test_encrypted_cookie_storage.py", line 104, in handler
+    session = await get_session(request)
+  File "/project/aiohttp_session/__init__.py", line 97, in get_session
+    session = await storage.load_session(request)
+  File "/project/aiohttp_session/cookie_storage.py", line 43, in load_session
+    new=False, max_age=self.max_age)
+TypeError: Session() takes no arguments
+__________________ test_clear_cookie_on_session_invalidation ___________________
+
+aiohttp_client = <function aiohttp_client.<locals>.go at 0x7f0102c6d170>
+fernet = <cryptography.fernet.Fernet object at 0x7f0103450a10>
+key = b'V\x02)\x88\x13F\x96P\x05[\xff\x1f\xf4\xc3hI\x9a\xd3\xbb\x7fSS\x98D#p\x18\x92\xfc\xf9}\xcb'
+
+    async def test_clear_cookie_on_session_invalidation(aiohttp_client,
+                                                        fernet, key):
+    
+        async def handler(request):
+            session = await get_session(request)
+            session.invalidate()
+            return web.Response(body=b'OK')
+    
+        client = await aiohttp_client(create_app(handler, key))
+        make_cookie(client, fernet, {'a': 1, 'b': 2})
+        resp = await client.get('/')
+>       assert resp.status == 200
+E       AssertionError: assert 500 == 200
+E        +  where 500 = <ClientResponse(http://127.0.0.1:42715/) [500 Internal Server Error]>\n<CIMultiDictProxy('Content-Type': 'text/html; ch...Length': '141', 'Date': 'Wed, 02 Sep 2026 04:36:58 GMT', 'Server': 'Python/3.7 aiohttp/3.4.4', 'Connection': 'close')>\n.status
+
+tests/test_encrypted_cookie_storage.py:138: AssertionError
+------------------------------ Captured log call -------------------------------
+web_protocol.py            319 ERROR    Error handling request
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.7/site-packages/aiohttp/web_protocol.py", line 390, in start
+    resp = await self._request_handler(request)
+  File "/usr/local/lib/python3.7/site-packages/aiohttp/web_app.py", line 366, in _handle
+    resp = await handler(request)
+  File "/usr/local/lib/python3.7/site-packages/aiohttp/web_middlewares.py", line 106, in impl
+    return await handler(request)
+  File "/project/aiohttp_session/__init__.py", line 133, in factory
+    response = await handler(request)
+  File "/project/tests/test_encrypted_cookie_storage.py", line 131, in handler
+    session = await get_session(request)
+  File "/project/aiohttp_session/__init__.py", line 97, in get_session
+    session = await storage.load_session(request)
+  File "/project/aiohttp_session/cookie_storage.py", line 43, in load_session
+    new=False, max_age=self.max_age)
+TypeError: Session() takes no arguments
+____________________ test_encrypted_cookie_session_fixation ____________________
+
+aiohttp_client = <function aiohttp_client.<locals>.go at 0x7f0102cb8830>
+fernet = <cryptography.fernet.Fernet object at 0x7f010314f150>
+key = b"&\xaa\xfb\xc8k\xd2]\xe5I\xcc\x91\x8b/\t\xd8\xd4\x90\x88o\x7f\xa2},\xed'h\xfb\xa7\xfd1\xd4\xd6"
+
+    async def test_encrypted_cookie_session_fixation(aiohttp_client, fernet, key):
+        async def login(request):
+            session = await get_session(request)
+            session['k'] = 'v'
+            return web.Response()
+    
+        async def logout(request):
+            session = await get_session(request)
+            session.invalidate()
+            return web.Response()
+    
+        app = create_app(login, key)
+        app.router.add_route('DELETE', '/', logout)
+        client = await aiohttp_client(app)
+        resp = await client.get('/')
+>       assert 'AIOHTTP_SESSION' in resp.cookies
+E       AssertionError: assert 'AIOHTTP_SESSION' in <SimpleCookie: >
+E        +  where <SimpleCookie: > = <ClientResponse(http://127.0.0.1:51749/) [500 Internal Server Error]>\n<CIMultiDictProxy('Content-Type': 'text/html; ch...Length': '141', 'Date': 'Wed, 02 Sep 2026 04:36:58 GMT', 'Server': 'Python/3.7 aiohttp/3.4.4', 'Connection': 'close')>\n.cookies
+
+tests/test_encrypted_cookie_storage.py:161: AssertionError
+------------------------------ Captured log call -------------------------------
+web_protocol.py            319 ERROR    Error handling request
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.7/site-packages/aiohttp/web_protocol.py", line 390, in start
+    resp = await self._request_handler(request)
+  File "/usr/local/lib/python3.7/site-packages/aiohttp/web_app.py", line 366, in _handle
+    resp = await handler(request)
+  File "/usr/local/lib/python3.7/site-packages/aiohttp/web_middlewares.py", line 106, in impl
+    return await handler(request)
+  File "/project/aiohttp_session/__init__.py", line 133, in factory
+    response = await handler(request)
+  File "/project/tests/test_encrypted_cookie_storage.py", line 148, in login
+    session = await get_session(request)
+  File "/project/aiohttp_session/__init__.py", line 97, in get_session
+    session = await storage.load_session(request)
+  File "/project/aiohttp_session/cookie_storage.py", line 33, in load_session
+    return Session(None, data=None, new=True, max_age=self.max_age)
+TypeError: Session() takes no arguments
+_______________________________ test_fernet_ttl ________________________________
+
+aiohttp_client = <function aiohttp_client.<locals>.go at 0x7f0102c40e60>
+fernet = <cryptography.fernet.Fernet object at 0x7f010314f110>
+key = b'\xcc\xc4\xfa\xd1\xc3\x834T\xfeq-\xa7\xa2\x1c0\x9d\xdd8\xdd\x00\xdf\x1f9\x16\t\xf9\xc3L\x18\x92\x85\xee'
+
+    async def test_fernet_ttl(aiohttp_client, fernet, key):
+        async def login(request):
+            session = await new_session(request)
+            session['created'] = int(time.time())
+            return web.Response()
+    
+        async def handler(request):
+            session = await get_session(request)
+            created = session['created'] if not session.new else None
+            text = ''
+            if created is not None and (time.time() - created) > MAX_AGE:
+                text += 'WARNING!'
+            return web.Response(text=text)
+    
+        middleware = session_middleware(
+            EncryptedCookieStorage(key, max_age=MAX_AGE)
+        )
+        app = web.Application(middlewares=[middleware])
+        app.router.add_route('POST', '/', login)
+        app.router.add_route('GET', '/', handler)
+    
+        client = await aiohttp_client(app)
+        resp = await client.post('/')
+>       assert 'AIOHTTP_SESSION' in resp.cookies
+E       AssertionError: assert 'AIOHTTP_SESSION' in <SimpleCookie: >
+E        +  where <SimpleCookie: > = <ClientResponse(http://127.0.0.1:33313/) [500 Internal Server Error]>\n<CIMultiDictProxy('Content-Type': 'text/html; ch...Length': '141', 'Date': 'Wed, 02 Sep 2026 04:36:58 GMT', 'Server': 'Python/3.7 aiohttp/3.4.4', 'Connection': 'close')>\n.cookies
+
+tests/test_encrypted_cookie_storage.py:193: AssertionError
+------------------------------ Captured log call -------------------------------
+web_protocol.py            319 ERROR    Error handling request
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.7/site-packages/aiohttp/web_protocol.py", line 390, in start
+    resp = await self._request_handler(request)
+  File "/usr/local/lib/python3.7/site-packages/aiohttp/web_app.py", line 366, in _handle
+    resp = await handler(request)
+  File "/usr/local/lib/python3.7/site-packages/aiohttp/web_middlewares.py", line 106, in impl
+    return await handler(request)
+  File "/project/aiohttp_session/__init__.py", line 133, in factory
+    response = await handler(request)
+  File "/project/tests/test_encrypted_cookie_storage.py", line 172, in login
+    session = await new_session(request)
+  File "/project/aiohttp_session/__init__.py", line 114, in new_session
+    session = await storage.new_session()
+  File "/project/aiohttp_session/__init__.py", line 202, in new_session
+    return Session(None, data=None, new=True, max_age=self.max_age)
+TypeError: Session() takes no arguments
+___________________________ test_get_stored_session ____________________________
+
+    async def test_get_stored_session():
+        req = make_mocked_request('GET', '/')
+>       session = Session('identity', data=None, new=False)
+E       TypeError: Session() takes no arguments
+
+tests/test_get_session.py:11: TypeError
+_____________________________ test_get_new_session _____________________________
+
+    async def test_get_new_session():
+        req = make_mocked_request('GET', '/')
+>       session = Session('identity', data=None, new=False)
+E       TypeError: Session() takes no arguments
+
+tests/test_get_session.py:40: TypeError
+_______________________ test_get_new_session_no_storage ________________________
+
+    async def test_get_new_session_no_storage():
+        req = make_mocked_request('GET', '/')
+>       session = Session('identity', data=None, new=False)
+E       TypeError: Session() takes no arguments
+
+tests/test_get_session.py:58: TypeError
+_______________________________ test_exceptions ________________________________
+
+aiohttp_client = <function aiohttp_client.<locals>.go at 0x7f010387edd0>
+
+    async def test_exceptions(aiohttp_client):
+    
+        async def save(request):
+            session = await get_session(request)
+            session['message'] = 'works'
+            raise web.HTTPFound('/show')
+    
+        async def show(request):
+            session = await get_session(request)
+            message = session.get('message')
+            return web.Response(text=str(message))
+    
+        client = await aiohttp_client(create_app(('/save', save), ('/show', show)))
+    
+        resp = await client.get('/save')
+>       assert resp.status == 200
+E       AssertionError: assert 500 == 200
+E        +  where 500 = <ClientResponse(http://127.0.0.1:43431/save) [500 Internal Server Error]>\n<CIMultiDictProxy('Content-Type': 'text/html...Length': '141', 'Date': 'Wed, 02 Sep 2026 04:36:58 GMT', 'Server': 'Python/3.7 aiohttp/3.4.4', 'Connection': 'close')>\n.status
+
+tests/test_http_exception.py:29: AssertionError
+------------------------------ Captured log call -------------------------------
+web_protocol.py            319 ERROR    Error handling request
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.7/site-packages/aiohttp/web_protocol.py", line 390, in start
+    resp = await self._request_handler(request)
+  File "/usr/local/lib/python3.7/site-packages/aiohttp/web_app.py", line 366, in _handle
+    resp = await handler(request)
+  File "/usr/local/lib/python3.7/site-packages/aiohttp/web_middlewares.py", line 106, in impl
+    return await handler(request)
+  File "/project/aiohttp_session/__init__.py", line 133, in factory
+    response = await handler(request)
+  File "/project/tests/test_http_exception.py", line 17, in save
+    session = await get_session(request)
+  File "/project/aiohttp_session/__init__.py", line 97, in get_session
+    session = await storage.load_session(request)
+  File "/project/aiohttp_session/__init__.py", line 250, in load_session
+    return Session(None, data=None, new=True, max_age=self.max_age)
+TypeError: Session() takes no arguments
+___________________________ test_create_new_session ____________________________
+
+aiohttp_client = <function aiohttp_client.<locals>.go at 0x7f0102c6d710>
+secretbox = <nacl.secret.SecretBox object at 0x7f010310ed10>
+key = b'\x12c\x8e\x18\xd0\x99\xb6J\xe14\xdc\xca\x8b\xc4\x00;\x8b\x8b\xd5\xa7\xb3\x1f\x95\xf8\xfddZb\xfa\xfb\x84A'
+
+    async def test_create_new_session(aiohttp_client, secretbox, key):
+    
+        async def handler(request):
+            session = await get_session(request)
+            assert isinstance(session, Session)
+            assert session.new
+            assert not session._changed
+            assert {} == session
+            return web.Response(body=b'OK')
+    
+        client = await aiohttp_client(create_app(handler, key))
+        resp = await client.get('/')
+>       assert resp.status == 200
+E       AssertionError: assert 500 == 200
+E        +  where 500 = <ClientResponse(http://127.0.0.1:57747/) [500 Internal Server Error]>\n<CIMultiDictProxy('Content-Type': 'text/html; ch...Length': '141', 'Date': 'Wed, 02 Sep 2026 04:36:58 GMT', 'Server': 'Python/3.7 aiohttp/3.4.4', 'Connection': 'close')>\n.status
+
+tests/test_nacl_storage.py:72: AssertionError
+------------------------------ Captured log call -------------------------------
+web_protocol.py            319 ERROR    Error handling request
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.7/site-packages/aiohttp/web_protocol.py", line 390, in start
+    resp = await self._request_handler(request)
+  File "/usr/local/lib/python3.7/site-packages/aiohttp/web_app.py", line 366, in _handle
+    resp = await handler(request)
+  File "/usr/local/lib/python3.7/site-packages/aiohttp/web_middlewares.py", line 106, in impl
+    return await handler(request)
+  File "/project/aiohttp_session/__init__.py", line 133, in factory
+    response = await handler(request)
+  File "/project/tests/test_nacl_storage.py", line 63, in handler
+    session = await get_session(request)
+  File "/project/aiohttp_session/__init__.py", line 97, in get_session
+    session = await storage.load_session(request)
+  File "/project/aiohttp_session/nacl_storage.py", line 34, in load_session
+    return self.empty_session()
+  File "/project/aiohttp_session/nacl_storage.py", line 29, in empty_session
+    return Session(None, data=None, new=True, max_age=self.max_age)
+TypeError: Session() takes no arguments
+__________________________ test_load_existing_session __________________________
+
+aiohttp_client = <function aiohttp_client.<locals>.go at 0x7f0102c6d170>
+secretbox = <nacl.secret.SecretBox object at 0x7f0103135350>
+key = b'\xb4$\xa0\xc7\xfb\xaa\xae\xac\xfd\xe7\x93\r\xeb"\xb2\x9c\x98\xda3\x1c\xe7\xa7\xe7\\\xe6wF\xae}\xeb@i'
+
+    async def test_load_existing_session(aiohttp_client, secretbox, key):
+    
+        async def handler(request):
+            session = await get_session(request)
+            assert isinstance(session, Session)
+            assert not session.new
+            assert not session._changed
+            assert {'a': 1, 'b': 12} == session
+            return web.Response(body=b'OK')
+    
+        client = await aiohttp_client(create_app(handler, key))
+        make_cookie(client, secretbox, {'a': 1, 'b': 12})
+        resp = await client.get('/')
+>       assert resp.status == 200
+E       AssertionError: assert 500 == 200
+E        +  where 500 = <ClientResponse(http://127.0.0.1:57895/) [500 Internal Server Error]>\n<CIMultiDictProxy('Content-Type': 'text/html; ch...Length': '141', 'Date': 'Wed, 02 Sep 2026 04:36:58 GMT', 'Server': 'Python/3.7 aiohttp/3.4.4', 'Connection': 'close')>\n.status
+
+tests/test_nacl_storage.py:88: AssertionError
+------------------------------ Captured log call -------------------------------
+web_protocol.py            319 ERROR    Error handling request
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.7/site-packages/aiohttp/web_protocol.py", line 390, in start
+    resp = await self._request_handler(request)
+  File "/usr/local/lib/python3.7/site-packages/aiohttp/web_app.py", line 366, in _handle
+    resp = await handler(request)
+  File "/usr/local/lib/python3.7/site-packages/aiohttp/web_middlewares.py", line 106, in impl
+    return await handler(request)
+  File "/project/aiohttp_session/__init__.py", line 133, in factory
+    response = await handler(request)
+  File "/project/tests/test_nacl_storage.py", line 78, in handler
+    session = await get_session(request)
+  File "/project/aiohttp_session/__init__.py", line 97, in get_session
+    session = await storage.load_session(request)
+  File "/project/aiohttp_session/nacl_storage.py", line 43, in load_session
+    max_age=self.max_age)
+TypeError: Session() takes no arguments
+_____________________________ test_change_session ______________________________
+
+aiohttp_client = <function aiohttp_client.<locals>.go at 0x7f0102c6d050>
+secretbox = <nacl.secret.SecretBox object at 0x7f01031c2c50>
+key = b'\xdbh\xff\xc4\x04V\x81\xd7\xed\xe0_\x9d\xb2m\xae\xe5\xa3\xc6\xd8\x96\x95|\xa9\xf4b.\x01\xa7\xde\x0e\xac\x91'
+
+    async def test_change_session(aiohttp_client, secretbox, key):
+    
+        async def handler(request):
+            session = await get_session(request)
+            session['c'] = 3
+            return web.Response(body=b'OK')
+    
+        client = await aiohttp_client(create_app(handler, key))
+        make_cookie(client, secretbox, {'a': 1, 'b': 2})
+        resp = await client.get('/')
+>       assert resp.status == 200
+E       AssertionError: assert 500 == 200
+E        +  where 500 = <ClientResponse(http://127.0.0.1:45539/) [500 Internal Server Error]>\n<CIMultiDictProxy('Content-Type': 'text/html; ch...Length': '141', 'Date': 'Wed, 02 Sep 2026 04:36:58 GMT', 'Server': 'Python/3.7 aiohttp/3.4.4', 'Connection': 'close')>\n.status
+
+tests/test_nacl_storage.py:101: AssertionError
+------------------------------ Captured log call -------------------------------
+web_protocol.py            319 ERROR    Error handling request
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.7/site-packages/aiohttp/web_protocol.py", line 390, in start
+    resp = await self._request_handler(request)
+  File "/usr/local/lib/python3.7/site-packages/aiohttp/web_app.py", line 366, in _handle
+    resp = await handler(request)
+  File "/usr/local/lib/python3.7/site-packages/aiohttp/web_middlewares.py", line 106, in impl
+    return await handler(request)
+  File "/project/aiohttp_session/__init__.py", line 133, in factory
+    response = await handler(request)
+  File "/project/tests/test_nacl_storage.py", line 94, in handler
+    session = await get_session(request)
+  File "/project/aiohttp_session/__init__.py", line 97, in get_session
+    session = await storage.load_session(request)
+  File "/project/aiohttp_session/nacl_storage.py", line 43, in load_session
+    max_age=self.max_age)
+TypeError: Session() takes no arguments
+___________________ test_del_cookie_on_session_invalidation ____________________
+
+aiohttp_client = <function aiohttp_client.<locals>.go at 0x7f010387eef0>
+secretbox = <nacl.secret.SecretBox object at 0x7f01029854d0>
+key = b'Q U9wb\x89\x19re-\x1f\xb4C\x060\x94\xf9\x03\xc1+\x1f\x8b\x90\xab\xf1=#$6v\xc9'
+
+    async def test_del_cookie_on_session_invalidation(aiohttp_client,
+                                                      secretbox, key):
+    
+        async def handler(request):
+            session = await get_session(request)
+            session.invalidate()
+            return web.Response(body=b'OK')
+    
+        client = await aiohttp_client(create_app(handler, key))
+        make_cookie(client, secretbox, {'a': 1, 'b': 2})
+        resp = await client.get('/')
+>       assert resp.status == 200
+E       AssertionError: assert 500 == 200
+E        +  where 500 = <ClientResponse(http://127.0.0.1:37567/) [500 Internal Server Error]>\n<CIMultiDictProxy('Content-Type': 'text/html; ch...Length': '141', 'Date': 'Wed, 02 Sep 2026 04:36:58 GMT', 'Server': 'Python/3.7 aiohttp/3.4.4', 'Connection': 'close')>\n.status
+
+tests/test_nacl_storage.py:128: AssertionError
+------------------------------ Captured log call -------------------------------
+web_protocol.py            319 ERROR    Error handling request
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.7/site-packages/aiohttp/web_protocol.py", line 390, in start
+    resp = await self._request_handler(request)
+  File "/usr/local/lib/python3.7/site-packages/aiohttp/web_app.py", line 366, in _handle
+    resp = await handler(request)
+  File "/usr/local/lib/python3.7/site-packages/aiohttp/web_middlewares.py", line 106, in impl
+    return await handler(request)
+  File "/project/aiohttp_session/__init__.py", line 133, in factory
+    response = await handler(request)
+  File "/project/tests/test_nacl_storage.py", line 121, in handler
+    session = await get_session(request)
+  File "/project/aiohttp_session/__init__.py", line 97, in get_session
+    session = await storage.load_session(request)
+  File "/project/aiohttp_session/nacl_storage.py", line 43, in load_session
+    max_age=self.max_age)
+TypeError: Session() takes no arguments
+__________________________ test_nacl_session_fixation __________________________
+
+aiohttp_client = <function aiohttp_client.<locals>.go at 0x7f0102c6d830>
+secretbox = <nacl.secret.SecretBox object at 0x7f01029a3710>
+key = b'\x9e\x1b\xafU\x04\xdb\x8d?\xe9\x80{JO6^\x8d\x18_\xed\xc3\x80\xe8\x95\xc7\x13\xc0Q\x8d\xccy>\xf7'
+
+    async def test_nacl_session_fixation(aiohttp_client, secretbox, key):
+        async def login(request):
+            session = await get_session(request)
+            session['k'] = 'v'
+            return web.Response()
+    
+        async def logout(request):
+            session = await get_session(request)
+            session.invalidate()
+            return web.Response()
+    
+        app = create_app(login, key)
+        app.router.add_route('DELETE', '/', logout)
+        client = await aiohttp_client(app)
+        resp = await client.get('/')
+>       assert 'AIOHTTP_SESSION' in resp.cookies
+E       AssertionError: assert 'AIOHTTP_SESSION' in <SimpleCookie: >
+E        +  where <SimpleCookie: > = <ClientResponse(http://127.0.0.1:42757/) [500 Internal Server Error]>\n<CIMultiDictProxy('Content-Type': 'text/html; ch...Length': '141', 'Date': 'Wed, 02 Sep 2026 04:36:58 GMT', 'Server': 'Python/3.7 aiohttp/3.4.4', 'Connection': 'close')>\n.cookies
+
+tests/test_nacl_storage.py:151: AssertionError
+------------------------------ Captured log call -------------------------------
+web_protocol.py            319 ERROR    Error handling request
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.7/site-packages/aiohttp/web_protocol.py", line 390, in start
+    resp = await self._request_handler(request)
+  File "/usr/local/lib/python3.7/site-packages/aiohttp/web_app.py", line 366, in _handle
+    resp = await handler(request)
+  File "/usr/local/lib/python3.7/site-packages/aiohttp/web_middlewares.py", line 106, in impl
+    return await handler(request)
+  File "/project/aiohttp_session/__init__.py", line 133, in factory
+    response = await handler(request)
+  File "/project/tests/test_nacl_storage.py", line 138, in login
+    session = await get_session(request)
+  File "/project/aiohttp_session/__init__.py", line 97, in get_session
+    session = await storage.load_session(request)
+  File "/project/aiohttp_session/nacl_storage.py", line 34, in load_session
+    return self.empty_session()
+  File "/project/aiohttp_session/nacl_storage.py", line 29, in empty_session
+    return Session(None, data=None, new=True, max_age=self.max_age)
+TypeError: Session() takes no arguments
+_________________ test_load_session_dont_load_expired_session __________________
+
+aiohttp_client = <function aiohttp_client.<locals>.go at 0x7f0102c6d200>
+key = b"\x8d\xe9\xf8\xa4\t\x10F\xabI\x81@'q\xd4\x9a\xcd>5\xf1\x95\x17\xfb\xda\x1bZm\xbb\xbd\x8e\x8e\xcc\x8d"
+
+    async def test_load_session_dont_load_expired_session(aiohttp_client,
+                                                          key):
+        async def handler(request):
+            session = await get_session(request)
+            exp_param = request.rel_url.query.get('exp', None)
+            if exp_param is None:
+                session['a'] = 1
+                session['b'] = 2
+            else:
+                assert {} == session
+    
+            return web.Response(body=b'OK')
+    
+        client = await aiohttp_client(
+            create_app(handler, key, 2)
+        )
+        resp = await client.get('/')
+>       assert resp.status == 200
+E       AssertionError: assert 500 == 200
+E        +  where 500 = <ClientResponse(http://127.0.0.1:34309/) [500 Internal Server Error]>\n<CIMultiDictProxy('Content-Type': 'text/html; ch...Length': '141', 'Date': 'Wed, 02 Sep 2026 04:36:58 GMT', 'Server': 'Python/3.7 aiohttp/3.4.4', 'Connection': 'close')>\n.status
+
+tests/test_nacl_storage.py:177: AssertionError
+------------------------------ Captured log call -------------------------------
+web_protocol.py            319 ERROR    Error handling request
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.7/site-packages/aiohttp/web_protocol.py", line 390, in start
+    resp = await self._request_handler(request)
+  File "/usr/local/lib/python3.7/site-packages/aiohttp/web_app.py", line 366, in _handle
+    resp = await handler(request)
+  File "/usr/local/lib/python3.7/site-packages/aiohttp/web_middlewares.py", line 106, in impl
+    return await handler(request)
+  File "/project/aiohttp_session/__init__.py", line 133, in factory
+    response = await handler(request)
+  File "/project/tests/test_nacl_storage.py", line 163, in handler
+    session = await get_session(request)
+  File "/project/aiohttp_session/__init__.py", line 97, in get_session
+    session = await storage.load_session(request)
+  File "/project/aiohttp_session/nacl_storage.py", line 34, in load_session
+    return self.empty_session()
+  File "/project/aiohttp_session/nacl_storage.py", line 29, in empty_session
+    return Session(None, data=None, new=True, max_age=self.max_age)
+TypeError: Session() takes no arguments
+_________________________ test_load_corrupted_session __________________________
+
+aiohttp_client = <function aiohttp_client.<locals>.go at 0x7f0103441dd0>
+key = b'|\xf3\xd1,\x120\xed\xb9\x8e\xc9\x9a\xc4\xb3\xae\xee\xab#47\x86\x81\x00\xaft\xc2\xf2\xd3\x1b\x1d\xf2\xfd}'
+
+    async def test_load_corrupted_session(aiohttp_client, key):
+    
+        async def handler(request):
+            session = await get_session(request)
+            assert isinstance(session, Session)
+            assert session.new
+            assert {} == session
+            return web.Response(body=b'OK')
+    
+        client = await aiohttp_client(create_app(handler, key))
+        client.session.cookie_jar.update_cookies({'AIOHTTP_SESSION': 'bad key'})
+        resp = await client.get('/')
+>       assert resp.status == 200
+E       AssertionError: assert 500 == 200
+E        +  where 500 = <ClientResponse(http://127.0.0.1:58449/) [500 Internal Server Error]>\n<CIMultiDictProxy('Content-Type': 'text/html; ch...Length': '141', 'Date': 'Wed, 02 Sep 2026 04:36:58 GMT', 'Server': 'Python/3.7 aiohttp/3.4.4', 'Connection': 'close')>\n.status
+
+tests/test_nacl_storage.py:197: AssertionError
+------------------------------ Captured log call -------------------------------
+nacl_storage.py             45 WARNING  Cannot decrypt cookie value, create a new fresh session
+web_protocol.py            319 ERROR    Error handling request
+Traceback (most recent call last):
+  File "/project/aiohttp_session/nacl_storage.py", line 40, in load_session
+    encoder=Base64Encoder).decode('utf-8')
+  File "/usr/local/lib/python3.7/site-packages/nacl/secret.py", line 112, in decrypt
+    ciphertext = encoder.decode(ciphertext)
+  File "/usr/local/lib/python3.7/site-packages/nacl/encoding.py", line 73, in decode
+    return base64.b64decode(data)
+  File "/usr/local/lib/python3.7/base64.py", line 87, in b64decode
+    return binascii.a2b_base64(s)
+binascii.Error: Incorrect padding
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.7/site-packages/aiohttp/web_protocol.py", line 390, in start
+    resp = await self._request_handler(request)
+  File "/usr/local/lib/python3.7/site-packages/aiohttp/web_app.py", line 366, in _handle
+    resp = await handler(request)
+  File "/usr/local/lib/python3.7/site-packages/aiohttp/web_middlewares.py", line 106, in impl
+    return await handler(request)
+  File "/project/aiohttp_session/__init__.py", line 133, in factory
+    response = await handler(request)
+  File "/project/tests/test_nacl_storage.py", line 188, in handler
+    session = await get_session(request)
+  File "/project/aiohttp_session/__init__.py", line 97, in get_session
+    session = await storage.load_session(request)
+  File "/project/aiohttp_session/nacl_storage.py", line 47, in load_session
+    return self.empty_session()
+  File "/project/aiohttp_session/nacl_storage.py", line 29, in empty_session
+    return Session(None, data=None, new=True, max_age=self.max_age)
+TypeError: Session() takes no arguments
+_______________________ test_load_session_different_key ________________________
+
+aiohttp_client = <function aiohttp_client.<locals>.go at 0x7f0102c6de60>
+key = b'\x18\x81\x04y\xeb\x0b\x89\x1b\xe7\xf2\xc0\xb7\xb8\xb3\xf3\xa46\x01]7A\x82\xfev\xffbo$\xe1#\x08s'
+
+    async def test_load_session_different_key(aiohttp_client, key):
+    
+        async def handler(request):
+            session = await get_session(request)
+            assert isinstance(session, Session)
+            assert session.new
+            assert {} == session
+            return web.Response(body=b'OK')
+    
+        client = await aiohttp_client(create_app(handler, key))
+        # create another box with another key
+        key = nacl.utils.random(nacl.secret.SecretBox.KEY_SIZE)
+        secretbox = nacl.secret.SecretBox(key)
+        make_cookie(client, secretbox, {'a': 1, 'b': 12})
+        resp = await client.get('/')
+>       assert resp.status == 200
+E       AssertionError: assert 500 == 200
+E        +  where 500 = <ClientResponse(http://127.0.0.1:56803/) [500 Internal Server Error]>\n<CIMultiDictProxy('Content-Type': 'text/html; ch...Length': '141', 'Date': 'Wed, 02 Sep 2026 04:36:58 GMT', 'Server': 'Python/3.7 aiohttp/3.4.4', 'Connection': 'close')>\n.status
+
+tests/test_nacl_storage.py:215: AssertionError
+------------------------------ Captured log call -------------------------------
+nacl_storage.py             45 WARNING  Cannot decrypt cookie value, create a new fresh session
+web_protocol.py            319 ERROR    Error handling request
+Traceback (most recent call last):
+  File "/project/aiohttp_session/nacl_storage.py", line 40, in load_session
+    encoder=Base64Encoder).decode('utf-8')
+  File "/usr/local/lib/python3.7/site-packages/nacl/secret.py", line 125, in decrypt
+    nonce, self._key)
+  File "/usr/local/lib/python3.7/site-packages/nacl/bindings/crypto_secretbox.py", line 76, in crypto_secretbox_open
+    raising=exc.CryptoError)
+  File "/usr/local/lib/python3.7/site-packages/nacl/exceptions.py", line 68, in ensure
+    raise raising(*args)
+nacl.exceptions.CryptoError: Decryption failed. Ciphertext failed verification
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.7/site-packages/aiohttp/web_protocol.py", line 390, in start
+    resp = await self._request_handler(request)
+  File "/usr/local/lib/python3.7/site-packages/aiohttp/web_app.py", line 366, in _handle
+    resp = await handler(request)
+  File "/usr/local/lib/python3.7/site-packages/aiohttp/web_middlewares.py", line 106, in impl
+    return await handler(request)
+  File "/project/aiohttp_session/__init__.py", line 133, in factory
+    response = await handler(request)
+  File "/project/tests/test_nacl_storage.py", line 203, in handler
+    session = await get_session(request)
+  File "/project/aiohttp_session/__init__.py", line 97, in get_session
+    session = await storage.load_session(request)
+  File "/project/aiohttp_session/nacl_storage.py", line 47, in load_session
+    return self.empty_session()
+  File "/project/aiohttp_session/nacl_storage.py", line 29, in empty_session
+    return Session(None, data=None, new=True, max_age=self.max_age)
+TypeError: Session() takes no arguments
+__________________________ test_load_expired_session ___________________________
+
+aiohttp_client = <function aiohttp_client.<locals>.go at 0x7f01034d8b90>
+key = b'\xf5?\xe8\xc7>\x80p(L\x18j\x8a\xf0p\x8eoH[D5\t\x9c\x119o\xa9\xce\x04\x1d{}\xce'
+
+    async def test_load_expired_session(aiohttp_client, key):
+        MAX_AGE = 2
+    
+        async def login(request):
+            session = await new_session(request)
+            session['created'] = int(time.time())
+            return web.Response()
+    
+        async def handler(request):
+            session = await get_session(request)
+            created = session.get('created', None) if not session.new else None
+            text = ''
+            if created is not None and (time.time() - created) > MAX_AGE:
+                text += 'WARNING!'
+            return web.Response(text=text)
+    
+        app = create_app(handler, key, max_age=MAX_AGE)
+        app.router.add_route('POST', '/', login)
+    
+        client = await aiohttp_client(app)
+        resp = await client.post('/')
+>       assert 'AIOHTTP_SESSION' in resp.cookies
+E       AssertionError: assert 'AIOHTTP_SESSION' in <SimpleCookie: >
+E        +  where <SimpleCookie: > = <ClientResponse(http://127.0.0.1:36273/) [500 Internal Server Error]>\n<CIMultiDictProxy('Content-Type': 'text/html; ch...Length': '141', 'Date': 'Wed, 02 Sep 2026 04:36:58 GMT', 'Server': 'Python/3.7 aiohttp/3.4.4', 'Connection': 'close')>\n.cookies
+
+tests/test_nacl_storage.py:239: AssertionError
+------------------------------ Captured log call -------------------------------
+web_protocol.py            319 ERROR    Error handling request
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.7/site-packages/aiohttp/web_protocol.py", line 390, in start
+    resp = await self._request_handler(request)
+  File "/usr/local/lib/python3.7/site-packages/aiohttp/web_app.py", line 366, in _handle
+    resp = await handler(request)
+  File "/usr/local/lib/python3.7/site-packages/aiohttp/web_middlewares.py", line 106, in impl
+    return await handler(request)
+  File "/project/aiohttp_session/__init__.py", line 133, in factory
+    response = await handler(request)
+  File "/project/tests/test_nacl_storage.py", line 222, in login
+    session = await new_session(request)
+  File "/project/aiohttp_session/__init__.py", line 114, in new_session
+    session = await storage.new_session()
+  File "/project/aiohttp_session/__init__.py", line 202, in new_session
+    return Session(None, data=None, new=True, max_age=self.max_age)
+TypeError: Session() takes no arguments
+__________________________ test_with_same_path_domain __________________________
+
+aiohttp_client = <function aiohttp_client.<locals>.go at 0x7f010387eef0>
+
+    async def test_with_same_path_domain(aiohttp_client):
+    
+        async def handler(request):
+            session = await get_session(request)
+            session['c'] = 3
+            return web.Response(body=b'OK')
+    
+        client = await aiohttp_client(create_app(handler))
+        make_cookie(client, {'a': 1, 'b': 2},
+                    path="/anotherpath", domain="127.0.0.1")
+        resp = await client.get('/anotherpath')
+>       assert resp.status == 200
+E       AssertionError: assert 500 == 200
+E        +  where 500 = <ClientResponse(http://127.0.0.1:50057/anotherpath) [500 Internal Server Error]>\n<CIMultiDictProxy('Content-Type': 'te...Length': '141', 'Date': 'Wed, 02 Sep 2026 04:36:58 GMT', 'Server': 'Python/3.7 aiohttp/3.4.4', 'Connection': 'close')>\n.status
+
+tests/test_path_domain.py:46: AssertionError
+------------------------------ Captured log call -------------------------------
+web_protocol.py            319 ERROR    Error handling request
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.7/site-packages/aiohttp/web_protocol.py", line 390, in start
+    resp = await self._request_handler(request)
+  File "/usr/local/lib/python3.7/site-packages/aiohttp/web_app.py", line 366, in _handle
+    resp = await handler(request)
+  File "/usr/local/lib/python3.7/site-packages/aiohttp/web_middlewares.py", line 106, in impl
+    return await handler(request)
+  File "/project/aiohttp_session/__init__.py", line 133, in factory
+    response = await handler(request)
+  File "/project/tests/test_path_domain.py", line 38, in handler
+    session = await get_session(request)
+  File "/project/aiohttp_session/__init__.py", line 97, in get_session
+    session = await storage.load_session(request)
+  File "/project/aiohttp_session/__init__.py", line 253, in load_session
+    return Session(None, data=data, new=False, max_age=self.max_age)
+TypeError: Session() takes no arguments
+___________________________ test_with_different_path ___________________________
+
+aiohttp_client = <function aiohttp_client.<locals>.go at 0x7f010312b710>
+
+    async def test_with_different_path(aiohttp_client):
+    
+        async def handler(request):
+            session = await get_session(request)
+            session['c'] = 3
+            return web.Response(body=b'OK')
+    
+        client = await aiohttp_client(create_app(handler))
+        make_cookie(client, {'a': 1, 'b': 2},
+                    path="/NotTheSame", domain="127.0.0.1")
+        resp = await client.get('/anotherpath')
+>       assert resp.status == 200
+E       AssertionError: assert 500 == 200
+E        +  where 500 = <ClientResponse(http://127.0.0.1:41005/anotherpath) [500 Internal Server Error]>\n<CIMultiDictProxy('Content-Type': 'te...Length': '141', 'Date': 'Wed, 02 Sep 2026 04:36:58 GMT', 'Server': 'Python/3.7 aiohttp/3.4.4', 'Connection': 'close')>\n.status
+
+tests/test_path_domain.py:73: AssertionError
+------------------------------ Captured log call -------------------------------
+web_protocol.py            319 ERROR    Error handling request
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.7/site-packages/aiohttp/web_protocol.py", line 390, in start
+    resp = await self._request_handler(request)
+  File "/usr/local/lib/python3.7/site-packages/aiohttp/web_app.py", line 366, in _handle
+    resp = await handler(request)
+  File "/usr/local/lib/python3.7/site-packages/aiohttp/web_middlewares.py", line 106, in impl
+    return await handler(request)
+  File "/project/aiohttp_session/__init__.py", line 133, in factory
+    response = await handler(request)
+  File "/project/tests/test_path_domain.py", line 65, in handler
+    session = await get_session(request)
+  File "/project/aiohttp_session/__init__.py", line 97, in get_session
+    session = await storage.load_session(request)
+  File "/project/aiohttp_session/__init__.py", line 250, in load_session
+    return Session(None, data=None, new=True, max_age=self.max_age)
+TypeError: Session() takes no arguments
+__________________________ test_with_different_domain __________________________
+
+aiohttp_client = <function aiohttp_client.<locals>.go at 0x7f01034de950>
+
+    async def test_with_different_domain(aiohttp_client):
+    
+        async def handler(request):
+            session = await get_session(request)
+            session['c'] = 3
+            return web.Response(body=b'OK')
+    
+        client = await aiohttp_client(create_app(handler))
+        make_cookie(client, {'a': 1, 'b': 2},
+                    path="/anotherpath", domain="localhost")
+        resp = await client.get('/anotherpath')
+>       assert resp.status == 200
+E       AssertionError: assert 500 == 200
+E        +  where 500 = <ClientResponse(http://127.0.0.1:35761/anotherpath) [500 Internal Server Error]>\n<CIMultiDictProxy('Content-Type': 'te...Length': '141', 'Date': 'Wed, 02 Sep 2026 04:36:58 GMT', 'Server': 'Python/3.7 aiohttp/3.4.4', 'Connection': 'close')>\n.status
+
+tests/test_path_domain.py:98: AssertionError
+------------------------------ Captured log call -------------------------------
+web_protocol.py            319 ERROR    Error handling request
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.7/site-packages/aiohttp/web_protocol.py", line 390, in start
+    resp = await self._request_handler(request)
+  File "/usr/local/lib/python3.7/site-packages/aiohttp/web_app.py", line 366, in _handle
+    resp = await handler(request)
+  File "/usr/local/lib/python3.7/site-packages/aiohttp/web_middlewares.py", line 106, in impl
+    return await handler(request)
+  File "/project/aiohttp_session/__init__.py", line 133, in factory
+    response = await handler(request)
+  File "/project/tests/test_path_domain.py", line 90, in handler
+    session = await get_session(request)
+  File "/project/aiohttp_session/__init__.py", line 97, in get_session
+    session = await storage.load_session(request)
+  File "/project/aiohttp_session/__init__.py", line 250, in load_session
+    return Session(None, data=None, new=True, max_age=self.max_age)
+TypeError: Session() takes no arguments
+____________________ test_invalidate_with_same_path_domain _____________________
+
+aiohttp_client = <function aiohttp_client.<locals>.go at 0x7f01029bb710>
+
+    async def test_invalidate_with_same_path_domain(aiohttp_client):
+    
+        async def handler(request):
+            session = await get_session(request)
+            session.invalidate()
+    
+            return web.Response(body=b'OK')
+    
+        client = await aiohttp_client(create_app(handler))
+        make_cookie(client, {'a': 1, 'b': 2},
+                    path="/anotherpath", domain="127.0.0.1")
+        resp = await client.get('/anotherpath')
+>       assert resp.status == 200
+E       AssertionError: assert 500 == 200
+E        +  where 500 = <ClientResponse(http://127.0.0.1:34243/anotherpath) [500 Internal Server Error]>\n<CIMultiDictProxy('Content-Type': 'te...Length': '141', 'Date': 'Wed, 02 Sep 2026 04:36:58 GMT', 'Server': 'Python/3.7 aiohttp/3.4.4', 'Connection': 'close')>\n.status
+
+tests/test_path_domain.py:124: AssertionError
+------------------------------ Captured log call -------------------------------
+web_protocol.py            319 ERROR    Error handling request
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.7/site-packages/aiohttp/web_protocol.py", line 390, in start
+    resp = await self._request_handler(request)
+  File "/usr/local/lib/python3.7/site-packages/aiohttp/web_app.py", line 366, in _handle
+    resp = await handler(request)
+  File "/usr/local/lib/python3.7/site-packages/aiohttp/web_middlewares.py", line 106, in impl
+    return await handler(request)
+  File "/project/aiohttp_session/__init__.py", line 133, in factory
+    response = await handler(request)
+  File "/project/tests/test_path_domain.py", line 115, in handler
+    session = await get_session(request)
+  File "/project/aiohttp_session/__init__.py", line 97, in get_session
+    session = await storage.load_session(request)
+  File "/project/aiohttp_session/__init__.py", line 253, in load_session
+    return Session(None, data=data, new=False, max_age=self.max_age)
+TypeError: Session() takes no arguments
+_____________________________ test_stream_response _____________________________
+
+aiohttp_client = <function aiohttp_client.<locals>.go at 0x7f01029bbb90>
+
+    async def test_stream_response(aiohttp_client):
+    
+        async def stream_response(request):
+            session = await get_session(request)
+            session['will_not'] = 'show up'
+            return web.StreamResponse()
+    
+        client = await aiohttp_client(create_app(('/stream', stream_response)))
+    
+        resp = await client.get('/stream')
+>       assert resp.status == 200
+E       AssertionError: assert 500 == 200
+E        +  where 500 = <ClientResponse(http://127.0.0.1:47681/stream) [500 Internal Server Error]>\n<CIMultiDictProxy('Content-Type': 'text/ht...Length': '141', 'Date': 'Wed, 02 Sep 2026 04:36:58 GMT', 'Server': 'Python/3.7 aiohttp/3.4.4', 'Connection': 'close')>\n.status
+
+tests/test_response_types.py:27: AssertionError
+------------------------------ Captured log call -------------------------------
+web_protocol.py            319 ERROR    Error handling request
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.7/site-packages/aiohttp/web_protocol.py", line 390, in start
+    resp = await self._request_handler(request)
+  File "/usr/local/lib/python3.7/site-packages/aiohttp/web_app.py", line 366, in _handle
+    resp = await handler(request)
+  File "/usr/local/lib/python3.7/site-packages/aiohttp/web_middlewares.py", line 106, in impl
+    return await handler(request)
+  File "/project/aiohttp_session/__init__.py", line 133, in factory
+    response = await handler(request)
+  File "/project/tests/test_response_types.py", line 20, in stream_response
+    session = await get_session(request)
+  File "/project/aiohttp_session/__init__.py", line 97, in get_session
+    session = await storage.load_session(request)
+  File "/project/aiohttp_session/__init__.py", line 250, in load_session
+    return Session(None, data=None, new=True, max_age=self.max_age)
+TypeError: Session() takes no arguments
+_________________________________ test_create __________________________________
+
+    def test_create():
+>       s = Session('test_identity', data=None, new=True)
+E       TypeError: Session() takes no arguments
+
+tests/test_session_dict.py:8: TypeError
+_________________________________ test_create2 _________________________________
+
+    def test_create2():
+        s = Session('test_identity', data={'session': {'some': 'data'}},
+>                   new=False)
+E       TypeError: Session() takes no arguments
+
+tests/test_session_dict.py:18: TypeError
+_________________________________ test_create3 _________________________________
+
+    def test_create3():
+>       s = Session(identity=1, data=None, new=True)
+E       TypeError: Session() takes no arguments
+
+tests/test_session_dict.py:27: TypeError
+___________________________ test_set_new_identity_ok ___________________________
+
+    def test_set_new_identity_ok():
+>       s = Session(identity=1, data=None, new=True)
+E       TypeError: Session() takes no arguments
+
+tests/test_session_dict.py:36: TypeError
+__________________ test_set_new_identity_for_not_new_session ___________________
+
+    def test_set_new_identity_for_not_new_session():
+>       s = Session(identity=1, data=None, new=False)
+E       TypeError: Session() takes no arguments
+
+tests/test_session_dict.py:46: TypeError
+_________________________________ test__repr__ _________________________________
+
+    def test__repr__():
+>       s = Session('test_identity', data=None, new=True)
+E       TypeError: Session() takes no arguments
+
+tests/test_session_dict.py:52: TypeError
+________________________________ test__repr__2 _________________________________
+
+    def test__repr__2():
+        created = int(time.time()) - 1000
+        session_data = {
+            'session': {
+                'key': 123
+            },
+            'created': created
+        }
+>       s = Session('test_identity', data=session_data, new=False)
+E       TypeError: Session() takes no arguments
+
+tests/test_session_dict.py:70: TypeError
+_______________________________ test_invalidate ________________________________
+
+    def test_invalidate():
+        s = Session('test_identity', data={'session': {'foo': 'bar'}},
+>                   new=False)
+E       TypeError: Session() takes no arguments
+
+tests/test_session_dict.py:82: TypeError
+_______________________________ test_invalidate2 _______________________________
+
+    def test_invalidate2():
+        s = Session('test_identity', data={'session': {'foo': 'bar'}},
+>                   new=False)
+E       TypeError: Session() takes no arguments
+
+tests/test_session_dict.py:94: TypeError
+_______________________________ test_operations ________________________________
+
+    def test_operations():
+>       s = Session('test_identity', data=None, new=False)
+E       TypeError: Session() takes no arguments
+
+tests/test_session_dict.py:105: TypeError
+_________________________________ test_change __________________________________
+
+    def test_change():
+        created = int(time.time())
+        s = Session('test_identity', new=False, data={
+            'session': {
+                'a': {'key': 'value'}
+            },
+>           'created': created
+        })
+E       TypeError: Session() takes no arguments
+
+tests/test_session_dict.py:148: TypeError
+============== 40 failed, 9 passed, 26 deselected in 0.75 seconds ==============

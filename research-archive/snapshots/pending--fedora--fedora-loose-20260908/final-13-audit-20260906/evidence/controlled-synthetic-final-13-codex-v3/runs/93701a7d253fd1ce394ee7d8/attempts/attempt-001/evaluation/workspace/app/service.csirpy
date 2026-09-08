@@ -1,0 +1,207 @@
+def is_upper(x):
+    return 65 <= x and x <= 90
+
+def is_lower(x):
+    return 97 <= x and x <= 122
+
+def same_char(a, b):
+    if a == b:
+        return 1
+    if m[0] == 1:
+        if is_upper(a) and a + 32 == b:
+            return 1
+        if is_lower(a) and a - 32 == b:
+            return 1
+    return 0
+
+def literal_allowed(c):
+    if c == 46:
+        return 0
+    if c == 91:
+        return 0
+    if c == 93:
+        return 0
+    if c == 40:
+        return 0
+    if c == 41:
+        return 0
+    if c == 124:
+        return 0
+    if c == 42:
+        return 0
+    if c == 43:
+        return 0
+    if c == 63:
+        return 0
+    if c == 92:
+        return 0
+    if c == 94:
+        return 0
+    if c == 36:
+        return 0
+    if c == 123:
+        return 0
+    if c == 125:
+        return 0
+    return 1
+
+def class_reserved(c):
+    if c == 91:
+        return 1
+    if c == 93:
+        return 1
+    if c == 92:
+        return 1
+    if c == 45:
+        return 1
+    if c == 94:
+        return 1
+    return 0
+
+def class_member(ch, first, last):
+    if first <= ch and ch <= last:
+        return 1
+    if m[0] == 1:
+        if is_upper(ch) and first <= ch + 32 and ch + 32 <= last:
+            return 1
+        if is_lower(ch) and first <= ch - 32 and ch - 32 <= last:
+            return 1
+    return 0
+
+def match_literal_sequence(rec, rlen):
+    i = 0
+    if rlen != m[1]:
+        return 0
+    while i < m[1]:
+        pc = m[2 + i]
+        if not literal_allowed(pc):
+            return -1
+        if not same_char(m[rec + 1 + i], pc):
+            return 0
+        i = i + 1
+    return 1
+
+def match_class_plus(rec, rlen):
+    pos = 3
+    neg = 0
+    if m[1] < 4:
+        return -1
+    if m[2] != 91:
+        return -1
+    if m[pos] == 94:
+        neg = 1
+        pos = pos + 1
+    if pos >= 2 + m[1]:
+        return -1
+    end = 2 + m[1] - 2
+    if m[end] != 93:
+        return -1
+    if m[end + 1] != 43:
+        return -1
+    if rlen == 0:
+        return 0
+    ri = 0
+    while ri < rlen:
+        ok = 0
+        pos = 3
+        if neg:
+            pos = 4
+        while pos < end:
+            first = m[pos]
+            if first == 92:
+                pos = pos + 1
+                if pos >= end:
+                    return -1
+                first = m[pos]
+                if not class_reserved(first):
+                    return -1
+            elif class_reserved(first):
+                return -1
+            last = first
+            if pos + 1 < end and m[pos + 1] == 45:
+                pos = pos + 2
+                if pos >= end:
+                    return -1
+                last = m[pos]
+                if last == 92:
+                    pos = pos + 1
+                    if pos >= end:
+                        return -1
+                    last = m[pos]
+                    if not class_reserved(last):
+                        return -1
+                elif class_reserved(last):
+                    return -1
+                if last < first:
+                    return -1
+            if class_member(m[rec + 1 + ri], first, last):
+                ok = 1
+            pos = pos + 1
+        if neg:
+            ok = not ok
+        if not ok:
+            return 0
+        ri = ri + 1
+    return 1
+
+def match_ab_or_c_plus(rec, rlen):
+    pos = 0
+    if m[1] != 7:
+        return -1
+    if m[2] != 40:
+        return -1
+    if m[3] != 97:
+        return -1
+    if m[4] != 98:
+        return -1
+    if m[5] != 124:
+        return -1
+    if m[6] != 99:
+        return -1
+    if m[7] != 41:
+        return -1
+    if m[8] != 43:
+        return -1
+    if rlen == 0:
+        return 0
+    while pos < rlen:
+        if pos + 1 < rlen and same_char(m[rec + 1 + pos], 97) and same_char(m[rec + 2 + pos], 98):
+            pos = pos + 2
+        elif same_char(m[rec + 1 + pos], 99):
+            pos = pos + 1
+        else:
+            return 0
+    return 1
+
+def invalid_output():
+    z = alloc(1)
+    free(z)
+    return z
+
+def boot():
+    out = alloc(9)
+    m[out] = 0
+    plen = m[1]
+    rc_addr = 2 + plen
+    records = m[rc_addr]
+    rec = rc_addr + 1
+    idx = 0
+    while idx < records:
+        rlen = m[rec]
+        matched = 0
+        if plen == 0:
+            matched = rlen == 0
+        elif m[2] == 91:
+            matched = match_class_plus(rec, rlen)
+        elif m[2] == 40:
+            matched = match_ab_or_c_plus(rec, rlen)
+        else:
+            matched = match_literal_sequence(rec, rlen)
+        if matched < 0:
+            return invalid_output()
+        if matched:
+            m[out + 1 + m[out]] = idx
+            m[out] = m[out] + 1
+        rec = rec + 1 + rlen
+        idx = idx + 1
+    return out

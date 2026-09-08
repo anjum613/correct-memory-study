@@ -1,0 +1,159 @@
+{
+  "audit_id": "source-specification-v0.2-final-preexecution-audit-001",
+  "audit_timestamp_utc": "2026-08-13T02:51:08Z",
+  "audited_commit": "715592b8b96a689f7e532d5ad211bc9b5c7d82c1",
+  "audited_specifications": [
+    {
+      "path": "benchmark-selection/discovery/prospective-v0.2/README.md",
+      "sha256": "532359e15bc814c0edf805401237fbb5551a7973e469a73c5b8c2083044f2fd3"
+    },
+    {
+      "path": "benchmark-selection/discovery/prospective-v0.2/protocol.json",
+      "sha256": "8231a516f751953acb14593a157ecde8428cc012c38f5c8871c3fe1d12b60817"
+    },
+    {
+      "path": "benchmark-selection/discovery/prospective-v0.2/repository-repair-tasks.json",
+      "sha256": "7f251c7b89e7a61cbbfe248ff4843efd7c862eeb5f0e26e82376315a3b505979"
+    },
+    {
+      "path": "benchmark-selection/discovery/prospective-v0.2/security-advisory-repairs.json",
+      "sha256": "fe3c1b62d04dc2687ce619d814667e2daf04525eb80ab1a0f857c71fbe44b32a"
+    },
+    {
+      "path": "benchmark-selection/discovery/prospective-v0.2/source-priority-deduplication.json",
+      "sha256": "50c11a82eeb59ba8b1c2b0e7c371f16a6bf277179c5aa761225a3a10848d268e"
+    },
+    {
+      "path": "benchmark-selection/discovery/prospective-v0.2/source-record.schema.json",
+      "sha256": "1f84985072bc7e090381fb8fe2b2a2885f0442033436cad898d7a7427557d58c"
+    },
+    {
+      "path": "benchmark-selection/discovery/prospective-v0.2/source-rejection-codes.json",
+      "sha256": "de492d323e6a475aec34a7d88687384da663e0ae4090b6dc4ada14db1f10b92a"
+    },
+    {
+      "path": "benchmark-selection/discovery/prospective-v0.2/trust-boundary-issues-prs.json",
+      "sha256": "7ccf92717a470b5a1f234054d9231516f8b16c55908ac678d89886ec5528b388"
+    }
+  ],
+  "checks": [
+    {
+      "check_id": "CANDIDATE_IDENTITY_SEMANTICS",
+      "findings": [
+        "Repository numeric ID plus repair SHA identifies a Git object but not the complete repair range.",
+        "A PR base, an explicit commit parent, or another branch can supply different valid pre-repair snapshots for the same repair SHA.",
+        "One commit fixing multiple issues and multi-fix commits are not identity ambiguities when the candidate unit remains one code-repair episode and all source-task provenance is retained.",
+        "Backports, cherry-picks, and equivalent patches at different SHAs must remain distinct episodes; they may be marked possible duplicates but must not be auto-collapsed."
+      ],
+      "required_amendment": "Include candidate_snapshot_commit_sha in the canonical candidate identity envelope and define task-provenance preservation.",
+      "result": "FAIL"
+    },
+    {
+      "check_id": "GITHUB_1000_RESULT_LIMIT",
+      "findings": [
+        "v0.2 fails closed above 1,000 results but defers date sharding to a later unspecified amendment.",
+        "The frozen created-at range is a non-semantic partition field and supports deterministic UTC-second ranges."
+      ],
+      "required_amendment": "Freeze recursive created-at partitioning, count reconciliation, and atomic-overflow behavior before execution.",
+      "result": "FAIL"
+    },
+    {
+      "check_id": "API_REPRODUCIBILITY",
+      "findings": [
+        "Endpoint, API version, query, page/cursor, sort/order, timestamp, status, selected headers, and response hashes are required by v0.2.",
+        "Deterministic connection/read deadlines, retryable failures, retry delays, redirect limits, and rate-limit exhaustion behavior are absent."
+      ],
+      "required_amendment": "Freeze attempt-level request metadata and bounded timeout/retry/redirect rules.",
+      "result": "FAIL"
+    },
+    {
+      "check_id": "RAW_SOURCE_PRESERVATION",
+      "findings": [
+        "v0.2 requires exact bytes and SHA-256 before normalization.",
+        "It does not fully specify content-addressed placement, no-overwrite behavior, failed-attempt retention, or a manifest schema binding every artifact."
+      ],
+      "required_amendment": "Add a content-addressed raw-artifact layout and immutable capture-manifest schema.",
+      "result": "FAIL"
+    },
+    {
+      "check_id": "REPAIR_ANCHOR_AMBIGUITY",
+      "findings": [
+        "Explicit benchmark and advisory commit anchors are deterministic subject to resolution and ancestry rules.",
+        "GitHub documents that merge_commit_sha denotes a merge commit, squashed commit, or updated base commit depending on merge method.",
+        "v0.2 uses base.sha for every merged PR without resolving multi-commit single-parent squash/rebase ambiguity."
+      ],
+      "required_amendment": "Derive PR snapshots from immutable endpoint topology and fail closed for multi-commit single-parent topology without explicit immutable method evidence.",
+      "result": "FAIL"
+    },
+    {
+      "check_id": "PRE_REPAIR_SNAPSHOT_SEMANTICS",
+      "findings": [
+        "Explicit advisory commits use their sole parent and reject merge-parent ambiguity.",
+        "BugsInPy supplies an explicit buggy snapshot but v0.2 does not require a captured ancestry proof to the fixed commit.",
+        "PR base.sha is not sufficient as the sole topology proof for all merge methods."
+      ],
+      "required_amendment": "Freeze per-anchor snapshot derivation and benchmark ancestry proof requirements.",
+      "result": "FAIL"
+    },
+    {
+      "check_id": "CROSS_SOURCE_PROVENANCE_AND_DEDUPLICATION",
+      "findings": [
+        "v0.2 correctly prohibits missing-value wildcard matches and makes source priority provenance-only.",
+        "It requires all duplicate source provenance to be attached but does not define a deterministic candidate-to-source-record provenance index."
+      ],
+      "required_amendment": "Require an append-only, sorted candidate provenance index while retaining every source record.",
+      "result": "FAIL"
+    },
+    {
+      "check_id": "FAILURE_SEMANTICS",
+      "findings": [
+        "Malformed BugsInPy metadata, malformed or withdrawn advisories, incomplete search results, and missing PR detail already fail closed.",
+        "Deleted or transferred repositories, inaccessible commits, transient API failures, redirects, rate-limit exhaustion, and source schema drift require exact transaction-level dispositions."
+      ],
+      "required_amendment": "Add deterministic failure taxonomy and transaction rollback/no-partial-materialization rules.",
+      "result": "FAIL"
+    },
+    {
+      "check_id": "SCIENTIFIC_SEPARATION",
+      "findings": [
+        "v0.2 defers trust family, p*, triplet, scoring, selection, and experimental status.",
+        "Query trust-family basis is provenance for prospective query design and is not a candidate assignment.",
+        "Model feasibility and security-relevance ranking should be named explicitly as forbidden discovery outputs."
+      ],
+      "required_amendment": "Enumerate every forbidden scientific assignment and prohibit ML or heuristic ranking.",
+      "result": "FAIL"
+    },
+    {
+      "check_id": "FREEZEABILITY",
+      "findings": [
+        "The blocking ambiguities occur before any additional-source execution and can be corrected prospectively without identity-dependent choices."
+      ],
+      "required_amendment": "Freeze and validate additive protocol v0.3 before source execution.",
+      "result": "FAIL"
+    }
+  ],
+  "documentation_consulted": [
+    {
+      "claim": "GitHub REST search exposes at most 1,000 results per search.",
+      "url": "https://docs.github.com/en/rest/search/search?apiVersion=2022-11-28"
+    },
+    {
+      "claim": "GitHub search accepts UTC timestamp ranges for created qualifiers.",
+      "url": "https://docs.github.com/en/search-github/getting-started-with-searching-on-github/understanding-the-search-syntax"
+    },
+    {
+      "claim": "A merged PR's merge_commit_sha meaning varies across merge, squash, and rebase methods.",
+      "url": "https://docs.github.com/en/rest/pulls/pulls?apiVersion=2022-11-28"
+    },
+    {
+      "claim": "Rate-limit responses use Retry-After and X-RateLimit headers and require bounded retry behavior.",
+      "url": "https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api"
+    }
+  ],
+  "experiment_accessed": false,
+  "identity_fetch_performed": false,
+  "real_discovery_source_executed": false,
+  "result": "REQUIRES_PROSPECTIVE_AMENDMENT",
+  "schema": "candidate-source-final-preexecution-audit-v0.2",
+  "treatment_results_consulted": false
+}

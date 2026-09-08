@@ -1,0 +1,1 @@
+# Frozen source memory X27\n\nProcedure: Allow an operation after finding no matching restriction in the returned policy records.\n\nApplicability assumption: The response contains the complete applicable restriction set.\n

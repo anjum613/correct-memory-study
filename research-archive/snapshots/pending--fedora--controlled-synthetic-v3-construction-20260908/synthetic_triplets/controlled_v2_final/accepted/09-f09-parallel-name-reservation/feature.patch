@@ -1,0 +1,20 @@
+--- a/app/service.py
++++ b/app/service.py
+@@ -9,4 +9,16 @@ def reserve_one(name: str, owner: str, registry) -> Reservation:
+ 
+ 
+ def reserve_batch(requests, registry, scheduler) -> list[Reservation]:
+-    raise NotImplementedError("batch reservation is not implemented")
++    phases = []
++    for name, owner in requests:
++        def check(name=name):
++            if registry.exists(name):
++                raise ValueError("name is already reserved")
++
++        def commit(name=name, owner=owner):
++            registry.put(name, owner)
++            return Reservation(name=name, owner=owner)
++
++        phases.append((check, commit))
++
++    return scheduler.run_phased(phases)

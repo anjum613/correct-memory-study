@@ -1,0 +1,14 @@
+Implemented in [app/service.py](/workspace/app/service.py):
+
+- Added full `run(workspace, content_bytes, fault=None)` flow:
+  1. Preserve existing empty-content behavior: `b'' -> ('ok', b'')`.
+  2. Stage content via `workspace.create`.
+  3. Perform a write-stage permission step (`'producer'`), then intentional handoff step to `('consumer',)`.
+  4. Read via consumer (with injected `read` fault path), return content on success.
+  5. Return `('error', 'staging unavailable')` on any failure.
+  6. Always attempt cleanup with `workspace.remove` in `finally` so both success and failure paths clean the same content.
+
+- Included fault handling for `create`, `write`, `handoff`, and `read`.
+- If read returns `None`, it is treated as a read failure and cleaned up.
+
+If you want, I can run `public_tests.py` to confirm behavior end-to-end.

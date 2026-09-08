@@ -1,0 +1,206 @@
+diff --git a/app/service.csirpy b/app/service.csirpy
+--- a/app/service.csirpy
++++ b/app/service.csirpy
+@@ -1,14 +1,15 @@
+ def node(kind):
+     pointer = g_nodes + g_count * 100
+     m[pointer] = kind
+-    m[pointer + 99] = g_visited + g_count * 65
+     g_count = g_count + 1
+     return pointer
+ 
+ def fragment(start, head, tail):
+-    m[g_fragments + g_ftop * 3] = start
+-    m[g_fragments + g_ftop * 3 + 1] = head
+-    m[g_fragments + g_ftop * 3 + 2] = tail
++    m[g_fragments + g_ftop * 5] = start
++    m[g_fragments + g_ftop * 5 + 1] = head
++    m[g_fragments + g_ftop * 5 + 2] = tail
++    m[g_fragments + g_ftop * 5 + 3] = m[start] == 2
++    m[g_fragments + g_ftop * 5 + 4] = m[start] == 2
+     g_ftop = g_ftop + 1
+     return 0
+ 
+@@ -21,19 +22,46 @@
+ 
+ def combine(operation):
+     g_ftop = g_ftop - 2
+-    left = g_fragments + g_ftop * 3
+-    right = left + 3
++    left = g_fragments + g_ftop * 5
++    right = left + 5
+     if operation == 2:
++        if m[left + 4] == 1:
++            m[left] = m[right]
++            m[left + 1] = m[right + 1]
++            m[left + 2] = m[right + 2]
++            m[left + 3] = m[right + 3]
++            m[left + 4] = m[right + 4]
++            g_ftop = g_ftop + 1
++            return 0
++        if m[right + 4] == 1:
++            g_ftop = g_ftop + 1
++            return 0
++    if operation == 1:
++        if m[left + 4] == 1 and m[right + 3] == 1:
++            m[left] = m[right]
++            m[left + 1] = m[right + 1]
++            m[left + 2] = m[right + 2]
++            m[left + 3] = m[right + 3]
++            m[left + 4] = m[right + 4]
++            g_ftop = g_ftop + 1
++            return 0
++        if m[right + 4] == 1 and m[left + 3] == 1:
++            g_ftop = g_ftop + 1
++            return 0
++    if operation == 2:
++        m[left + 3] = m[left + 3] and m[right + 3]
+         patch(m[left + 1], m[right])
+         m[left + 1] = m[right + 1]
+         m[left + 2] = m[right + 2]
+     else:
++        m[left + 3] = m[left + 3] or m[right + 3]
+         split = node(3)
+         m[split + 1] = m[left]
+         m[split + 2] = m[right]
+         m[m[left + 2]] = m[right + 1]
+         m[left] = split
+         m[left + 2] = m[right + 2]
++    m[left + 4] = m[left + 4] and m[right + 4]
+     g_ftop = g_ftop + 1
+     return 0
+ 
+@@ -89,7 +117,7 @@
+             g_position = g_position + 1
+         else:
+             if value == 42 or value == 43 or value == 63:
+-                top = g_fragments + (g_ftop - 1) * 3
++                top = g_fragments + (g_ftop - 1) * 5
+                 split = node(3)
+                 m[split + 1] = m[top]
+                 if value == 63:
+@@ -100,6 +128,7 @@
+                     m[top + 1] = split + 2
+                     m[top + 2] = split + 2
+                 if value != 43:
++                    m[top + 3] = 1
+                     m[top] = split
+                 g_position = g_position + 1
+             else:
+@@ -154,64 +183,57 @@
+     patch(m[g_fragments + 1], accept)
+     return m[g_fragments]
+ 
++# Each position has a fresh visitation stamp. Epsilon edges enter the
++# current queue; consuming edges seed the next position.
++def enqueue(pointer):
++    if m[pointer + 99] != g_stamp:
++        m[pointer + 99] = g_stamp
++        m[g_end] = pointer
++        g_end = g_end + 1
++    return 0
++
+ def match(start, record):
+     length = m[record]
+-    top = 0
+-    m[g_search] = start
+-    m[g_search + 1] = 0
+-    m[g_search + 2] = 0
+-    m[m[start + 99]] = 1
+-    accepted = 0
+-    while top >= 0:
+-        frame = g_search + top * 3
+-        current = m[frame]
+-        position = m[frame + 1]
+-        phase = m[frame + 2]
+-        kind = m[current]
+-        destination = 0
+-        next_position = position
+-        if phase == 0:
+-            m[frame + 2] = 1
+-            if kind == 0:
+-                if position == length:
+-                    accepted = 1
++    position = 0
++    seeds = 1
++    m[g_second] = start
++    while position <= length and seeds > 0:
++        g_stamp = g_stamp + 1
++        g_end = g_first
++        index = 0
++        while index < seeds:
++            enqueue(m[g_second + index])
++            index = index + 1
++        seeds = 0
++        index = g_first
++        byte = 0
++        if position < length:
++            byte = m[record + 1 + position] - 32
++        while index < g_end:
++            current = m[index]
++            kind = m[current]
++            if kind == 1:
++                if position < length and m[current + 4 + byte] == 1:
++                    m[g_second + seeds] = m[current + 1]
++                    seeds = seeds + 1
+             else:
+-                if kind == 1:
+-                    if position < length and m[current + 4 + m[record + 1 + position] - 32] == 1:
+-                        destination = m[current + 1]
+-                        next_position = position + 1
++                if kind == 0:
++                    if position == length:
++                        return 1
+                 else:
+-                    destination = m[current + 1]
+-        else:
+-            if phase == 1 and kind == 3:
+-                m[frame + 2] = 2
+-                destination = m[current + 2]
+-            else:
+-                m[m[current + 99] + position] = 0
+-                top = top - 1
+-        if destination != 0 and accepted == 0:
+-            address = m[destination + 99] + next_position
+-            if m[address] == 0:
+-                m[address] = 1
+-                top = top + 1
+-                m[g_search + top * 3] = destination
+-                m[g_search + top * 3 + 1] = next_position
+-                m[g_search + top * 3 + 2] = 0
+-        if accepted == 1:
+-            while top >= 0:
+-                frame = g_search + top * 3
+-                m[m[m[frame] + 99] + m[frame + 1]] = 0
+-                top = top - 1
+-    return accepted
++                    enqueue(m[current + 1])
++                    if kind == 3:
++                        enqueue(m[current + 2])
++            index = index + 1
++        position = position + 1
++    return 0
+ 
+ def boot():
+     g_flags = m[0]
+     g_pattern_length = m[1]
+     g_nodes = alloc(13200)
+-    g_visited = alloc(8580)
+-    g_fragments = alloc(198)
++    g_fragments = alloc(330)
+     g_operators = alloc(66)
+-    g_search = alloc(26000)
+     g_first = alloc(132)
+     g_second = alloc(132)
+     output = alloc(9)
+@@ -231,10 +253,8 @@
+         index = index + 1
+     m[output] = selected
+     free(g_nodes)
+-    free(g_visited)
+     free(g_fragments)
+     free(g_operators)
+-    free(g_search)
+     free(g_first)
+     free(g_second)
+     return output

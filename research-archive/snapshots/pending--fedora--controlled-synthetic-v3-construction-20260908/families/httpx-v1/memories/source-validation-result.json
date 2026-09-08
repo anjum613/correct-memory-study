@@ -1,0 +1,59 @@
+{
+  "commands": [
+    {
+      "argv": [
+        "/opt/miniconda3/bin/python",
+        "-c",
+        "import ast, json, pathlib\nroot = pathlib.Path(\".\")\nfiles = sorted(root.rglob(\"*.py\"))\nfor path in files:\n    ast.parse(path.read_text(encoding=\"utf-8\"), filename=path.as_posix())\nmodels = ast.parse((root / \"httpx/models.py\").read_text(encoding=\"utf-8\"))\nurl_class = next(node for node in models.body if isinstance(node, ast.ClassDef) and node.name == \"URL\")\nmethods = {node.name for node in url_class.body if isinstance(node, ast.FunctionDef)}\nexports = (root / \"httpx/__init__.py\").read_text(encoding=\"utf-8\")\nassert {\"__init__\", \"copy_with\"} <= methods\nassert \"from .models import (\" in exports and \"    URL,\" in exports\nprint(json.dumps({\"public_url_export_found\": True, \"python_files_parsed\": len(files), \"url_methods_found\": sorted({\"__init__\", \"copy_with\"} & methods)}, sort_keys=True))"
+      ],
+      "cwd": "families/httpx-v1/repositories/source",
+      "exit_code": 0,
+      "kind": "SOURCE_ONLY_STATIC_PUBLIC_URL_AND_SYNTAX_VALIDATION",
+      "stderr": "",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout": "{\"public_url_export_found\": true, \"python_files_parsed\": 81, \"url_methods_found\": [\"__init__\", \"copy_with\"]}\n",
+      "stdout_sha256": "a17e225567a9b5ab0fe8e066321154f1a58213d1798060fe724377a9b63f9a93"
+    }
+  ],
+  "environment": {
+    "LANG": "C.UTF-8",
+    "LC_ALL": "C.UTF-8",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTHONHASHSEED": "0",
+    "PYTHONNOUSERSITE": "1",
+    "python": "/opt/miniconda3/bin/python",
+    "python_version": "3.12.8"
+  },
+  "schema": "cmpilot-source-visible-validation-v1",
+  "source_repository_sha256": "a34e7849a0983a005700af0379964b1aa85be5483ed9cb2487c7ee9ac2d2073f",
+  "source_revision": "e6da325e8be4a7194571adea67053446c75d9aa3",
+  "summary": {
+    "failed": 0,
+    "passed": 1,
+    "skipped": 1,
+    "status": "PASS"
+  },
+  "unavailable_commands": [
+    {
+      "argv": [
+        "/opt/miniconda3/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "-p",
+        "no:cacheprovider"
+      ],
+      "cwd": "families/httpx-v1/repositories/source",
+      "exit_code": 1,
+      "missing_source_dependencies": [
+        "pytest"
+      ],
+      "reason": "The unmodified source-visible pytest suite could not be collected because the isolated qualified interpreter does not provide pytest. No dependency was downloaded and no compatibility overlay was introduced.",
+      "status": "TECHNICALLY_UNAVAILABLE_NOT_SCIENTIFIC_FAILURE",
+      "stderr": "/opt/miniconda3/bin/python: No module named pytest\n",
+      "stderr_sha256": "e650ea9062f42697aaa5631ee811f870efdb401db7b8faab2edea6b6619c4c97",
+      "stdout": "",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ]
+}

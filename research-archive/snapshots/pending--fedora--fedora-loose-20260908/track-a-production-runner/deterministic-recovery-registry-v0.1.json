@@ -1,0 +1,58 @@
+{
+  "schema": "track-a-deterministic-recovery-registry-v0.1",
+  "version": "v0.1",
+  "unknown_recovery_policy": "BLOCKER",
+  "dynamic_self_modifying_repair": false,
+  "recoveries": [
+    {
+      "id": "CURRENT_POSITION_MATERIALIZATION",
+      "trigger_state": ["PRE_POSITION", "POSITION_MATERIALIZATION_REQUIRED", "DETERMINISTIC_INTERFACE_CORRECTION_REQUIRED"],
+      "required_validated_inputs": ["replayed ledger", "next_due_position", "sealed queue and manifest", "production authorization", "frozen discovery provenance", "exact immutable source commits", "optional exact known blocker"],
+      "operation": "scripts/materialize_candidate_screening_position_v020.py --expected-position N",
+      "allowed_outputs": ["positions/N/position-authorization.json", "positions/N/candidate-manifest.json", "positions/N/position-materialization-recovery.json when blocker exists"],
+      "scientific_invariants_unchanged": ["candidate ordering", "candidate universe", "screening semantics", "administrative rules", "TPTM", "review authority", "stopping rule"],
+      "success_state": "TPTM_REQUIRED",
+      "failure_state": "BLOCKER"
+    },
+    {
+      "id": "FROZEN_DISCOVERY_ARTIFACT_PROVISIONING",
+      "trigger_state": ["DISCOVERY_ARTIFACT_PROVISIONING_REQUIRED"],
+      "required_validated_inputs": ["frozen source and destination manifests", "source checkout identity", "copy-only provisioning amendment", "discovery-recovery-plan-v0.1.json", "historical provisioning evidence hashes"],
+      "operation": "validate discovery-recovery-plan-v0.1.json then run scripts/provision_frozen_discovery_artifacts.py verify or provision for each exact registered transaction",
+      "allowed_outputs": ["independent opaque discovery copy", "provisioning provenance", "session provenance"],
+      "scientific_invariants_unchanged": ["source bytes", "candidate identities", "queue order", "no candidate interpretation"],
+      "success_state": "POSITION_MATERIALIZATION_REQUIRED",
+      "failure_state": "BLOCKER"
+    },
+    {
+      "id": "REVIEWER_B_ASSIGNMENT_COMPLETION",
+      "trigger_state": ["AI_SECOND_ASSIGNMENT_CORRECTION_REQUIRED", "REVIEWER_B_ASSIGNMENT_COMPLETION_REQUIRED"],
+      "required_validated_inputs": ["valid AI-A assignment", "valid AI-A decision", "frozen B trigger", "incomplete base B assignment", "no B decision"],
+      "operation": "append a numbered B assignment with mechanically copied evidence/interface hashes and unchanged blinded boundary",
+      "allowed_outputs": ["positions/N/ai-reviewer-b-assignment-NNNN.json"],
+      "scientific_invariants_unchanged": ["A semantics not exposed", "B authority", "review questions", "evidence boundary", "disagreement policy"],
+      "success_state": "AI_SECOND_REVIEW_REQUIRED",
+      "failure_state": "BLOCKER"
+    },
+    {
+      "id": "INTERRUPTED_TERMINAL_PUBLICATION_RECONCILIATION",
+      "trigger_state": ["PARTIAL_PUBLICATION_RECONCILIATION"],
+      "required_validated_inputs": ["prior replayed ledger", "exact current terminal record", "valid previous_record_sha256", "record stopping state"],
+      "operation": "mechanically construct/validate the sole N to N+1 ledger document and commit exact publication files",
+      "allowed_outputs": ["records/N.json unchanged", "ledger.json", "ledger.json.sha256", "one publication commit"],
+      "scientific_invariants_unchanged": ["terminal outcome", "record semantic hash", "ledger transition", "stopping rule"],
+      "success_state": "TERMINAL_PUBLISHED",
+      "failure_state": "BLOCKER"
+    },
+    {
+      "id": "VALID_DESCENDANT_HEAD_RECONCILIATION",
+      "trigger_state": ["VALID_DESCENDANT_HEAD_RECONCILIATION"],
+      "required_validated_inputs": ["external expected HEAD", "actual HEAD", "ancestor proof", "current-position-only changed paths", "valid ledger replay", "known durable state"],
+      "operation": "atomically replace external expected_head with actual validated descendant",
+      "allowed_outputs": ["external runner-state.json"],
+      "scientific_invariants_unchanged": ["repository bytes", "records", "ledger", "queue", "role boundaries"],
+      "success_state": "CLASSIFY_FROM_DURABLE_STATE",
+      "failure_state": "BLOCKER"
+    }
+  ]
+}

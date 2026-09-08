@@ -1,0 +1,47 @@
+"""Diagnostic record logger."""
+from __future__ import annotations
+
+import json
+
+from fixture_api import contracts as r
+
+
+_PUBLIC_FIELDS = ("correlation", "message", "code", "children", "error")
+
+
+def _valid_correlation(value):
+    return value is None or type(value) in (str, int, float, bool)
+
+
+def _sanitize_record(diagnostic_record, depth):
+    if type(diagnostic_record) is not dict:
+        return {}
+
+    output = {}
+    for field in _PUBLIC_FIELDS:
+        if field not in diagnostic_record:
+            continue
+        value = diagnostic_record[field]
+        if field == "correlation":
+            output[field] = value if _valid_correlation(value) else None
+        elif field == "children":
+            if type(value) is list and depth < r.X06_MAX_DEPTH:
+                output[field] = [
+                    _sanitize_record(child, depth + 1)
+                    for child in value[: r.X06_MAX_CHILDREN]
+                    if type(child) is dict
+                ]
+            else:
+                output[field] = value
+        else:
+            output[field] = value
+    return output
+
+
+def run(diagnostic_record, sink):
+    record = _sanitize_record(diagnostic_record, 1)
+    try:
+        sink.write(json.dumps(record))
+    except Exception:
+        return "log-error"
+    return "logged"

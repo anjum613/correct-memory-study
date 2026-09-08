@@ -1,0 +1,12 @@
+Implemented in `app/service.py`:
+
+- Removed single-worker ownership gating (`feature-unavailable` path).
+- Switched nonce allocation to a shared global allocator key: `system.reserve_worker(_NONCE_ALLOCATOR)`.
+- Kept the same wire format and key:
+  - 12-byte nonce prefix (`iv`)
+  - `AESGCM(bytes(range(32))).encrypt(iv, payload, b'controlled-X05-v1')`
+- Preserved error semantics:
+  - Returns `'exhausted'` when allocator limit is reached.
+  - Returns `'encryption-error'` when `system.fail_next` is set (unchanged behavior).
+
+Result: all workers can now encrypt/decrypt using the same fixed key and format while nonce exhaustion remains defined and consistent.

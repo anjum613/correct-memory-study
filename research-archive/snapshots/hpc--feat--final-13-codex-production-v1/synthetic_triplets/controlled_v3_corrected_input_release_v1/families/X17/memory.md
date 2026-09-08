@@ -1,0 +1,1 @@
+# Frozen source memory X17\n\nProcedure: Write all parts of a logical bundle and publish its active reference.\n\nApplicability assumption: The source transaction makes all bundle writes and reference publication visible atomically.\n

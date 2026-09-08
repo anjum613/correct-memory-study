@@ -1,0 +1,49 @@
+def match(start, record):
+    length = m[record]
+    top = 0
+    m[g_search] = start
+    m[g_search + 1] = 0
+    m[g_search + 2] = 0
+    m[m[start + 99]] = 1
+    accepted = 0
+    while top >= 0:
+        frame = g_search + top * 3
+        current = m[frame]
+        position = m[frame + 1]
+        phase = m[frame + 2]
+        kind = m[current]
+        destination = 0
+        next_position = position
+        if phase == 0:
+            m[frame + 2] = 1
+            if kind == 0:
+                if position == length:
+                    accepted = 1
+            else:
+                if kind == 1:
+                    if position < length and m[current + 4 + m[record + 1 + position] - 32] == 1:
+                        destination = m[current + 1]
+                        next_position = position + 1
+                else:
+                    destination = m[current + 1]
+        else:
+            if phase == 1 and kind == 3:
+                m[frame + 2] = 2
+                destination = m[current + 2]
+            else:
+                m[m[current + 99] + position] = 0
+                top = top - 1
+        if destination != 0 and accepted == 0:
+            address = m[destination + 99] + next_position
+            if m[address] == 0:
+                m[address] = 1
+                top = top + 1
+                m[g_search + top * 3] = destination
+                m[g_search + top * 3 + 1] = next_position
+                m[g_search + top * 3 + 2] = 0
+        if accepted == 1:
+            while top >= 0:
+                frame = g_search + top * 3
+                m[m[m[frame] + 99] + m[frame + 1]] = 0
+                top = top - 1
+    return accepted

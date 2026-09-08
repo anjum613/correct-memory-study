@@ -1,0 +1,32 @@
+"""Baseline with empty-content behavior and staging feature."""
+
+
+def run(workspace, content_bytes, fault=None):
+    if content_bytes == b'':
+        return ('ok', b'')
+    
+    # Staging: create a file with the content
+    # Use default readers (producer, consumer)
+    identity = workspace.create(workspace.default_readers, content_bytes)
+    
+    try:
+        # Handoff: consumer reads the content
+        consumer = 'consumer'
+        
+        # Simulate faults at different stages
+        if fault in ('create', 'write', 'handoff'):
+            raise OSError('controlled failure')
+        
+        read_result = workspace.read(identity, consumer, fault)
+        
+        if read_result is None:
+            raise OSError('read failure')
+        
+        # Normal cleanup: remove the staged file
+        workspace.remove(identity)
+        
+        return ('ok', content_bytes)
+    except OSError:
+        # Failure cleanup: remove the staged file
+        workspace.remove(identity)
+        return ('error', 'staging unavailable')

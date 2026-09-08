@@ -1,0 +1,12 @@
+Implemented in [`/workspace/app/service.py`]( /workspace/app/service.py):
+
+- Kept the existing empty-content behavior: `b''` returns `('ok', b'')` with no staging side effects.
+- Added staging flow for non-empty content:
+  1. Create a staging object with inherited `workspace.default_readers`.
+  2. Hand it off explicitly to `consumer` via `permissions`.
+  3. Read back as `consumer` (with read-fault propagation through the existing `fault` path).
+  4. Return `('ok', content)` on success.
+- Added failure handling for `create`, `handoff`, `write`, and `read`-style fault modes using the tuple contract, returning `('error', 'staging unavailable')`.
+- Ensured cleanup in all paths via `finally` to remove the staging file after use (normal and failure paths).  
+
+If you want, I can also run `public_tests.py` next to confirm it passes end-to-end.

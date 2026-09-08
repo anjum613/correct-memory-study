@@ -1,0 +1,328 @@
+--- a/app/service.csirpy
++++ b/app/service.csirpy
+@@ -1,4 +1,322 @@
++def bad():
++    out = alloc(1)
++    m[out] = 9
++    return out
++
++def new_state():
++    g_state = g_state + 1
++    if g_state >= 320:
++        return bad()
++    m[g_eps1 + g_state] = 0
++    m[g_eps2 + g_state] = 0
++    m[g_cls + g_state] = 0
++    m[g_dst + g_state] = 0
++    return g_state
++
++def is_letter(c):
++    return (65 <= c and c <= 90) or (97 <= c and c <= 122)
++
++def mate(c):
++    if 65 <= c and c <= 90:
++        return c + 32
++    if 97 <= c and c <= 122:
++        return c - 32
++    return c
++
++def is_reserved(c):
++    return c == 46 or c == 91 or c == 93 or c == 40 or c == 41 or c == 124 or c == 42 or c == 43 or c == 63 or c == 92 or c == 94 or c == 36 or c == 123 or c == 125
++
++def is_class_reserved(c):
++    return c == 91 or c == 93 or c == 92 or c == 45 or c == 94
++
++def pat_at(pos):
++    return m[2 + pos]
++
++def make_empty():
++    s = new_state()
++    e = new_state()
++    m[g_eps1 + s] = e
++    g_rs = s
++    g_re = e
++    return 0
++
++def make_char(cls):
++    s = new_state()
++    e = new_state()
++    m[g_cls + s] = cls
++    m[g_dst + s] = e
++    g_rs = s
++    g_re = e
++    return 0
++
++def new_class():
++    g_class = g_class + 1
++    if g_class >= 80:
++        return bad()
++    i = 0
++    while i < 95:
++        m[g_classmem + ((g_class - 1) * 95) + i] = 0
++        i = i + 1
++    return g_class
++
++def add_member(cls, c):
++    m[g_classmem + ((cls - 1) * 95) + (c - 32)] = 1
++    if m[0] == 1 and is_letter(c):
++        m[g_classmem + ((cls - 1) * 95) + (mate(c) - 32)] = 1
++    return 0
++
++def parse_literal(in_class):
++    if g_pos >= g_plen:
++        g_bad = 1
++        return 0
++    c = pat_at(g_pos)
++    g_pos = g_pos + 1
++    if c == 92:
++        if g_pos >= g_plen:
++            g_bad = 1
++            return 0
++        c = pat_at(g_pos)
++        if in_class:
++            if not is_class_reserved(c):
++                g_bad = 1
++                return 0
++        else:
++            if not is_reserved(c):
++                g_bad = 1
++                return 0
++        g_pos = g_pos + 1
++        return c
++    if in_class:
++        if is_class_reserved(c):
++            g_bad = 1
++            return 0
++    else:
++        if is_reserved(c):
++            g_bad = 1
++            return 0
++    return c
++
++def parse_class():
++    cls = new_class()
++    g_pos = g_pos + 1
++    comp = 0
++    if g_pos < g_plen and pat_at(g_pos) == 94:
++        comp = 1
++        g_pos = g_pos + 1
++    any = 0
++    while g_pos < g_plen and pat_at(g_pos) != 93 and g_bad == 0:
++        first = parse_literal(1)
++        if g_bad == 0:
++            if g_pos < g_plen and pat_at(g_pos) == 45:
++                g_pos = g_pos + 1
++                last = parse_literal(1)
++                if g_bad == 0:
++                    if last < first:
++                        g_bad = 1
++                    c = first
++                    while c <= last and g_bad == 0:
++                        add_member(cls, c)
++                        c = c + 1
++            else:
++                add_member(cls, first)
++            any = 1
++    if any == 0 or g_pos >= g_plen or pat_at(g_pos) != 93:
++        g_bad = 1
++        return 0
++    g_pos = g_pos + 1
++    if comp:
++        i = 0
++        while i < 95:
++            a = g_classmem + ((cls - 1) * 95) + i
++            m[a] = not m[a]
++            i = i + 1
++    make_char(cls)
++    return 0
++
++def parse_atom():
++    if g_pos >= g_plen:
++        g_bad = 1
++        return 0
++    c = pat_at(g_pos)
++    if c == 40:
++        g_pos = g_pos + 1
++        parse_expr()
++        if g_bad == 0:
++            if g_pos >= g_plen or pat_at(g_pos) != 41:
++                g_bad = 1
++            else:
++                g_pos = g_pos + 1
++        return 0
++    if c == 46:
++        cls = new_class()
++        i = 0
++        while i < 95:
++            m[g_classmem + ((cls - 1) * 95) + i] = 1
++            i = i + 1
++        g_pos = g_pos + 1
++        make_char(cls)
++        return 0
++    if c == 91:
++        parse_class()
++        return 0
++    cls = new_class()
++    lit = parse_literal(0)
++    if g_bad == 0:
++        add_member(cls, lit)
++        make_char(cls)
++    return 0
++
++def parse_rep():
++    parse_atom()
++    if g_bad:
++        return 0
++    if g_pos < g_plen:
++        op = pat_at(g_pos)
++        if op == 42 or op == 43 or op == 63:
++            old_s = g_rs
++            old_e = g_re
++            s = new_state()
++            e = new_state()
++            if op == 42:
++                m[g_eps1 + s] = old_s
++                m[g_eps2 + s] = e
++                m[g_eps1 + old_e] = old_s
++                m[g_eps2 + old_e] = e
++            if op == 43:
++                m[g_eps1 + s] = old_s
++                m[g_eps1 + old_e] = old_s
++                m[g_eps2 + old_e] = e
++            if op == 63:
++                m[g_eps1 + s] = old_s
++                m[g_eps2 + s] = e
++                m[g_eps1 + old_e] = e
++            g_rs = s
++            g_re = e
++            g_pos = g_pos + 1
++            if g_pos < g_plen:
++                nxt = pat_at(g_pos)
++                if nxt == 42 or nxt == 43 or nxt == 63:
++                    g_bad = 1
++    return 0
++
++def parse_seq():
++    first = 1
++    if g_pos >= g_plen or pat_at(g_pos) == 41 or pat_at(g_pos) == 124:
++        make_empty()
++        return 0
++    while g_pos < g_plen and pat_at(g_pos) != 41 and pat_at(g_pos) != 124 and g_bad == 0:
++        if first:
++            parse_rep()
++            first = 0
++        else:
++            left_s = g_rs
++            left_e = g_re
++            parse_rep()
++            m[g_eps1 + left_e] = g_rs
++            g_rs = left_s
++    return 0
++
++def parse_expr():
++    parse_seq()
++    while g_pos < g_plen and pat_at(g_pos) == 124 and g_bad == 0:
++        left_s = g_rs
++        left_e = g_re
++        g_pos = g_pos + 1
++        parse_seq()
++        right_s = g_rs
++        right_e = g_re
++        s = new_state()
++        e = new_state()
++        m[g_eps1 + s] = left_s
++        m[g_eps2 + s] = right_s
++        m[g_eps1 + left_e] = e
++        m[g_eps1 + right_e] = e
++        g_rs = s
++        g_re = e
++    return 0
++
++def clear_marks(base):
++    i = 1
++    while i <= g_state:
++        m[base + i] = 0
++        i = i + 1
++    return 0
++
++def close(base):
++    changed = 1
++    while changed:
++        changed = 0
++        i = 1
++        while i <= g_state:
++            if m[base + i]:
++                e = m[g_eps1 + i]
++                if e != 0 and not m[base + e]:
++                    m[base + e] = 1
++                    changed = 1
++                e = m[g_eps2 + i]
++                if e != 0 and not m[base + e]:
++                    m[base + e] = 1
++                    changed = 1
++            i = i + 1
++    return 0
++
++def has_char(cls, c):
++    return m[g_classmem + ((cls - 1) * 95) + (c - 32)]
++
++def matches_record(rbase, rlen):
++    clear_marks(g_cur)
++    m[g_cur + g_start] = 1
++    close(g_cur)
++    pos = 0
++    while pos < rlen:
++        c = m[rbase + pos]
++        clear_marks(g_next)
++        i = 1
++        while i <= g_state:
++            if m[g_cur + i]:
++                cls = m[g_cls + i]
++                if cls != 0:
++                    if has_char(cls, c):
++                        m[g_next + m[g_dst + i]] = 1
++            i = i + 1
++        close(g_next)
++        tmp = g_cur
++        g_cur = g_next
++        g_next = tmp
++        pos = pos + 1
++    return m[g_cur + g_accept]
++
+ def boot():
+-    output = alloc(1)
+-    m[output] = 0
+-    return output
++    g_plen = m[1]
++    g_pos = 0
++    g_bad = 0
++    g_state = 0
++    g_class = 0
++    g_eps1 = alloc(320)
++    g_eps2 = alloc(320)
++    g_cls = alloc(320)
++    g_dst = alloc(320)
++    g_classmem = alloc(80 * 95)
++    g_cur = alloc(320)
++    g_next = alloc(320)
++    parse_expr()
++    if g_bad or g_pos != g_plen:
++        return bad()
++    g_start = g_rs
++    g_accept = g_re
++    rcount_addr = 2 + g_plen
++    rcount = m[rcount_addr]
++    out = alloc(9)
++    m[out] = 0
++    rec = 0
++    ptr = rcount_addr + 1
++    while rec < rcount:
++        rlen = m[ptr]
++        rbase = ptr + 1
++        if matches_record(rbase, rlen):
++            n = m[out]
++            m[out + 1 + n] = rec
++            m[out] = n + 1
++        ptr = ptr + 1 + rlen
++        rec = rec + 1
++    return out

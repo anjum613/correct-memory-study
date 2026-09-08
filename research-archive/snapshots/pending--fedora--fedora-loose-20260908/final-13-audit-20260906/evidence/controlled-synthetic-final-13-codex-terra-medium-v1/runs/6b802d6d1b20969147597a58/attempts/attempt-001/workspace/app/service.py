@@ -1,0 +1,39 @@
+"""Stage content, hand it to the consumer, and always clean it up."""
+
+
+def run(workspace, content_bytes, fault=None):
+    """Deliver *content_bytes* through a short-lived producer staging file.
+
+    The file is deliberately created for the producer first; it is made
+    available to the consumer only after staging is complete.  Once an item
+    has been created, the ``finally`` block owns its removal, including on a
+    controlled or workspace failure.
+    """
+    identity = None
+    try:
+        if fault == 'create':
+            raise OSError('controlled create failure')
+
+        identity = workspace.create(('producer',), content_bytes)
+
+        if fault == 'write':
+            raise OSError('controlled write failure')
+
+        if fault == 'handoff':
+            raise OSError('controlled handoff failure')
+
+        workspace.permissions(identity, ('consumer',))
+        content = workspace.read(identity, 'consumer', fault=fault)
+        if content is None:
+            raise OSError('consumer cannot read staged content')
+        return ('ok', content)
+    except Exception as error:
+        return ('error', str(error))
+    finally:
+        if identity is not None:
+            try:
+                workspace.remove(identity)
+            except Exception:
+                # The operation's primary result must not be replaced by a
+                # cleanup failure; normal fixture implementations remove it.
+                pass

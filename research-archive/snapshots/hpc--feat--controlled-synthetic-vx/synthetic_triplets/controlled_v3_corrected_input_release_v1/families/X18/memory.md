@@ -1,0 +1,1 @@
+# Frozen source memory X18\n\nProcedure: Install the valid signed release returned by the configured update source.\n\nApplicability assumption: The source returns a release no older than the locally committed security version.\n

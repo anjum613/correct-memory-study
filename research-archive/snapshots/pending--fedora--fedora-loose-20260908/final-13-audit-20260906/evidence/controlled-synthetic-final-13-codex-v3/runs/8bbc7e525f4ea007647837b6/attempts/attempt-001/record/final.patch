@@ -1,0 +1,37 @@
+--- a/app/service.py
++++ b/app/service.py
+@@ -1,7 +1,32 @@
+-"""Baseline with empty-content behavior and no staging feature."""
++"""Stage content, hand it to the consumer, and clean up the staging file."""
+ 
+ 
+ def run(workspace, content_bytes, fault=None):
+     if content_bytes == b'':
+         return ('ok', b'')
+-    return ('error', 'staging unavailable')
++
++    identity = None
++    try:
++        if fault == 'create':
++            raise OSError('controlled create failure')
++
++        # The staging file deliberately starts with the workspace's inherited
++        # default permissions.  The content is written as part of creation by
++        # the fixture's staging API.
++        identity = workspace.create(workspace.default_readers, content_bytes)
++
++        if fault == 'write':
++            raise OSError('controlled write failure')
++        if fault == 'handoff':
++            raise OSError('controlled handoff failure')
++
++        # Handoff is explicit: after staging, only the designated consumer is
++        # retained as a reader.
++        workspace.permissions(identity, {'consumer'})
++        result = workspace.read(identity, 'consumer', fault=fault)
++        return ('ok', result)
++    except BaseException as error:
++        return ('error', str(error))
++    finally:
++        if identity is not None:
++            workspace.remove(identity)

@@ -1,0 +1,1 @@
+# Frozen source memory X01\n\nProcedure: Open and replace a named report after checking the destination object's attributes.\n\nApplicability assumption: The checked directory entry continues to denote the same filesystem object until replacement finishes.\n

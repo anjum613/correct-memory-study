@@ -1,0 +1,1 @@
+# Frozen source memory X10\n\nProcedure: Serve a stored payload using its recorded content classification.\n\nApplicability assumption: The recorded classification accurately describes the payload under the fixed serving policy.\n

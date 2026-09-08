@@ -1,0 +1,66 @@
+diff --git a/app/service.py b/app/service.py
+--- a/app/service.py
++++ b/app/service.py
+@@ -1,2 +1,60 @@
+-"""Executable canonical S for X09; source-valid context only."""
+-from synthetic_triplets.controlled_v3_executable_oracle_release_v1.agent_inputs.shared.agent_runtime import x09_source as run
++"""Apply authenticated operations once within the store's retention horizon.
++
++An acknowledgment is ('ack', operation_id, committed effect ordinal).
++Retries return that original acknowledgment. Reusing an ID with a different
++meaning is an error, including when the original acknowledgment was lost.
++Receipts belong to the store, so replacing this service does not erase them.
++"""
++
++from copy import deepcopy
++
++
++def _retry(receipt, meaning):
++    original, acknowledgment = receipt
++    if original != meaning:
++        raise ValueError("operation identity already bound to another meaning")
++    return acknowledgment
++
++
++def run(operation_store, operation_id, meaning, fault=None):
++    # Snapshot before calling user-controlled hooks: caller mutation must not
++    # alter the authorized meaning retained by either the effect or receipt.
++    snapshot = deepcopy(meaning)
++    receipts = operation_store.receipts
++    if operation_id in receipts:
++        return _retry(receipts[operation_id], snapshot)
++
++    if fault == "before_commit":
++        raise RuntimeError("failure before commit")
++
++    hook = operation_store.before_commit
++    if hook is not None:
++        operation_store.before_commit = None
++        hook()
++
++    effect = (operation_id, deepcopy(snapshot))
++    # Keep coordination on the store so separately loaded service instances
++    # serialize their commits too. Dictionary setdefault is atomic in the
++    # public Python runtime. Hooks run outside this short critical section.
++    gate = operation_store.__dict__.setdefault("_x09_commit_gate", {})
++    token = object()
++    while gate.setdefault("owner", token) is not token:
++        pass
++    try:
++        if operation_id in receipts:
++            return _retry(receipts[operation_id], snapshot)
++        acknowledgment = ("ack", operation_id, len(operation_store.effects) + 1)
++        proposed = (snapshot, acknowledgment)
++        operation_store.effects.append(effect)
++        try:
++            receipts[operation_id] = proposed
++        except BaseException:
++            operation_store.effects.pop()
++            raise
++    finally:
++        del gate["owner"]
++
++    # A simulated lost acknowledgment must leave a complete committed receipt.
++    if fault in ("after_effect", "after_commit", "before_ack", "after_receipt"):
++        raise RuntimeError("acknowledgment lost after commit")
++    return acknowledgment

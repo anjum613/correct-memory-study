@@ -1,0 +1,39 @@
+"""Operations for making independently versioned decisions."""
+
+import copy
+
+
+def run(decision_store, operation, value):
+    if operation == 'read':
+        return copy.deepcopy(decision_store.rows[value])
+    if operation == 'prepare':
+        group, actor = value
+
+        # A decision is only possible while this actor is active and another
+        # actor in its group remains active.  The revision is the dependency
+        # of the decision: changing another group must not invalidate it.
+        row = decision_store.rows.get(group)
+        if row is None or actor not in row or not row[actor]:
+            return None
+        if not any(active for other, active in row.items() if other != actor):
+            return None
+        return (group, actor, decision_store.revisions[group])
+    if operation == 'commit':
+        # Prepared decisions carry the version that was observed.  Reject a
+        # stale decision rather than overwriting a concurrent update to the
+        # same record; decisions for other records can proceed independently.
+        if not isinstance(value, tuple) or len(value) != 3:
+            return 'conflict'
+        group, actor, revision = value
+        row = decision_store.rows.get(group)
+        if (
+            row is None
+            or actor not in row
+            or decision_store.revisions.get(group) != revision
+            or not row[actor]
+            or not any(active for other, active in row.items() if other != actor)
+        ):
+            return 'conflict'
+        decision_store.commit(group, actor)
+        return 'committed'
+    raise ValueError(operation)

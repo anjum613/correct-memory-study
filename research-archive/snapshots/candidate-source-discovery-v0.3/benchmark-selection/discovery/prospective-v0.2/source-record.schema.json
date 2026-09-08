@@ -1,0 +1,135 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/correct-memory-study/candidate-source-record-v0.2.schema.json",
+  "title": "Candidate source record v0.2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "protocol_version",
+    "source_record_id",
+    "source_id",
+    "source_revision",
+    "source_native_identity",
+    "raw_artifact",
+    "disposition",
+    "rejection_reason_codes",
+    "candidate_links",
+    "experiment_accessed",
+    "treatment_results_consulted"
+  ],
+  "properties": {
+    "schema": {"const": "candidate-source-record-v0.2"},
+    "protocol_version": {"const": "benchmark-selection-source-v0.2"},
+    "source_record_id": {
+      "type": "string",
+      "pattern": "^CMVP-SRC-02-[0-9a-f]{64}$"
+    },
+    "source_id": {"type": "string", "minLength": 1},
+    "source_revision": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "value"],
+          "properties": {
+            "kind": {"const": "GIT_COMMIT"},
+            "value": {"$ref": "#/$defs/sha1"}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "value"],
+          "properties": {
+            "kind": {"const": "VERSIONED_API_CAPTURE"},
+            "value": {"$ref": "#/$defs/sha256"}
+          }
+        }
+      ]
+    },
+    "source_native_identity": {
+      "type": "object",
+      "minProperties": 1
+    },
+    "raw_artifact": {"$ref": "#/$defs/raw_artifact"},
+    "disposition": {"enum": ["MATERIALIZED", "SOURCE_REJECTED"]},
+    "rejection_reason_codes": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "candidate_links": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/candidate_link"}
+    },
+    "experiment_accessed": {"const": false},
+    "treatment_results_consulted": {"const": false}
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {"disposition": {"const": "MATERIALIZED"}},
+        "required": ["disposition"]
+      },
+      "then": {
+        "properties": {
+          "candidate_links": {"minItems": 1},
+          "rejection_reason_codes": {"maxItems": 0}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"disposition": {"const": "SOURCE_REJECTED"}},
+        "required": ["disposition"]
+      },
+      "then": {
+        "properties": {
+          "candidate_links": {"maxItems": 0},
+          "rejection_reason_codes": {"minItems": 1}
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "sha1": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "raw_artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256", "media_type", "captured_at_utc"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "media_type": {"type": "string", "minLength": 1},
+        "captured_at_utc": {"type": "string", "format": "date-time"}
+      }
+    },
+    "candidate_link": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "canonical_candidate_id",
+        "github_repository_id",
+        "candidate_snapshot_commit_sha",
+        "repair_commit_sha",
+        "deduplication_decision"
+      ],
+      "properties": {
+        "canonical_candidate_id": {
+          "type": "string",
+          "pattern": "^CMVP-CAND-02-[0-9a-f]{64}$"
+        },
+        "github_repository_id": {"type": "integer", "minimum": 1},
+        "candidate_snapshot_commit_sha": {"$ref": "#/$defs/sha1"},
+        "repair_commit_sha": {"$ref": "#/$defs/sha1"},
+        "pull_request_number": {"type": "integer", "minimum": 1},
+        "deduplication_decision": {
+          "enum": ["NEW_CANONICAL", "EXACT_DUPLICATE", "POSSIBLE_DUPLICATE"]
+        }
+      }
+    }
+  }
+}

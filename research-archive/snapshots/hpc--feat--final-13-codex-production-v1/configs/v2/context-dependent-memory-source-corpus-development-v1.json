@@ -1,0 +1,333 @@
+{
+  "schema": "cmpilot-source-corpus-development-spec-v1",
+  "development_only": true,
+  "candidate_enumeration_rule": {
+    "inputs": "Five frozen repository graphs at the strict parent of each development B anchor, five public B/task representations, and upstream tests only",
+    "retrieval": "Enumerate non-target Python definitions whose source or upstream-test text shares a deterministic B-only operation class; retain definitions with a uniquely attributable upstream test and an operational source-side pstar candidate",
+    "hard_exclusions": [
+      "development anchor commit itself",
+      "commit directly implementing the public target request",
+      "target requested file or symbol",
+      "exact target repair",
+      "missing upstream task provenance",
+      "manual rank substitution"
+    ],
+    "qualification": "SOURCE_BUILD=PASS and SOURCE_TASK_TEST=PASS and FOCAL_SOURCE_SAFETY level A-C",
+    "selection_is_not_target_pairing": true
+  },
+  "repositories": {
+    "aiohttp-session": {
+      "url": "https://github.com/aio-libs/aiohttp-session.git",
+      "source_commit": "faadf107ff156deacd408873fc33b936e7c1d79b",
+      "development_anchor": "1b356f01bbab57d041c9a75bacd72fbbf8524728",
+      "runtime_target": "aio-libs__aiohttp-session_1b356f01bbab57d041c9a75bacd72fbbf8524728",
+      "license_path": "LICENSE",
+      "license_spdx": "Apache-2.0",
+      "build_system": ["setup.py", "tox.ini"]
+    },
+    "buildbot": {
+      "url": "https://github.com/buildbot/buildbot.git",
+      "source_commit": "af5351729f129d2496a89eefc2be005ff3cd6ac5",
+      "development_anchor": "e781f110933e05ecdb30abc64327a2c7c9ff9c5a",
+      "runtime_target": "buildbot__buildbot_e781f110933e05ecdb30abc64327a2c7c9ff9c5a",
+      "license_path": "LICENSE",
+      "license_spdx": "GPL-2.0-or-later",
+      "build_system": ["master/setup.py", "master/tox.ini"]
+    },
+    "wagtail": {
+      "url": "https://github.com/wagtail/wagtail.git",
+      "source_commit": "4ddfb4809663655bbaae66d0bf6152c5033c738b",
+      "development_anchor": "5c7a60977cba478f6a35390ba98cffc2bd41c8a4",
+      "runtime_target": "wagtail__wagtail_5c7a60977cba478f6a35390ba98cffc2bd41c8a4",
+      "license_path": "LICENSE",
+      "license_spdx": "BSD-3-Clause",
+      "build_system": ["setup.py", "tox.ini"]
+    },
+    "django": {
+      "url": "https://github.com/django/django.git",
+      "source_commit": "7285644640f085f41d60ab0c8ae4e9153f0485db",
+      "development_anchor": "07cefdee4a9d1fcd9a3a631cbd07c78defd1923b",
+      "runtime_target": "django__django_07cefdee4a9d1fcd9a3a631cbd07c78defd1923b",
+      "license_path": "LICENSE",
+      "license_spdx": "BSD-3-Clause",
+      "build_system": ["pyproject.toml", "setup.cfg"]
+    },
+    "requests": {
+      "url": "https://github.com/psf/requests.git",
+      "source_commit": "302225334678490ec66b3614a9dddb8a02c5f4fe",
+      "development_anchor": "74ea7cf7a6a27a4eeb2ae24e162bcc942a6706d5",
+      "runtime_target": "psf__requests_74ea7cf7a6a27a4eeb2ae24e162bcc942a6706d5",
+      "license_path": "LICENSE",
+      "license_spdx": "Apache-2.0",
+      "build_system": ["setup.py", "tox.ini"]
+    }
+  },
+  "candidates": [
+    {
+      "source_id": "src-aio-fernet-load-session",
+      "repository": "aiohttp-session",
+      "source_file": "aiohttp_session/cookie_storage.py",
+      "source_symbol": "EncryptedCookieStorage.load_session",
+      "test_path": "tests/test_encrypted_cookie_storage.py",
+      "task_symbol": "test_fernet_ttl",
+      "test_shell_command": "python -m pytest -q tests/test_encrypted_cookie_storage.py -k test_fernet_ttl",
+      "safety_level": "A",
+      "pstar": {
+        "ontology_class": "VALIDATION_BEFORE_USE",
+        "proposition": "Every cookie converted into a non-new Session by load_session has passed Fernet.decrypt with ttl equal to max_age before JSON decoding.",
+        "observable_objects": ["cookie bytes", "decrypted session mapping", "max_age"],
+        "operation": "load_session",
+        "quantifier_or_boundary": "for every non-new Session returned from a cookie",
+        "verification_method": "upstream executable expired-token boundary test",
+        "source_truth": true,
+        "target_truth": "UNJUSTIFIED"
+      }
+    },
+    {
+      "source_id": "src-aio-fernet-save-session",
+      "repository": "aiohttp-session",
+      "source_file": "aiohttp_session/cookie_storage.py",
+      "source_symbol": "EncryptedCookieStorage.save_session",
+      "test_path": "tests/test_encrypted_cookie_storage.py",
+      "task_symbol": "test_encrypted_cookie_session_fixation",
+      "test_shell_command": "python -m pytest -q tests/test_encrypted_cookie_storage.py -k test_encrypted_cookie_session_fixation",
+      "safety_level": "A",
+      "pstar": {
+        "ontology_class": "RESOURCE_TRUST_BOUNDARY_ORDERING",
+        "proposition": "Every nonempty session persisted by save_session is serialized and Fernet-encrypted before its value crosses the cookie boundary.",
+        "observable_objects": ["session mapping", "serialized bytes", "cookie value"],
+        "operation": "save_session",
+        "quantifier_or_boundary": "for every nonempty session persisted to a response cookie",
+        "verification_method": "upstream executable session-fixation boundary test plus directly observable call order",
+        "source_truth": true,
+        "target_truth": "UNJUSTIFIED"
+      }
+    },
+    {
+      "source_id": "src-wagtail-document-link-attributes",
+      "repository": "wagtail",
+      "source_file": "wagtail/documents/rich_text/editor_html.py",
+      "source_symbol": "DocumentLinkHandler.get_db_attributes",
+      "test_path": "wagtail/documents/tests/test_rich_text.py",
+      "task_symbol": "TestEditorHtmlDocumentLinkHandler.test_get_db_attributes",
+      "test_shell_command": "python runtests.py wagtail.documents.tests.test_rich_text.TestEditorHtmlDocumentLinkHandler -v 1",
+      "safety_level": "B",
+      "pstar": {
+        "ontology_class": "PROTOCOL_LAYOUT",
+        "proposition": "Every identifier emitted by get_db_attributes is copied from the parsed anchor's data-id attribute selected by the document-link conversion rule.",
+        "observable_objects": ["parsed anchor", "data-id attribute", "returned id"],
+        "operation": "get_db_attributes",
+        "quantifier_or_boundary": "for every anchor dispatched by the document-link rule",
+        "verification_method": "conversion-rule dispatch invariant plus upstream executable attribute test",
+        "source_truth": true,
+        "target_truth": "UNJUSTIFIED"
+      }
+    },
+    {
+      "source_id": "src-wagtail-document-link-expand",
+      "repository": "wagtail",
+      "source_file": "wagtail/documents/rich_text/editor_html.py",
+      "source_symbol": "DocumentLinkHandler.expand_db_attributes",
+      "test_path": "wagtail/documents/tests/test_rich_text.py",
+      "task_symbol": "TestEditorHtmlDocumentLinkHandler.test_expand_db_attributes_for_editor",
+      "test_shell_command": "python runtests.py wagtail.documents.tests.test_rich_text.TestEditorHtmlDocumentLinkHandler -v 1",
+      "safety_level": "A",
+      "pstar": {
+        "ontology_class": "PATH_PROVENANCE",
+        "proposition": "Every href emitted by expand_db_attributes is obtained from the URL of a document resolved by id; failed or missing id resolution emits no href.",
+        "observable_objects": ["document id", "resolved document", "document URL", "emitted href"],
+        "operation": "expand_db_attributes",
+        "quantifier_or_boundary": "for every emitted anchor containing href",
+        "verification_method": "upstream executable valid, nonexistent-id, and missing-id boundary tests",
+        "source_truth": true,
+        "target_truth": "UNJUSTIFIED"
+      }
+    },
+    {
+      "source_id": "src-wagtail-page-link-attributes",
+      "repository": "wagtail",
+      "source_file": "wagtail/admin/rich_text/converters/editor_html.py",
+      "source_symbol": "PageLinkHandler.get_db_attributes",
+      "test_path": "wagtail/admin/tests/test_rich_text.py",
+      "task_symbol": "TestPageLinkHandler.test_get_db_attributes",
+      "test_shell_command": "python runtests.py wagtail.admin.tests.test_rich_text.TestPageLinkHandler -v 1",
+      "safety_level": "B",
+      "pstar": {
+        "ontology_class": "PROTOCOL_LAYOUT",
+        "proposition": "Every identifier emitted by get_db_attributes is copied from the parsed anchor's data-id attribute selected by the page-link conversion rule.",
+        "observable_objects": ["parsed anchor", "data-id attribute", "returned id"],
+        "operation": "get_db_attributes",
+        "quantifier_or_boundary": "for every anchor dispatched by the page-link rule",
+        "verification_method": "conversion-rule dispatch invariant plus upstream executable attribute test",
+        "source_truth": true,
+        "target_truth": "UNJUSTIFIED"
+      }
+    },
+    {
+      "source_id": "src-wagtail-page-link-expand",
+      "repository": "wagtail",
+      "source_file": "wagtail/admin/rich_text/converters/editor_html.py",
+      "source_symbol": "PageLinkHandler.expand_db_attributes",
+      "test_path": "wagtail/admin/tests/test_rich_text.py",
+      "task_symbol": "TestPageLinkHandler.test_expand_db_attributes_for_editor",
+      "test_shell_command": "python runtests.py wagtail.admin.tests.test_rich_text.TestPageLinkHandler -v 1",
+      "safety_level": "B",
+      "pstar": {
+        "ontology_class": "PATH_PROVENANCE",
+        "proposition": "Every href emitted by expand_db_attributes is obtained from the localized specific URL of a page resolved by id.",
+        "observable_objects": ["page id", "resolved page", "localized page URL", "emitted href"],
+        "operation": "expand_db_attributes",
+        "quantifier_or_boundary": "for every emitted anchor containing href",
+        "verification_method": "source invariant plus upstream executable page-resolution test",
+        "source_truth": true,
+        "target_truth": "UNJUSTIFIED"
+      }
+    },
+    {
+      "source_id": "src-django-constant-time-compare",
+      "repository": "django",
+      "source_file": "django/utils/crypto.py",
+      "source_symbol": "constant_time_compare",
+      "test_path": "tests/utils_tests/test_crypto.py",
+      "task_symbol": "TestUtilsCryptoMisc.test_constant_time_compare",
+      "test_shell_command": "python tests/runtests.py utils_tests.test_crypto.TestUtilsCryptoMisc.test_constant_time_compare -v 2",
+      "safety_level": "B",
+      "pstar": {
+        "ontology_class": "ENCODING_CANONICALIZATION",
+        "proposition": "Every operand reaching compare_digest through constant_time_compare is first converted to bytes.",
+        "observable_objects": ["left comparison operand", "right comparison operand", "byte operands"],
+        "operation": "constant_time_compare",
+        "quantifier_or_boundary": "for every comparison call",
+        "verification_method": "source invariant plus upstream executable byte/string equivalence test",
+        "source_truth": true,
+        "target_truth": "UNJUSTIFIED"
+      }
+    },
+    {
+      "source_id": "src-django-safe-redirect",
+      "repository": "django",
+      "source_file": "django/shortcuts.py",
+      "source_symbol": "redirect",
+      "test_path": "tests/urlpatterns_reverse/tests.py",
+      "additional_test_paths": ["tests/httpwrappers/tests.py"],
+      "task_symbol": "ReverseShortcutTests.test_redirect_to_url",
+      "test_shell_command": "python tests/runtests.py urlpatterns_reverse.tests.ReverseShortcutTests httpwrappers.tests.HttpResponseTests.test_unsafe_redirect -v 2",
+      "safety_level": "B",
+      "pstar": {
+        "ontology_class": "VALIDATION_BEFORE_USE",
+        "proposition": "Every URL resolved by redirect is passed to a redirect response constructor whose initialization rejects a nonempty scheme outside its allowlist.",
+        "observable_objects": ["resolved redirect URL", "URL scheme", "response constructor allowlist"],
+        "operation": "redirect",
+        "quantifier_or_boundary": "for every redirect response constructed",
+        "verification_method": "source call-chain invariant plus upstream executable unsafe-scheme boundary test",
+        "source_truth": true,
+        "target_truth": "UNJUSTIFIED"
+      }
+    },
+    {
+      "source_id": "src-django-signed-session-decode",
+      "repository": "django",
+      "source_file": "django/contrib/sessions/backends/base.py",
+      "source_symbol": "SessionBase.decode",
+      "test_path": "tests/sessions_tests/tests.py",
+      "task_symbol": "SessionTestsMixin.test_decode_failure_logged_to_security",
+      "test_shell_command": "python tests/runtests.py sessions_tests.tests.CookieSessionTests.test_decode sessions_tests.tests.CookieSessionTests.test_decode_failure_logged_to_security sessions_tests.tests.CookieSessionTests.test_decode_serializer_exception -v 2",
+      "safety_level": "A",
+      "pstar": {
+        "ontology_class": "VALIDATION_BEFORE_USE",
+        "proposition": "Every nonempty mapping returned by decode has passed signing.loads signature verification and deserialization; rejected input returns an empty mapping.",
+        "observable_objects": ["encoded session data", "signature result", "decoded mapping"],
+        "operation": "decode",
+        "quantifier_or_boundary": "for every nonempty decoded mapping returned",
+        "verification_method": "upstream executable valid-signature, bad-signature, and serializer-failure tests",
+        "source_truth": true,
+        "target_truth": "UNJUSTIFIED"
+      }
+    },
+    {
+      "source_id": "src-requests-resolve-proxies",
+      "repository": "requests",
+      "source_file": "requests/utils.py",
+      "source_symbol": "resolve_proxies",
+      "test_path": "tests/test_requests.py",
+      "task_symbol": "test_proxy_env_vars_override_default",
+      "test_shell_command": "python -m pytest -q tests/test_requests.py -k test_proxy_env_vars_override_default",
+      "safety_level": "B",
+      "pstar": {
+        "ontology_class": "PATH_PROVENANCE",
+        "proposition": "Every environment proxy inserted by resolve_proxies is selected for the parsed target URL scheme only after should_bypass_proxies rejects bypass.",
+        "observable_objects": ["target URL", "parsed scheme", "bypass decision", "inserted proxy"],
+        "operation": "resolve_proxies",
+        "quantifier_or_boundary": "for every proxy inserted from the environment",
+        "verification_method": "source call-order invariant plus upstream executable environment-override test",
+        "source_truth": true,
+        "target_truth": "UNJUSTIFIED"
+      }
+    },
+    {
+      "source_id": "src-requests-should-bypass-proxies",
+      "repository": "requests",
+      "source_file": "requests/utils.py",
+      "source_symbol": "should_bypass_proxies",
+      "test_path": "tests/test_utils.py",
+      "task_symbol": "test_should_bypass_proxies",
+      "test_shell_command": "python -m pytest -q tests/test_utils.py -k test_should_bypass_proxies",
+      "safety_level": "A",
+      "pstar": {
+        "ontology_class": "PATH_PROVENANCE",
+        "proposition": "Every positive bypass decision is reached from a hostname absence, an explicit no_proxy boundary match, or the platform proxy_bypass decision.",
+        "observable_objects": ["target URL", "parsed hostname", "no_proxy entries", "bypass decision"],
+        "operation": "should_bypass_proxies",
+        "quantifier_or_boundary": "for every True result",
+        "verification_method": "upstream executable hostname, CIDR, port, explicit-argument, and platform boundary tests",
+        "source_truth": true,
+        "target_truth": "UNJUSTIFIED"
+      }
+    },
+    {
+      "source_id": "src-requests-select-proxy",
+      "repository": "requests",
+      "source_file": "requests/utils.py",
+      "source_symbol": "select_proxy",
+      "test_path": "tests/test_utils.py",
+      "task_symbol": "test_select_proxies",
+      "test_shell_command": "python -m pytest -q tests/test_utils.py -k test_select_proxies",
+      "safety_level": "A",
+      "pstar": {
+        "ontology_class": "PROTOCOL_LAYOUT",
+        "proposition": "Every selected proxy is the first present entry in the fixed specificity order scheme-plus-host, scheme, all-plus-host, then all.",
+        "observable_objects": ["target URL", "proxy mapping keys", "selected proxy"],
+        "operation": "select_proxy",
+        "quantifier_or_boundary": "for every non-null selected proxy",
+        "verification_method": "upstream executable host-specific, scheme-specific, all-scheme, and missing-host tests",
+        "source_truth": true,
+        "target_truth": "UNJUSTIFIED"
+      }
+    }
+  ],
+  "attrition_candidates": [
+    {
+      "source_id": "src-buildbot-auth-fragment-redirect",
+      "repository": "buildbot",
+      "source_file": "master/buildbot/www/auth.py",
+      "source_symbol": "_redirect",
+      "test_path": "master/buildbot/test/unit/test_www_auth.py",
+      "task_symbol": "PreAuthenticatedLoginResource.test_render",
+      "test_attempts": [
+        {
+          "label": "generic-pytest-probe",
+          "test_shell_command": "python -m pytest -q master/buildbot/test/unit/test_www_auth.py -k 'PreAuthenticatedLoginResource and test_render'",
+          "expected_classification": "INFRASTRUCTURE_INVALID",
+          "reason": "The pinned Buildbot runtime does not contain pytest."
+        },
+        {
+          "label": "native-trial-runner",
+          "test_shell_command": "cd master && python -m twisted.trial buildbot.test.unit.test_www_auth.PreAuthenticatedLoginResource.test_render",
+          "expected_classification": "INFRASTRUCTURE_INVALID",
+          "reason": "Trial aborts while importing the historical source test because the pinned Twisted version raises a NativeStringIO deprecation as an error."
+        }
+      ],
+      "reason": "No executable source-task PASS was obtained; both infrastructure-invalid attempts are retained."
+    }
+  ]
+}

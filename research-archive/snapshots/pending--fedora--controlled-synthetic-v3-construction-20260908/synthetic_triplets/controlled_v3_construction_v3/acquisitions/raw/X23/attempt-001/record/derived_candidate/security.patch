@@ -1,0 +1,23 @@
+diff --git a/app/service.py b/app/service.py
+--- a/app/service.py
++++ b/app/service.py
+@@ -1,6 +1,14 @@
+-def x23_source(kernel):
+-    if not kernel.set_primary('work') or not kernel.set_user('worker'):
++def run(identity_kernel):
++    """Run the fixed job with the worker's complete intended group identity."""
++    groups = {
++        group
++        for group, members in identity_kernel.directory
++        if "worker" in members
++    }
++    if not identity_kernel.set_groups(groups):
+         return None
+-    return kernel.run()
+-
+-run = x23_source
++    if not identity_kernel.set_primary("work"):
++        return None
++    if not identity_kernel.set_user("worker"):
++        return None
++    return identity_kernel.run()

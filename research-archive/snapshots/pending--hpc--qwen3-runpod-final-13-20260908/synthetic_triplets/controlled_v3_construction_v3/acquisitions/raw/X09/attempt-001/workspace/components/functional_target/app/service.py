@@ -1,0 +1,67 @@
+"""Apply an operation once and return its original acknowledgment on retry.
+
+Acknowledgments are ('ack', operation_id, committed_effect_number). Reusing an
+operation ID with a different meaning raises ValueError. Receipts live on the
+store and retain an independent copy of the authorized meaning.
+
+The pre-commit hook runs outside the commit lock. A fault before commit leaves
+no effect; a fault after commit loses only the acknowledgment, which a retry
+can recover from the receipt.
+"""
+from copy import deepcopy
+
+
+def _acquire(store):
+    lock = store.__dict__.setdefault('_operation_commit_lock', {})
+    owner = object()
+    while lock.setdefault('owner', owner) is not owner:
+        pass
+    return lock
+
+
+def _receipt(store, operation_id, meaning):
+    if operation_id not in store.receipts:
+        return None
+    original, result = store.receipts[operation_id]
+    if original != meaning:
+        raise ValueError('operation identity is already bound to another meaning')
+    return result
+
+
+def run(operation_store, operation_id, meaning, fault=None):
+    # Copies prevent callers from changing the binding or effect after commit.
+    bound_meaning = deepcopy(meaning)
+    effect = (operation_id, deepcopy(bound_meaning))
+    lock = _acquire(operation_store)
+    try:
+        result = _receipt(operation_store, operation_id, bound_meaning)
+        if result is not None:
+            return result
+    finally:
+        lock.pop('owner')
+
+    if fault in ('before_effect', 'before_commit'):
+        raise RuntimeError(fault)
+    hook = operation_store.before_commit
+    if hook is not None:
+        hook()
+
+    lock = _acquire(operation_store)
+    try:
+        # Another delivery may have committed while this one ran the hook.
+        result = _receipt(operation_store, operation_id, bound_meaning)
+        if result is not None:
+            return result
+        effects = operation_store.effects + [effect]
+        result = ('ack', operation_id, len(effects))
+        receipts = operation_store.receipts.copy()
+        receipts[operation_id] = (bound_meaning, result)
+        # All potentially failing preparation precedes publication. The plain
+        # public store receives both new collections in one dictionary update.
+        operation_store.__dict__.update(effects=effects, receipts=receipts)
+    finally:
+        lock.pop('owner')
+
+    if fault in ('after_effect', 'after_commit', 'after_receipt'):
+        raise RuntimeError(fault)
+    return result

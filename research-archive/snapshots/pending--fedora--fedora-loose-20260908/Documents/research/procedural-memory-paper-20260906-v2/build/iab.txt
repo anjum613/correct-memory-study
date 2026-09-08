@@ -1,0 +1,1138 @@
+             Procedural Memory Across Trust Boundaries:
+             A Controlled Study of Coding Agent Behavior
+
+
+                                                  Anonymous Author(s)
+                                                      Affiliation
+                                                       Address
+                                                        email
+
+
+
+                                                         Abstract
+
+ 1             A procedure can be correct where it was learned and incomplete where it is reused.
+ 2             We study coding agents supplied with procedural memory in target tasks that
+ 3             change a security relevant source assumption. Thirteen synthetic families cross
+ 4             four memory conditions and two repetitions in six model and agent configurations,
+ 5             yielding 624 recorded runs and 595 technically valid outcomes. The primary end-
+ 6             point is functional completion that fails a focal security witness. Correct memory
+ 7             changes this endpoint by −11.5 to +13.6 percentage points across configurations;
+ 8             the experiment does not establish a general harmful memory effect. Lower failure
+ 9             rates sometimes accompany lower functionality. A generic applicability reminder
+10             reduces the endpoint descriptively in the three Codex configurations, a direction
+11             that survives all assignments of unresolved outcomes in the recorded cohort. Two
+12             isolated LLM annotation passes over a sample of 52 runs document procedure re-
+13             tention, protection, explicit assumption recognition, and non-completion separately.
+14             Protections often appear without preceding explicit recognition in the visible trace.
+15             Together, the outcome decomposition and implementation evidence show how
+16             non-completion, witness scope, and distinct implementation mechanisms change
+17             the interpretation of apparent memory transfer successes and failures.
+
+
+18   1    Introduction
+
+19   Procedural memory lets an agent reuse a successful method without deriving it again. Yet success is
+20   conditional. A record may have been complete before reaching a parser; a cache may have belonged
+21   to one request; a diagnostic object may have contained only public fields. If the target changes these
+22   assumptions, a memory can accurately describe the source task while providing an incomplete guide
+23   to the new one.
+24   We ask: when a coding agent receives a source procedure in a target context where its assumptions
+25   no longer hold, how does that memory change functional completion and focal security failures?
+26   A second question asks whether a generic applicability reminder changes this behavior. We supply
+27   a frozen correct memory, a matched irrelevant memory, correct memory with the reminder, or no
+28   memory. The target task and changed assumption remain fixed.
+29   The original hypothesis was that correct source memory would increase functional completions that
+30   violate the target’s focal security property. The completed experiment does not establish this as a
+31   general effect. Corrected estimates have both signs across six configurations. This mixed result
+32   becomes informative when completion, measurement availability, and implementation behavior are
+33   examined together. A lower failure rate can reflect an unfinished task. A witness pass can establish
+34   confidentiality without establishing useful output. Two implementations can fail the same witness
+35   through different mechanisms.
+
+     Submitted to NeurIPS 2026 Workshop: Interpreting Agent Behavior. Do not distribute.
+36   The study contributes (1) thirteen controlled synthetic families with explicit source assumptions and
+37   separate functionality and security observations; (2) corrected treatment comparisons, joint outcomes,
+38   and bounds that retain completed measurements within otherwise invalid runs; and (3) systematic
+39   exploratory coding of a transparently selected 52-run sample, complemented by matched transcript,
+40   patch, and outcome comparisons. The coding separates what agents say before editing from the
+41   protections they implement. The resulting contribution is a more precise account of observed memory
+42   transfer, including successful adaptations and counterexamples to harmful reuse.
+43   All targets contain a context shift, and memories are supplied directly. The intervention therefore
+44   estimates the effect of supplied memory in those targets; it does not identify the effect of context shift
+45   or evaluate a retrieval system. Comparisons are made within each model and agent configuration.
+
+
+46   2   Related work
+
+47   Memory and applicability. Voyager stores reusable executable skills, while ExpeL extracts natural
+48   language lessons from experience without updating model parameters [Wang et al., 2023, Zhao
+49   et al., 2023]. These systems motivate procedural reuse, but successful transfer is conditional on
+50   what the memory preserves. Kim et al. [2026] study four memory representations across six coding
+51   benchmarks and find that abstract insights transfer more reliably than concrete traces. Our experiment
+52   fixes a procedure valid at the source and changes its relevance to a target security contract; the
+53   endpoint distinguishes task non-completion from a functional security violation.
+54   Boundary-Aware Skill Memory (BASM) is the closest applicability-aware method [Lin et al., 2026].
+55   It augments skills with applicability conditions, risk cues, avoidance rules, and recovery notes, and
+56   combines retrieval, boundary-conditioned execution, and local repair. It also investigates wrong-
+57   tool preference using attention and intervention analyses. Our B arm is a single generic reminder
+58   attached to a supplied memory. It neither implements BASM nor tests its structured mechanism. The
+59   contribution here is a controlled outcome decomposition for coding under changed trust assumptions,
+60   together with visible implementation evidence. We do not claim novelty for the general observation
+61   that relevant skills can be inapplicable.
+
+62   Skill induced regressions. SWE-Skills-Bench measures the marginal utility of supplied skills in
+63   repository software tasks and reports limited average gains and context-compatibility failures [Han
+64   et al., 2026]. Dong et al. [2026] use differential analysis of paired runs to examine functional failures
+65   and efficiency regressions induced by loaded skills. Their results make clear that procedural guidance
+66   can constrain implementation in unhelpful ways. Our focal distinction is between failing to implement
+67   a feature and implementing it while violating a separately evaluated security property. Our behavioral
+68   analysis separates statements, implementation changes, and measured outcomes.
+
+69   Security and the execution interface. SecureVibeBench reconstructs vulnerability-introducing
+70   scenarios in 105 C/C++ tasks from 41 OSS-Fuzz projects and combines functionality and security
+71   evaluation [Chen et al., 2026]. We cite its ACL 2026 version, which supersedes the earlier arXiv
+72   report. Its repository realism addresses a different objective from our synthetic memory intervention.
+73   Experience-driven self-evolution can also trade safety against task utility in web and embodied
+74   settings [Zhao et al., 2026]; our measured behavior is the generated implementation rather than
+75   refusal of a harmful request. Finally, SWE-agent demonstrates that the agent computer interface
+76   affects software engineering performance [Yang et al., 2024]. This matters directly here: different
+77   tool surfaces and execution budgets are part of each evaluated configuration, and interface related
+78   non-completion changes the meaning of an apparent security pass.
+
+
+79   3   Task construction and experimental design
+
+80   Source validity and changed assumptions. Each family pairs a source setting where a procedure
+81   is valid with a target feature request that changes a relevant assumption. The final suite contains
+82   six F-series and seven X-series synthetic families, covering parsing, lifetimes, paths, rendering,
+83   identity, confidentiality, and state consistency. Existing baseline code is visible in every condition. N
+84   removes supplied memory, not the task’s implementation. Appendix A gives the family contracts and
+85   construction records.
+
+
+                                                         2
+                    Configuration    Agent / tools          Sampling selection   Recorded / valid
+                    GPT-5.5 Low      Codex / shell, patch   low reasoning               104 / 96
+                    Luna Medium      Codex / shell, patch   medium reasoning            104 / 97
+                    Terra Medium     Codex / shell, patch   medium reasoning            104 / 94
+                    Qwen Next        MiniSWE / bash         T =1                       104 / 104
+                    Qwen 30B         MiniSWE / bash         T = 0.7                    104 / 102
+                    Devstral         MiniSWE / bash         T = 0.15                   104 / 102
+      Table 1: Executed design: thirteen families, four conditions, and two repetitions per configuration.
+      Codex uses 480 seconds and 32 command items; MiniSWE uses 900 seconds and 30 steps, a 32,768-
+      token context, and 512 output tokens per request. Appendix B records exact requested IDs, revisions,
+      settings, and tool details.
+
+
+86    Reference controls. The saved preflight checks three target states in each family: the incomplete
+87    baseline must fail functionality and pass the focal witness; an unadapted functional reference must
+88    pass functionality and fail the witness; and a repaired reference must pass both. Thus avoiding the
+89    requested feature is insufficient for success. The final manifest fixes the synthetic artifacts and source
+90    procedures. Constructors and evaluated agents are separate roles; constructors do not receive sealed
+91    witnesses or evaluated agent outcomes. The controls establish these three states, while validation of
+92    alternative implementations requires examining what the observer actually measures.
+
+93    Configurations and execution. The six configurations each complete their 104-run schedule,
+94    producing 624 recorded runs: 595 technically valid and 29 invalid. Codex and MiniSWE have
+95    different native interfaces, instruction envelopes, and budgets. Requested aliases are preserved;
+96    backend identities are not inferred. Executed manifests record run order. Appendix C gives the scope
+97    amendment and scoring history.
+
+98    Memory conditions. The conditions are no memory (N), correct source memory (C), matched
+99    irrelevant memory (I), and correct source memory with a generic applicability boundary (B). C, I,
+100   and B each contain a 4,096-byte envelope including neutral padding; N has none. Bytes, not tokens,
+101   are equalized. The B reminder asks whether the source assumption still holds and supplies no target
+102   repair. C−N is the frozen primary contrast; I−N and B−C are secondary.
+
+103   Outcomes and scoring. For a technically valid run, F denotes functionality pass and S focal
+104   security witness pass. The primary endpoint is
+                                                     U = F ∧ ¬S.                                             (1)
+105   All four joint outcomes are reported. In particular, ¬F ∧ S is a functional failure, while F ∧ S means
+106   functionality and focal witness pass. Technical invalids retain missing F/S/U values in the primary
+107   table. Termination labels do not override evaluations.
+108   We use the versioned contract validity correction: four Devstral security passes become failures, with
+109   no changes to functionality or validity. The X05 and X28 observers now inspect contract relevant
+110   returned behavior instead of depending on optional bookkeeping. Original scores and comparisons
+111   are preserved in Appendix C. X06 retains its executed confidentiality scope, under which rejecting
+112   the mixed record can pass without demonstrating retention of useful public fields.
+
+113   Primary analysis. A family is eligible for a contrast when both repetitions in both compared
+114   conditions are valid with observed F and S. We average repetitions within family and condition, then
+115   average paired differences equally over eligible families. Tables report the eligible count. Exploratory
+116   95% percentile intervals use 20,000 paired family bootstrap resamples. Exact sign flip and family
+117   omission diagnostics appear in Appendix E. These are comparisons within configurations, not a
+118   ranking of model security.
+
+119   Measurement availability and bounds. A separate review distinguishes external interruption, ses-
+120   sion timeout, candidate execution exception, and evaluator incompatibility. It preserves a component
+121   only when its saved evaluation explicitly completed; an exception alone establishes neither security
+122   success nor security failure. Alongside complete family estimates, we bound U over the fixed thirteen
+
+
+                                                            3
+                  Configuration    Contrast    n     ∆F         ∆S      ∆U     95% interval for ∆U
+                  GPT-5.5 Low      C−N        11     0.0        -9.1    +9.1   [-22.7, +40.9]
+                                   I−N        11     0.0        +4.5    -4.5   [-13.6, 0.0]
+                                   B−C        10     0.0       +30.0   -30.0   [-55.0, -5.0]
+                  Luna Medium      C−N        11    -9.1        -9.1   +13.6   [0.0, +36.4]
+                                   I−N        10    -5.0       +10.0    -5.0   [-15.0, 0.0]
+                                   B−C        11    +4.5       +13.6   -13.6   [-36.4, +9.1]
+                  Terra Medium     C−N        12    -4.2        -4.2    +4.2   [-16.7, +29.2]
+                                   I−N        12     0.0        -4.2    +4.2   [-8.3, +16.7]
+                                   B−C        11     0.0       +22.7   -22.7   [-45.5, 0.0]
+                  Qwen Next        C−N        13    -3.8         0.0     0.0   [-15.4, +19.2]
+                                   I−N        13     0.0       -11.5    +7.7   [-7.7, +23.1]
+                                   B−C        13    -3.8         0.0     0.0   [-11.5, +11.5]
+                  Qwen 30B         C−N        13   -15.4        +3.8   -11.5   [-26.9, +3.8]
+                                   I−N        12    -4.2         0.0    -4.2   [-16.7, +8.3]
+                                   B−C        12   +12.5        +4.2    +4.2   [-8.3, +16.7]
+                  Devstral         C−N        12    +4.2        +8.3    -4.2   [-29.2, +20.8]
+                                   I−N        12    +4.2       +12.5    -8.3   [-33.3, +16.7]
+                                   B−C        12     0.0         0.0     0.0   [0.0, 0.0]
+      Table 2: Corrected contrasts in percentage points. Positive ∆U means more functional completions
+      that fail the focal witness. n counts families with both repetitions valid in both arms. C−N is primary;
+      I−N and B−C are secondary. Intervals are exploratory 95% percentile family bootstrap intervals.
+      Zero observed variation can produce a degenerate interval, as for Devstral B−C.
+
+
+123   families and two recorded repetitions per condition. Unresolved outcomes receive every assignment
+124   consistent with completed observations, including U = 0 when F = 0 or S = 1 is known. The
+125   primary table is unchanged. These bounds describe missing measurement in the recorded cohort, not
+126   sampling uncertainty or outcomes from a hypothetical continued execution.
+
+127   4   Results
+128   Correct memory has no established common harmful effect. Table 2 gives the corrected compar-
+129   isons. C−N changes U by +9.1, +13.6, and +4.2 percentage points for GPT-5.5, Luna, and Terra,
+130   and by 0.0, −11.5, and −4.2 for Qwen Next, Qwen 30B, and Devstral. The signs differ, and every
+131   C−N bootstrap interval includes zero. The original hypothesis is therefore not established across the
+132   evaluated configurations.
+
+133   Joint outcomes distinguish improvement from non-completion. For Qwen 30B, C−N lowers U
+134   by 11.5 points and functionality by 15.4 points. Across its thirteen eligible families, functional runs
+135   fall from 24 to 20 out of 26, and functionality and focal witness passes fall from 8 to 7. This is not an
+136   improvement that preserves functionality. Devstral’s U also falls, by 4.2 points, while functionality
+137   rises by 4.2 points. Identical endpoint directions can describe different changes in performance.
+138   Figure 1 retains all recorded runs. Qwen Next has 38 valid ¬F ∧ S outcomes, all with unchanged
+139   final implementations in the saved audit. Luna has 18 such outcomes; sixteen have empty patches and
+140   visible complaints about unavailable named tools. These observed non-completions make a security
+141   pass rate alone misleading.
+
+142   The reminder reduces observed failures in Codex. B−C lowers U by 30.0, 13.6, and 22.7 points
+143   in the three Codex configurations. Functionality is unchanged for GPT-5.5 and Terra and rises by 4.5
+144   points for Luna. MiniSWE estimates are 0.0, +4.2, and 0.0 points. The distinction concerns complete
+145   configurations, including their interfaces. None of the C−N or B−C exact family sign flip diagnostics
+146   is below .05. GPT-5.5’s B−C bootstrap interval excludes zero, whereas its sign flip diagnostic is
+147   .125; few families have nonzero differences and the procedures make different assumptions.
+
+148   The direction survives unresolved measurements in the recorded cohort. The 29 invalids
+149   comprise four interruptions, four timeouts, seventeen candidate execution exceptions, and four
+
+
+                                                           4
+                 GPT-5.5 Low / Codex                      Luna Medium / Codex                      Terra Medium / Codex
+
+       N              16                   9                   11           10      2 2                   16              8   2
+
+        C            13               11         2         7           12           6                   14            9       2
+
+         I           15                8        3              11           8      5    2                 15              9   2
+
+        B                  21                  3 2          10             9       5    2                  18             4   4
+
+
+                 Qwen Next / MiniSWE                      Qwen 30B / MiniSWE                        Devstral / MiniSWE
+
+       N         6         11              9               8                16                      8            15           2
+
+        C        5         11              10              7           13          3 3               10              14
+
+         I       4         13              8               8                15                       11              13
+
+        B        4        11            11                  9               14                       10              14       2
+
+             0                 13                26   0                13               26     0                13            26
+                     Recorded runs                              Recorded runs                           Recorded runs
+
+                                        F pass, S pass                     F fail, S pass            Invalid
+                                        F pass, S fail (U)                 F fail, S fail
+
+
+      Figure 1: Joint outcomes by condition within each configuration. Each bar contains 26 recorded runs.
+      Blue denotes functionality and focal witness pass; red is U . Gold and purple are functional failures.
+      Gray denotes technical invalidity and contributes no primary F/S/U score. Single-run segments are
+      unlabeled. The top row uses Codex; the bottom row uses MiniSWE.
+
+                                    Configuration     C−N                  I−N               B−C
+                                    GPT-5.5 Low       [+3.8, +11.5]        [-7.7, +3.8]      [-34.6, -23.1]
+                                    Luna Medium       [0.0, +11.5]         [-15.4, 0.0]      [-15.4, -3.8]
+                                    Terra Medium      [-3.8, +11.5]        [-3.8, +11.5]     [-26.9, -11.5]
+                                    Qwen Next         [0.0, 0.0]           [+7.7, +7.7]      [0.0, 0.0]
+                                    Qwen 30B          [-11.5, -11.5]       [-3.8, 0.0]       [+3.8, +7.7]
+                                    Devstral          [-3.8, 0.0]          [-7.7, -3.8]      [-3.8, 0.0]
+      Table 3: Identification bounds for ∆U in percentage points over all thirteen families and recorded
+      repetitions, retaining explicitly completed measurements. These are favorable and unfavorable
+      assignments of unresolved outcomes, not confidence intervals.
+
+
+
+150   lowering incompatibilities. The seventeen exceptions are in Codex X28. All have completed
+151   functionality passes, while their security evaluation stops on an exception. The four timeouts retain
+152   both completed component checks: three pass functionality, one fails it, and all four pass the focal
+153   witness. The other eight invalids have neither component resolved. Thus 21 invalid runs retain
+154   functionality information and four retain security information; U remains unresolved for 25.
+155   Table 3 uses this information without rescoring invalids. Even the largest admissible B−C bound is
+156   negative for each Codex configuration: −23.1, −3.8, and −11.5 points. Their descriptive direction
+157   therefore does not depend on discarding unresolved outcomes. The bounds use all thirteen families
+158   and need not contain a complete family estimate that uses a different family set. Appendix D reports
+159   treatment specific categories and the wider bounds obtained by discarding completed components.
+
+160   Family variation and witness scope matter. The full family overview is in Appendix D. In F04,
+161   all six Codex B runs pass both checks, compared with six functional witness failures under N; all
+162   six MiniSWE B runs are functional witness failures. Such observed variation can be obscured by
+163   aggregation. Omitting X06 changes GPT-5.5 C−N from +9.1 to 0.0 points, while all three Codex
+
+
+                                                                       5
+          Observable dimension                                    Pass A: Y   Pass B: Y   Both Y   Agreement
+          A: Explicit assumption recognition before editing              8           7        7        49/52
+          P: Source procedure without the target check                  20          22       20        50/52
+          T: Target protection present                                  22          23       22        49/52
+          Z: No meaningful implementation                                7           7        7        52/52
+      Table 4: Independent LLM passes over the same 52 sampled runs. “Both Y” requires two positive
+      labels; agreement includes uncertain and unavailable labels. Counts describe this sample, not
+      behavioral prevalence across all 624 runs. Full label distributions and all eight disagreements are
+      preserved in the artifact and Appendix F.
+
+
+
+164   B−C estimates remain negative. I−N ranges from −8.3 to +7.7 points. The irrelevant condition
+165   controls for a supplied memory envelope, but is not an inert placebo in every observed cell. Scope
+166   omissions and C−I are supplementary analyses, not replacement primary contrasts.
+
+
+167   5   Exploratory behavioral analysis
+
+168   Sampling and coding. We froze a four-dimension codebook and sampled one run from every
+169   family and condition cell, giving 52 runs. Configuration assignments were shuffled and balanced to
+170   eight or nine runs each; a repetition was selected at random. Selection used design labels, without
+171   outcomes or trace availability, and no run was replaced. All 52 selected traces and implementations
+172   were available. Two isolated LLM sessions independently read every packet, with final scores and
+173   model labels withheld. Each packet contained the task, a source procedure for comparison, the initial
+174   implementation, chronological visible statements and tool interactions, and the final implementation
+175   and patch. Tool interfaces and public feedback remained visible.
+176   The dimensions distinguish explicit recognition of the changed source assumption before editing
+177   (A), retention of a recognizable source procedure without its target check (P), a concrete target
+178   protection (T), and stopping without a meaningful implementation (Z). Each decision includes event
+179   or implementation line anchors. Labels are yes, no, uncertain, and unavailable. The passes could not
+180   inspect each other’s output; disagreements were retained without outcome based adjudication. This is
+181   automated exploratory coding, separate from the earlier casebooks selected after outcome inspection.
+
+182   Expressed recognition and implemented protection are distinct observations. Both passes
+183   identify explicit recognition before editing in 7 runs, procedure retention without the check in 20,
+184   concrete protection in 22, and no meaningful implementation in 7 (Table 4). All seven runs with
+185   agreed explicit recognition also have agreed protection. Fifteen further runs have agreed protection
+186   without agreed explicit recognition. This difference demonstrates why absence of an explanatory
+187   statement cannot be used as evidence that memory was ignored.
+188   The sampled Luna F08/B/r2 run (P027) illustrates the timing distinction: its patch escapes the label,
+189   but the visible explanation follows the edit. The saved outcome passes both checks. In Devstral
+190   X20/C/r1 (P015), recognition does precede editing: the agent distinguishes newly repeatable tags
+191   from a control field that remains singular, then rejects duplicate controls and uses one interpretation
+192   for authorization and dispatch. Both checks pass. The codebook captures these different observable
+193   paths to protection without attributing either edit causally to the statement.
+194   Protection codes also differ from outcome scores. Terra X28/B/r1 (P043) explicitly recognizes that
+195   a positive prefilter result is insufficient and adds an authoritative check. Both passes code A and
+196   T positively. Functionality evaluation completes successfully, but the error path interrupts security
+197   measurement, leaving the run invalid. A plausible main path repair is therefore documented without
+198   assigning an unobserved security result.
+
+199   Matched cases retain harmful transfer and counterexamples. Appendix F presents three tran-
+200   script, patch, and outcome panels from GPT-5.5/Codex. In F01/C/r2, the agent describes storing the
+201   declared number of bytes and adds slicing without a completeness check; functionality passes and
+202   the witness fails. The other C repetition adds that check and passes both. In X11, C/r1 creates with
+203   inherited permissions and restricts access later, whereas B/r1 restricts access at creation. Both are
+
+
+                                                              6
+      Claim                  Evidence                                      Alternative explanation retained
+      No established gen-    C−N has both signs; joint outcomes ex-        Local harms can coexist with aggregate
+      eral harmful effect    pose lost functionality                       cancellation.
+      Reminder reduces       Paired contrasts and bounds agree in direc-   Interfaces and instructions may shape re-
+      observed Codex U       tion                                          sponse; no model only attribution.
+      Recognition is not     Fifteen sampled runs have agreed protec-      Unexpressed reasoning or existing code
+      required in the vis-   tion without agreed prior recognition         can guide an edit.
+      ible trace
+      A pass needs an ob-    X05/X28 corrections and separate X06 out-     Confidentiality can hold because delivery
+      servation contract     put requirements                              was rejected.
+                         Table 5: Claim, evidence, and remaining alternative explanation.
+
+
+204   functional; only B passes the creation observation. The relevant implementation difference is when
+205   protection is established.
+206   F08 reverses the harmful direction. C/r1 explicitly notes that the target value is no longer guaranteed
+207   numeric and escapes the label. N/r1 extends direct interpolation. C passes both checks and N fails
+208   the witness despite functional completion; both C repetitions adapt successfully. Correct memory
+209   can therefore make its own source assumption useful for detecting what changed. The systematic
+210   sample supplies a counterexample in another configuration: Devstral F08/C/r2 (P007) retains direct
+211   interpolation without the check and fails the witness. These are selected explanatory comparisons,
+212   not family level effect estimates.
+
+213   One failure can have different implementation mechanisms. All twenty-four Codex F02 runs
+214   complete functionally and fail the focal witness. Their patches reopen or reread the slot at callback
+215   invocation; the unadapted reference instead captures a record whose lease has ended. Both can
+216   lose the original value, through different mechanisms. Qwen Next F02/B/r2 stores a precomputed
+217   formatted value and passes both checks. Neither a witness failure nor structural similarity alone
+218   proves copying of the supplied memory.
+
+219   6   Measurement implications and discussion
+220   Observe useful behavior as well as confidentiality. We reviewed the observation contract in
+221   all thirteen families against the saved observers and accepted implementations (Appendix G). The
+222   X05/X28 corrections show why three reference controls were insufficient: alternative implementations
+223   exposed dependence on optional bookkeeping. The review also identifies a representation constraint
+224   in F08’s literal entity check and an unspecified useful output obligation for X06’s mixed record.
+225   We specify prospective output contracts separately from the executed evaluation. For X06, supported
+226   public fields must survive the mixed record; unsupported public scalar values become null, and
+227   unsupported private fields are omitted without conversion. Confidentiality and required public output
+228   receive separate labels. For F08, named and numeric entities representing the same literal label are
+229   equivalent. Fourteen benign output controls pass these new observer checks, including rejection
+230   that preserves confidentiality but fails useful output. These controls test the proposed observers, not
+231   saved agent implementations; no historical score changes. The complete policy and family review are
+232   included in the artifact.
+
+233   A focused next experiment. Memory supplies both a procedure and information about its pre-
+234   conditions. The F08 comparison motivates separating those components. A prospective protocol
+235   in the artifact compares no memory, procedure only, source assumption only, and both, holding the
+236   target fixed and avoiding a target repair in the assumption text. It specifies interface qualification,
+237   randomized execution order, and a precision plan before a new cohort. This follow-up has not been
+238   run.
+
+239   Limitations. Thirteen selected synthetic families and two repetitions provide limited precision and
+240   do not sample repository work. Witnesses cover specific properties; the observer review is static,
+241   and the new output controls do not exhaust legitimate implementations. The 52-run coding is an
+242   exploratory sample assessed by two LLM contexts that may share biases, with imperfect model
+
+
+                                                            7
+243   masking and eight retained disagreements. It supplies inspectable observations, not human validated
+244   labels or causal mediation. Memory retrieval, the context shift interaction, and differences attributable
+245   to model weights remain outside the design.
+
+246   7   Conclusion
+247   The experiment does not establish a general harmful memory effect. Its strongest findings concern
+248   how non-completion, witness scope, and implementation evidence change the interpretation of
+249   apparent transfer successes and failures. Joint outcomes separate unfinished work from functional
+250   security failures; bounds expose the consequences of missing measurement; and systematic trace
+251   coding distinguishes expressed assumptions from implemented protections. These distinctions make
+252   the mixed result scientifically useful without requiring a stronger claim than the evidence supports.
+
+
+
+
+                                                         8
+253   References
+254   Junkai Chen, Huihui Huang, Yunbo Lyu, Junwen An, Jieke Shi, Chengran Yang, Ting Zhang, Haoye
+255     Tian, Yikun Li, Zhenhao Li, Xin Zhou, Xing Hu, and David Lo. SecureVibeBench: Benchmarking
+256     secure vibe coding of AI agents via reconstructing vulnerability-introducing scenarios. In Maria
+257     Liakata, Viviane P. Moreira, Jiajun Zhang, and David Jurgens, editors, Proceedings of the 64th
+258     Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers), pages
+259     24144–24168, San Diego, California, United States, July 2026. Association for Computational
+260     Linguistics. ISBN 979-8-89176-390-6. doi: 10.18653/v1/2026.acl-long.1107. URL https:
+261     //aclanthology.org/2026.acl-long.1107/.
+262   Gen Dong, Yanjie Gao, Liqun Li, Tianyin Xu, Yu Hua, and Fan Yang. Agent Skills Can Be
+263     Harmful: An Empirical Study of Skill-Induced Failures in LLM Agents, 2026. URL https:
+264    //arxiv.org/abs/2608.11888.
+265   Tingxu Han, Yi Zhang, Wei Song, Chunrong Fang, Zhenyu Chen, Youcheng Sun, and Lijie Hu.
+266     SWE-Skills-Bench: Do Agent Skills Actually Help in Real-World Software Engineering?, 2026.
+267     URL https://arxiv.org/abs/2603.15401.
+268   Kangsan Kim, Minki Kang, Taeil Kim, Yanlai Yang, Mengye Ren, and Sung Ju Hwang. Memory
+269     Transfer Learning: How Memories are Transferred Across Domains in Coding Agents, 2026. URL
+270     https://arxiv.org/abs/2604.14004.
+271   Zihan Lin, Zhenyu Chen, Jiawen Wei, Xiaohan Wang, Jie Cao, Jiajun Chai, Wei Lin, Guojun Yin,
+272     and Ran He. When Not to Imitate: Boundary-Aware Skill Memory for Reliable Tool-Use LLM
+273     Agents, 2026. URL https://arxiv.org/abs/2608.22339.
+274   Guanzhi Wang, Yuqi Xie, Yunfan Jiang, Ajay Mandlekar, Chaowei Xiao, Yuke Zhu, Linxi Fan, and
+275    Anima Anandkumar. Voyager: An Open-Ended Embodied Agent with Large Language Models,
+276     2023. URL https://arxiv.org/abs/2305.16291.
+277   John Yang, Carlos E. Jimenez, Alexander Wettig, Kilian Lieret, Shunyu Yao, Karthik Narasimhan,
+278     and Ofir Press. SWE-agent: Agent-Computer Interfaces Enable Automated Software Engineering,
+279     2024. URL https://arxiv.org/abs/2405.15793.
+280   Andrew Zhao, Daniel Huang, Quentin Xu, Matthieu Lin, Yong-Jin Liu, and Gao Huang. ExpeL:
+281     LLM Agents Are Experiential Learners, 2023. URL https://arxiv.org/abs/2308.10144.
+282   Weixiang Zhao, Yichen Zhang, Yingshuo Wang, Yang Deng, Yanyan Zhao, Xuda Zhi, Yongbo
+283    Huang, Hao He, Wanxiang Che, Bing Qin, and Ting Liu. On safety risks in experience-driven
+284    self-evolving agents. In Maria Liakata, Viviane P. Moreira, Jiajun Zhang, and David Jurgens,
+285    editors, Findings of the Association for Computational Linguistics: ACL 2026, pages 42145–42169,
+286    San Diego, California, United States, July 2026. Association for Computational Linguistics. ISBN
+287    979-8-89176-395-1. doi: 10.18653/v1/2026.findings-acl.2091. URL https://aclanthology.
+288    org/2026.findings-acl.2091/.
+
+
+289   Declaration of LLM Usage
+290   LLM agents were used in synthetic fixture construction and as experimental subjects. The saved con-
+291   struction protocol separates constructor authored target components from frozen source procedures,
+292   researcher witnesses, and deterministic patch derivation. LLM assistance supported evidence auditing,
+293   analysis code, and manuscript drafting. Two isolated LLM sessions independently annotated the 52
+294   selected behavioral packets, using a frozen codebook with final scores and model labels withheld;
+295   no human annotation or human adjudication is claimed. The underlying annotation model revision
+296   was not recorded. Reported experimental outcomes come from saved records and the completed
+297   versioned validity review. Manuscript preparation performed saved record analysis and benign output
+298   observer checks, with no new evaluated agent runs or execution of saved candidate implementations.
+
+
+
+
+                                                       9
+299   A      Family definitions and task validity
+300   The suite comprises synthetic feature-extension tasks. Table 6 states the source assumption, its target
+301   change, and the bounded property observed. The F02 witness concerns preservation of the original
+302   formatted value across deferred access. The X06 column describes its executed confidentiality
+303   observation; the prospective output contract is separate.
+
+                         Table 6: Source assumptions, target changes, and focal witness scopes.
+
+        ID      Source assumption                 Target change                   Bounded witness
+        F01     Complete length-delimited         Length supplied at a less       Declared payload completeness
+                input                             trusted boundary                before storage
+        F02     Record read while its lease is    Deferred callback outlives      Original record value retained
+                active                            the immediate read              across slot reuse
+        F04     Application-chosen export         Caller-supplied export path     Output remains inside the export
+                filename                                                          root
+        F08     Numeric status text in HTML       Caller-supplied label text      Label cannot change the
+                                                                                  surrounding markup
+        F17     Request-local document cache      Long-lived cache shared         Cached values remain separated
+                                                  across users                    by principal
+        F20     Resource destination has the      Resource destination may be     Session credentials do not cross
+                session origin                    external                        the origin boundary
+        X02     Pattern authors respect a fixed   Supported user-authored         Compilation and batch
+                work budget                       patterns                        evaluation stay within modeled
+                                                                                  work limits
+        X05     One allocator issues nonces       Multiple workers allocate       No repeated nonce among
+                for a key                         under the same key              returned successful packets in
+                                                                                  the fixed sequence
+        X06     All diagnostic fields are         Diagnostics mix public and      No confidential marker or unsafe
+                approved for the log              confidential content            representation call on the mixed
+                                                                                  fixture
+        X11     Default readers are all           Default readers include         No unauthorized observation at
+                authorized                        another identity                creation or handoff
+        X20     Security-relevant fields occur    Request contains repeatable     Control-field interpretation
+                once                              extension fields                remains consistent and
+                                                                                  unambiguous
+        X24     Decisions over the invariant      Concurrent operations on        Conflicting commits preserve
+                cannot overlap                    multiple records                the modeled cross-record
+                                                                                  invariant
+        X28     Positive membership evidence      Prefilter can report possible   Returned authorization and grant
+                is exact                          membership                      effects agree with exact
+                                                                                  membership
+
+
+
+304   Admission and non-completion controls. The final construction manifest binds six retained F
+305   families and seven admitted X families to immutable specifications and candidate artifacts. The
+306   X construction pool had 26 attempted families, 16 with a retained machine-valid candidate, and
+307   seven admitted to the final cohort. These are synthetic construction counts, not counts selected
+308   from a repository corpus. The source valid state establishes where the remembered procedure
+309   applies. Target controls distinguish an incomplete baseline (F = 0, S = 1), a functional unadapted
+310   implementation (F = 1, S = 0), and a functional repair (F = 1, S = 1). The saved Codex
+311   preflight checks these target roles for all thirteen families. Reference repairs are controls, not required
+312   implementation templates. The later observer corrections show that passing those controls did not
+313   guarantee observation of every behavior produced by an alternative implementation.
+
+314   Construction and evaluation separation. In the X-family protocol, the constructor authors in-
+315   complete and functional target components; the unadapted target implementation is derived from
+316   the frozen source-context implementation, and patches are produced deterministically. Constructors
+
+
+                                                            10
+317   do not receive researcher tests, sealed witnesses, reference states, evaluated-agent outcomes, or
+318   admission judgments. At most four constructor attempts per attempted family are permitted, retaining
+319   the first machine-valid candidate. The final source memories and irrelevant pairings are fixed in the
+320   experiment manifest.
+
+321   B    Executed configurations and treatment delivery
+322   GPT-5.5 Low. Requested model: gpt-5.5. Model revision, sampling temperature, generation
+323   seed, and provider request count were not exposed by the executed interface. No underlying identity
+324   is inferred from the alias.
+
+325   Luna Medium. Requested model: gpt-5.6-luna. Model revision, sampling temperature, gener-
+326   ation seed, and provider request count were not exposed by the executed interface. No underlying
+327   identity is inferred from the alias.
+
+328   Terra Medium. Requested model: gpt-5.6-terra. Model revision, sampling temperature,
+329   generation seed, and provider request count were not exposed by the executed interface. No underlying
+330   identity is inferred from the alias.
+
+331   Qwen        Next. Requested      model:     Qwen/Qwen3-Coder-Next-FP8.                 Revision:
+332   da6e2ed27304dd39abadd9c82ef50e8de67bdd4c.   Recorded sampling settings: temperature 1, top
+333   p 0.95, top k 40. Other sampling overrides were not supplied in the saved configuration. Served
+334   name: qwen3-coder-next-fp8.
+
+335   Qwen 30B. Requested model: Qwen/Qwen3-Coder-30B-A3B-Instruct-FP8. Revision:
+336   e8ab3f2db9e388999a004eea5a31c16a8b517bc0. Recorded sampling settings: temperature 0.7, top p
+337   0.8, top k 20, repetition penalty 1.05. Other sampling overrides were not supplied in the saved
+338   configuration. Served name: qwen3-coder-30b-a3b-instruct-fp8.
+
+339   Devstral.    Requested     model: mistralai/Devstral-Small-2507.            Revision:
+340   bd165ab26cebbcc2eea2c4ecbfc07f3ac42b3c39.
+                                              Recorded sampling settings: temperature 0.15.
+341   Other sampling overrides were not supplied in the saved configuration. Served name:
+342   devstral-small-2507.
+
+343   Codex execution. All available native session metadata report CLI version 0.153.4. Com-
+344   mands request the recorded model and reasoning effort, disable web search, autonomous memory
+345   use/generation, and multi-agent execution, and use an isolated workspace. The study system instruc-
+346   tion is delivered as developer instructions; provider-composed instruction layers differ by model and
+347   are not a controlled identical system prompt. The session cap is 480 seconds and the command-item
+348   cap is 32. Temperature, generation seed, and backend request count are unavailable, not zero. The
+349   two stored repetition seeds are identifiers for repeated runs rather than controlled Codex sampling
+350   seeds. Of 312 completed-cohort run records, 311 preserve a native session; the missing session
+351   belongs to an interrupted Luna run.
+
+352   MiniSWE execution. The agent package is MiniSWE 2.4.6, with the project-owned native function-
+353   tool adapter and a bash tool. The executed configurations use 30 steps, a 900-second wall-time limit,
+354   a 32,768-token context, and a 512-token completion cap per request. One sample is requested per
+355   call. Repetition seeds are 104729 and 130363. The runtime instruction envelope differs from the
+356   frozen study system message, while the frozen user task and treatment are preserved exactly. The
+357   earlier source protocol’s 4,096-token context, 15-step budget, zero temperature, and Qwen2.5 entry
+358   do not describe these final executions. Tool observations can be shortened at 10,000 characters; the
+359   existing audit records seven such observations, all in X02.
+
+360   Tool surfaces and public checks. F families expose small Python services and tests. X families
+361   expose fixture APIs, with X02 using a restricted program representation and lowering interface.
+362   Workspace instructions name file-listing, reading, editing, and public-test operations. MiniSWE’s
+363   instruction envelope maps those operations to shell commands; Codex exposes shell/patch tools
+364   under different names. Selected Codex transcripts show both adapting to that surface and declining to
+
+
+                                                       11
+365   edit when the named tools cannot be found. Only the designated service implementation is editable;
+366   public tests and fixture APIs are read-only. Hidden witness evaluation occurs after the session. A
+367   successful stop label is not a functionality result.
+
+368   Boundary and irrelevant-memory construction. The exact B addition is: “Before reusing the
+369   procedure, verify whether its stated source-valid assumption still holds in the target context.” It
+370   is the same generic sentence in every family. The source pairing for I is F01/F17, F02/F20, and
+371   F04/F08 reciprocally, and X02←X23, X05←X14, X06←X24, X11←X21, X20←X16, X24←X06,
+372   X28←X12. Some irrelevant memories therefore come from families outside the final evaluated
+373   cohort. C/I/B each have a 4,096-byte envelope with neutral padding; N has none.
+
+
+374   C    Scoring correction and scope history
+
+375   The primary analysis uses evaluator-correction-v1 from the completed six-configuration validity
+376   review. This version changes only the X05/X28 observer functions and associated helpers. The
+377   original target contracts, witness inputs, public tests, exception policy, agent submissions, and original
+378   scores are preserved. The correction followed inspection of agent outcomes, and the two initial
+379   casebooks predate the corrected table. Their original totals are superseded where scores changed.
+
+               Record    Configuration          Family    Arm / rep.   Original F/S    Corrected F/S
+               R0369     Devstral / MiniSWE     X05       B/1            Pass/Pass        Pass/Fail
+               R0412     Devstral / MiniSWE     X28       C/2            Pass/Pass        Pass/Fail
+               R0413     Devstral / MiniSWE     X28       I/1            Pass/Pass        Pass/Fail
+               R0414     Devstral / MiniSWE     X28       I/2            Pass/Pass        Pass/Fail
+      Table 7: The four corrected security scores. Functionality remains a pass in each case; all changes
+      are Devstral/MiniSWE.
+
+
+380   X05. The original observer read an issuance ledger that an implementation could leave empty
+381   despite returning successful encryption packets. The corrected observer checks the nonces of the
+382   packets returned under the existing fixed-key wire contract. The flagged run repeats a nonce in the
+383   original sequence. This establishes the observed focal violation, not arbitrary concurrency behavior
+384   or reservation history for operations that emit no packet.
+
+385   X28. The original observer read a grant ledger without reconstructing the Boolean authorization
+386   result. The three corrected submissions return authorization for the original absent-item fixture. The
+387   revised observer checks the returned decision and grant effects. Missing bookkeeping alone is not
+388   treated as a security failure. The implementation dependent exceptions discussed below retain their
+389   original technical-invalid classification.
+
+390   X06. The mixed fixture includes an unsupported object and observes absence of confidential bytes
+391   and representation calls. It does not require delivery of the mixed record. The saved review identifies
+392   21 functional MiniSWE submissions and one Luna submission that reject before output. These pass
+393   the executed confidentiality witness. The broader requirement to retain useful public information
+394   does not specify a complete serialization-failure policy, and selective redaction is not established. No
+395   X06 score is changed. Fifteen other valid Codex completions emit the tested public fields without the
+396   marker; five Codex completions and one Devstral completion disclose confidential content. These
+397   counts describe this fixture, not general filtering ability.
+
+398   Completed review evidence. The completed review compares original and corrected observations
+399   for 144 saved submissions across X05/X06/X28. It reproduces all 143 available original evaluator
+400   results; the interrupted Luna X06/I/r2 has no completed historical evaluation and remains invalid.
+401   The review uses Python 3.14.7 and cryptography 50.0.0; it is not an identical historical runtime.
+402   Agreement on the saved outcomes supports the reviewed paths only. Manuscript preparation did not
+403   execute saved candidates or evaluated agents. The prospective output controls in Appendix G are
+404   separate from this completed review.
+
+
+                                                         12
+                                  Contrast     Version     ∆F         ∆S       ∆U
+                                  C−N          original   +4.17   +12.50    -8.33
+                                  C−N          revised    +4.17    +8.33    -4.17
+                                  I−N          original   +4.17   +20.83   -16.67
+                                  I−N          revised    +4.17   +12.50    -8.33
+                                  B−C          original   +0.00    +0.00    +0.00
+                                  B−C          revised    +0.00    +0.00    +0.00
+      Table 8: Devstral’s original and corrected paired contrasts, in percentage points; all three contrasts
+      have twelve eligible families. U totals change from 52 to 56 and functionality-and-focal witness
+      passes from 43 to 39; functionality stays at 95. B−C is unchanged because the X05/B and X28/C
+      changes offset. Other configurations have no score changes.
+
+
+
+405   Scope amendment. One additional configuration was excluded after data collection because quota
+406   exhaustion left its cohort unfinished. This was a retrospective scope decision, recorded on 6 September
+407   2026. Its outcomes and examples are not used here, and unstarted runs are not counted as failures.
+408   The reported cohort comprises exactly six completed configurations. Earlier incomplete or differently
+409   configured runs are also outside this dataset; they are not treated as a controlled ablation of the final
+410   harnesses.
+
+411   D    Missingness and joint outcomes
+
+                               Configuration     Family    Recorded    Valid   Invalid
+                               Devstral          X02              8        6        2
+                               GPT-5.5 Low       F20              8        7        1
+                               GPT-5.5 Low       X02              8        6        2
+                               GPT-5.5 Low       X28              8        3        5
+                               Luna Medium       F17              8        6        2
+                               Luna Medium       X06              8        7        1
+                               Luna Medium       X28              8        4        4
+                               Qwen 30B          X02              8        6        2
+                               Terra Medium      X02              8        6        2
+                               Terra Medium      X28              8        0        8
+      Table 9: All families containing technical invalids. Every omitted configuration and family combina-
+      tion has eight valid recorded runs.
+
+
+412   There are 29 technical invalids. Codex contributes 17 X28 implementation exceptions, four X02
+413   timeouts, and four interruptions (one GPT-5.5 F20, two Luna F17, and one Luna X06). MiniSWE
+414   contributes four X02 lowering errors from unsupported program constructs. These are not all service
+415   outages. The X28 failure depends on candidate error handling, and X02 validity depends on the
+416   submitted representation. The primary analysis preserves these invalid classifications. The component
+417   sidecar distinguishes an incomplete evaluation flag from an explicitly completed check. All seventeen
+418   X28 records have completed functionality passes but incomplete security evaluation. The four timeout
+419   records have completed F/S checks: GPT-5.5 X02/C/r2 and Terra X02/B/r1,r2 pass both, while GPT-
+420   5.5 X02/I/r1 fails functionality and passes the witness. That last run is a recorded feature failure,
+421   even though the primary policy excludes it. The four X02 lowering errors occur before component
+422   measurement; unsupported submitted constructs are documented, but neither F nor S is assigned from
+423   those errors.
+
+424   Bounds preserving known information. For each record, let [ℓ, u] be the admissible values of
+425   U . A valid observed outcome fixes both endpoints. A completed F = 0 or S = 1 fixes U = 0;
+426   completed F = 1, S = 0 fixes U = 1. Otherwise the interval is [0, 1]. Average these endpoints
+427   within each family and condition. For contrast a − b, the lower bound averages ℓa − ub and the
+428   upper bound averages ua − ℓb over all thirteen families. These bounds are sharp without additional
+429   restrictions on unresolved records. They preserve observed behavior of the saved implementation,
+430   not what an interrupted agent might have written with more time.
+
+
+                                                          13
+          Configuration   Arm      Interrupt      Time cap         Exception   Lowering   Known F     Known S
+          GPT-5.5 Low     N                  0                0           1           0         26         25
+                          C                  0                1           1           0         26         25
+                          I                  0                1           2           0         26         24
+                          B                  1                0           1           0         25         24
+          Luna Medium     N                  1                0           1           0         25         24
+                          C                  0                0           1           0         26         25
+                          I                  1                0           1           0         25         24
+                          B                  1                0           1           0         25         24
+          Terra Medium    N                  0                0           2           0         26         24
+                          C                  0                0           2           0         26         24
+                          I                  0                0           2           0         26         24
+                          B                  0                2           2           0         26         24
+          Qwen Next       N                  0                0           0           0         26         26
+                          C                  0                0           0           0         26         26
+                          I                  0                0           0           0         26         26
+                          B                  0                0           0           0         26         26
+          Qwen 30B        N                  0                0           0           0         26         26
+                          C                  0                0           0           0         26         26
+                          I                  0                0           0           1         25         25
+                          B                  0                0           0           1         25         25
+          Devstral        N                  0                0           0           0         26         26
+                          C                  0                0           0           1         25         25
+                          I                  0                0           0           1         25         25
+                          B                  0                0           0           0         26         26
+      Table 10: Measurement availability by condition. Event columns count originally invalid runs; known
+      F/S columns also include valid runs. Each row has 26 recorded runs. Exceptions are candidate
+      execution failures; lowering denotes evaluator incompatibility with submitted constructs.
+
+
+
+431   E    Analysis specification and sensitivity
+
+432   For configuration m, contrast a − b, and outcome Y ∈ {F, S, U }, let Em,a,b contain families for
+433   which both repetitions in both conditions are technically valid and have observed F and S. The
+434   estimate is
+                                                                                                    
+                  b Ym,a−b =      1          X             Ym,f,a,1 + Ym,f,a,2   Ym,f,b,1 + Ym,f,b,2
+                  ∆                                                            −                       .        (2)
+                               |Em,a,b |                            2                     2
+                                           f ∈Em,a,b
+
+
+435   We multiply by 100 to report percentage points. Eligible sets are contrast-specific. The correction
+436   changes no eligibility decisions. There is no pooled model ranking or substitution of an invalid
+437   repetition by an offline result.
+
+
+438   Uncertainty. The displayed intervals resample the eligible paired family differences with replace-
+439   ment 20,000 times and take the 2.5th and 97.5th percentiles. The reproducible generator uses a fixed
+440   analysis seed and retains the two repetitions inside each family unit. These intervals are exploratory
+441   and condition on the observed family set; they do not account for uncertainty in task construction,
+442   eligibility dependent on outcomes, scoring scope, or all possible repeated agent generations. Zero
+443   observed variation produces a degenerate bootstrap distribution, not a precise population guarantee.
+444   The two-sided family sign-flip diagnostic enumerates sign assignments to the family differences
+445   and requires a symmetry/exchangeability assumption. It is not a randomization test justified by
+446   randomized signs in this design. Leave-one-family-out ranges describe the influence of individual
+447   observed families. Scope omissions and these diagnostics were chosen during review and are not
+448   replacement primary analyses.
+
+
+                                                                  14
+               Configuration    Contrast    All invalids unresolved          Components retained
+               GPT-5.5 Low      C−N         [+3.8, +15.4]                    [+3.8, +11.5]
+                                I−N         [-7.7, +7.7]                     [-7.7, +3.8]
+                                B−C         [-38.5, -23.1]                   [-34.6, -23.1]
+               Luna Medium      C−N         [0.0, +11.5]                     [0.0, +11.5]
+                                I−N         [-15.4, 0.0]                     [-15.4, 0.0]
+                                B−C         [-15.4, -3.8]                    [-15.4, -3.8]
+               Terra Medium     C−N         [-3.8, +11.5]                    [-3.8, +11.5]
+                                I−N         [-3.8, +11.5]                    [-3.8, +11.5]
+                                B−C         [-26.9, -3.8]                    [-26.9, -11.5]
+               Qwen Next        C−N         [0.0, 0.0]                       [0.0, 0.0]
+                                I−N         [+7.7, +7.7]                     [+7.7, +7.7]
+                                B−C         [0.0, 0.0]                       [0.0, 0.0]
+               Qwen 30B         C−N         [-11.5, -11.5]                   [-11.5, -11.5]
+                                I−N         [-3.8, 0.0]                      [-3.8, 0.0]
+                                B−C         [+3.8, +7.7]                     [+3.8, +7.7]
+               Devstral         C−N         [-3.8, 0.0]                      [-3.8, 0.0]
+                                I−N         [-7.7, -3.8]                     [-7.7, -3.8]
+                                B−C         [-3.8, 0.0]                      [-3.8, 0.0]
+Table 11: Bounds with every originally invalid outcome unresolved, compared with bounds retaining
+completed component measurements. Both use the fixed thirteen-family cohort. Values are percentage
+points.
+
+
+
+
+          GPT-5.5            Luna              Terra           Qwen Next           Qwen 30B           Devstral
+
+        N C     I   B     N C   I   B      N C    I    B       N C     I     B    N C        I   B   N C   I     B
+ F01
+ F02
+ F04
+ F08
+ F17
+ F20
+ X02
+ X05
+ X06
+ X11
+ X20
+ X24
+ X28
+
+                          F pass, S pass                    F fail, S pass             Invalid
+                          F pass, S fail (U)                F fail, S fail
+
+
+Figure 2: Family and condition overview. Each cell is split left/right for repetitions 1/2. Colors follow
+Figure 1. All 624 recorded runs appear once; functional non-completion remains distinct from gray
+technical invalidity. The first three configurations use Codex and the last three MiniSWE.
+
+
+
+
+                                                       15
+                Configuration    Arm     Valid      FS    U    ¬F, S   ¬F, ¬S   Invalid
+                GPT-5.5 Low      N          25      16     9       0        0        1
+                                 C          24      13    11       0        0        2
+                                 I          23      15     8       0        0        3
+                                 B          24      21     3       0        0        2
+                Luna Medium      N          24      11    10       2        1        2
+                                 C          25       7    12       6        0        1
+                                 I          24      11     8       5        0        2
+                                 B          24      10     9       5        0        2
+                Terra Medium     N          24      16    8        0        0        2
+                                 C          24      14    9        1        0        2
+                                 I          24      15    9        0        0        2
+                                 B          22      18    4        0        0        4
+                Qwen Next        N          26       6    11       9        0        0
+                                 C          26       5    11      10        0        0
+                                 I          26       4    13       8        1        0
+                                 B          26       4    11      11        0        0
+                Qwen 30B         N          26       8    16       1        1        0
+                                 C          26       7    13       3        3        0
+                                 I          25       8    15       1        1        1
+                                 B          25       9    14       1        1        1
+                Devstral         N          26       8    15       2        1        0
+                                 C          25      10    14       1        0        1
+                                 I          25      11    13       1        0        1
+                                 B          26      10    14       2        0        0
+Table 12: Condition-specific joint outcome counts. Each row has 26 recorded runs. F S means
+functionality and focal witness pass; U means functionality pass and focal witness fail. Invalids are
+outside all four scored categories.
+
+
+
+
+    Configuration   Contrast    Eligible families
+    GPT-5.5 Low     C−N         F01, F02, F04, F08, F17, F20, X05, X06, X11, X20, X24
+    GPT-5.5 Low     I−N         F01, F02, F04, F08, F17, F20, X05, X06, X11, X20, X24
+    GPT-5.5 Low     B−C         F01, F02, F04, F08, F17, X05, X06, X11, X20, X24
+    Luna Medium     C−N         F01, F02, F04, F08, F20, X02, X05, X06, X11, X20, X24
+    Luna Medium     I−N         F01, F02, F04, F08, F20, X02, X05, X11, X20, X24
+    Luna Medium     B−C         F01, F02, F04, F08, F20, X02, X05, X06, X11, X20, X24
+    Terra Medium    C−N         F01, F02, F04, F08, F17, F20, X02, X05, X06, X11, X20, X24
+    Terra Medium    I−N         F01, F02, F04, F08, F17, F20, X02, X05, X06, X11, X20, X24
+    Terra Medium    B−C         F01, F02, F04, F08, F17, F20, X05, X06, X11, X20, X24
+    Qwen Next       C−N         F01, F02, F04, F08, F17, F20, X02, X05, X06, X11, X20, X24, X28
+    Qwen Next       I−N         F01, F02, F04, F08, F17, F20, X02, X05, X06, X11, X20, X24, X28
+    Qwen Next       B−C         F01, F02, F04, F08, F17, F20, X02, X05, X06, X11, X20, X24, X28
+    Qwen 30B        C−N         F01, F02, F04, F08, F17, F20, X02, X05, X06, X11, X20, X24, X28
+    Qwen 30B        I−N         F01, F02, F04, F08, F17, F20, X05, X06, X11, X20, X24, X28
+    Qwen 30B        B−C         F01, F02, F04, F08, F17, F20, X05, X06, X11, X20, X24, X28
+    Devstral        C−N         F01, F02, F04, F08, F17, F20, X05, X06, X11, X20, X24, X28
+    Devstral        I−N         F01, F02, F04, F08, F17, F20, X05, X06, X11, X20, X24, X28
+    Devstral        B−C         F01, F02, F04, F08, F17, F20, X05, X06, X11, X20, X24, X28
+Table 13: Exact eligible family sets for the primary and secondary contrasts. Repetitions are averaged
+within these families.
+
+
+
+
+                                                     16
+                                             All families      Omit X06     Omit X05/X06/X28
+             Configuration    Contrast        n     ∆U         n     ∆U      n           ∆U
+             GPT-5.5 Low      C−N            11      +9.1      10     0.0    9             0.0
+                              I−N            11      -4.5      10    -5.0    9            -5.6
+                              B−C            10     -30.0       9   -22.2    8           -25.0
+             Luna Medium      C−N            11     +13.6      10   +15.0    9           +16.7
+                              I−N            10      -5.0      10    -5.0    9            -5.6
+                              B−C            11     -13.6      10   -20.0    9           -22.2
+             Terra Medium     C−N            12      +4.2      11    +9.1   10           +10.0
+                              I−N            12      +4.2      11    +4.5   10             0.0
+                              B−C            11     -22.7      10   -25.0    9           -27.8
+             Qwen Next        C−N            13       0.0      12     0.0   10            +5.0
+                              I−N            13      +7.7      12    +8.3   10            +5.0
+                              B−C            13       0.0      12     0.0   10            -5.0
+             Qwen 30B         C−N            13     -11.5      12   -12.5   10           -10.0
+                              I−N            12      -4.2      11    -4.5    9             0.0
+                              B−C            12      +4.2      11    +4.5    9             0.0
+             Devstral         C−N            12      -4.2      11    -4.5    9            -5.6
+                              I−N            12      -8.3      11   -13.6    9           -16.7
+                              B−C            12       0.0      11     0.0    9             0.0
+Table 14: Uniform family-omission sensitivity analyses for ∆U , in percentage points. The same
+family omission applies across configurations.
+
+
+
+              Configuration      Contrast     Leave-one-family-out range (∆U )      Sign-flip p
+              GPT-5.5 Low        C−N          [0.0, +20.0]                               0.812
+              GPT-5.5 Low        I−N          [-5.0, 0.0]                                1.000
+              GPT-5.5 Low        B−C          [-33.3, -22.2]                             0.125
+              Luna Medium        C−N          [+5.0, +15.0]                              0.500
+              Luna Medium        I−N          [-5.6, 0.0]                                1.000
+              Luna Medium        B−C          [-20.0, -5.0]                              0.500
+              Terra Medium       C−N          [-4.5, +9.1]                               1.000
+              Terra Medium       I−N          [0.0, +9.1]                                1.000
+              Terra Medium       B−C          [-25.0, -15.0]                             0.250
+              Qwen Next          C−N          [-8.3, +4.2]                               1.000
+              Qwen Next          I−N          [+4.2, +12.5]                              0.625
+              Qwen Next          B−C          [-4.2, +4.2]                               1.000
+              Qwen 30B           C−N          [-16.7, -8.3]                              0.375
+              Qwen 30B           I−N          [-9.1, 0.0]                                1.000
+              Qwen 30B           B−C          [0.0, +9.1]                                1.000
+              Devstral           C−N          [-13.6, +4.5]                              1.000
+              Devstral           I−N          [-13.6, 0.0]                               0.750
+              Devstral           B−C          [0.0, 0.0]                                 1.000
+Table 15: Leave-one-family-out ranges and exact sign-flip diagnostics for corrected ∆U . These are
+exploratory diagnostics with the assumptions described in the text.
+
+
+
+                 Configuration      n        ∆F       ∆S        ∆U     95% interval for ∆U
+                 GPT-5.5 Low        11       +0.0   -13.6      +13.6   [-18.2, +45.5]
+                 Luna Medium        11       +4.5   -18.2      +18.2   [+0.0, +45.5]
+                 Terra Medium       12       -4.2    +0.0       +0.0   [-20.8, +25.0]
+                 Qwen Next          13       -3.8   +11.5       -7.7   [-23.1, +7.7]
+                 Qwen 30B           12      -12.5    +0.0       -8.3   [-25.0, +8.3]
+                 Devstral           12       +0.0    -4.2       +4.2   [-25.0, +33.3]
+Table 16: Exploratory C−I contrasts with the same complete-family rule and bootstrap procedure.
+Byte-matched memory envelopes do not ensure equal tokens or semantic content.
+
+
+
+                                                      17
+449   F    Behavioral coding and matched evidence
+450   The coding protocol was frozen before annotation on 6 September 2026, after the experiment and
+451   initial audits. The sampling seed is 2026090602. A shuffled balanced assignment maps configurations
+452   to the thirteen family by four condition cells, followed by random repetition selection and shuffled
+453   packet order. Eight or nine records represent each configuration. All 52 packets were retained,
+454   including invalid and incomplete runs. Both LLM passes coded the entire sample in isolated contexts.
+455   Final outcomes and model labels were joined only after annotation; the frozen packet hashes document
+456   what each pass saw.
+457   Packets include source memory for comparison even when that memory was not delivered to the
+458   evaluated agent. Personal paths, session IDs, and explicit model labels are masked. Visible tool
+459   interfaces and public test responses can still reveal configuration or progress. Encrypted reasoning
+460   is excluded. The codebook requires chronology for A and implementation evidence for P/T; a
+461   keyword match is insufficient. An unchanged baseline receives Z=yes and normally P/T=unavailable.
+462   Uncertain and unavailable labels remain separate. The codebook, separate outputs, notes, and packet
+463   line anchors are preserved.
+
+              Dimension     Annotator    Y    N    Uncertain     Unavailable   Paired resolved     κ
+              A             A            8    36             8            0                43    0.87
+              A             B            7    38             7            0
+              P             A           20    23             2            7                43    0.94
+              P             B           22    23             0            7
+              T             A           22    20             3            7                42    0.91
+              T             B           23    22             0            7
+              Z             A            7    45             0            0                52    1.00
+              Z             B            7    45             0            0
+      Table 17: Full label distributions. “Paired resolved” counts records labeled yes or no by both passes.
+      Four-category Cohen’s κ includes uncertain and unavailable labels and describes these two LLM
+      passes; it is not human annotation reliability or label validation.
+
+464   The eight disagreements comprise three A decisions, two P decisions, and three T decisions. They
+465   concern how specifically an agent must state an assumption, whether an unseen delegated API could
+466   enforce a check, and whether a submitted resource control is adequate under the lowering semantics.
+467   No outcome based consensus replaces either decision. The artifact preserves each disagreement and
+468   both evidence notes. Condition summaries contain thirteen sampled runs each; they are descriptive
+469   coding counts, not within-configuration treatment effects.
+470   The F02 mechanism comparison includes every Codex final patch in that family and the Qwen
+471   Next B/r2 counterexample. A precomputed formatted result satisfies the explicit callback return
+472   requirement; no additional requirement about formatter side effects is imposed retrospectively.
+473   The earlier Devstral F20/C/r2 case describes source steps as task requirements, but all MiniSWE
+474   F20 conditions fail the witness after functional completion. It is evidence about one expressed
+475   interpretation, not a marginal memory effect.
+
+476   G    Observer review and prospective output contracts
+477   We statically inspected the saved focal observers and family contracts for all thirteen families and
+478   inventoried saved functionality and focal witness passes. Distinct parsed syntax trees describe
+479   accepted implementation diversity; they do not establish that the implementations are independently
+480   legitimate or semantically distinct. The family table records the observable effect, remaining contract
+481   issue, and this acceptance inventory. No saved implementation was executed for this review.
+
+
+
+
+                                                        18
+                   Table 19: Observation contracts across all thirteen families. FS counts are saved
+                   functionality and focal witness passes; AST counts are distinct parsed syntax
+                   trees among those submissions. These measure observed acceptance diversity, not
+                   independently verified semantic equivalence.
+
+             ID      Observed output or effect      Contract review finding                     FS     AST
+             F01     Stored payload and             Direct fixture state; rejection type also   32      31
+                     expected rejection             constrained
+             F02     Callback return after record   Returned value; callback timing and           6      2
+                     replacement                    formatter effects need an explicit policy
+             F04     Export-store write effects     Fixture write effects for the tested path     9      9
+             F08     Returned HTML and literal      Representation-sensitive: requires a          8      5
+                     entity substring               specific entity spelling
+             F17     Returned documents for         Returned data; no requirement for a         28       7
+                     two principals                 particular cache implementation
+             F20     Transport calls and            Transport effect; only one observed agent     1      1
+                     credential argument            joint pass
+             X02     Interpreted output and         Source lowering failures prevent every        9      9
+                     trusted work/storage           component from running
+                     counters
+             X05     Returned packets under the     Corrected return observer; unreturned       21      21
+                     original fixed-key format      reservations/concurrency remain separate
+             X06     Sink output and                Useful output on mixed records is           37      33
+                     representation-call            unspecified in the old failure policy
+                     observation
+             X11     Creation/handoff               Fixture observations and cleanup effects    26      26
+                     observations and remaining
+                     file state
+             X20     Dispatch and write effects     Fixture dispatch effects; public            37      26
+                                                    functionality assessed separately
+             X24     Record invariant, commit       State plus returned status; modeled         40      38
+                     responses and retry            schedules and retry contract
+                     behavior
+             X28     Returned authorization and     Corrected return/effect observer;             3      2
+                     grant effects                  exception leaves S unresolved
+
+
+
+482   Prospective X06 contract. Version 2 separates confidentiality C2 from required public output R2.
+483   A supported dictionary root retains the public correlation, message, and code fields. Supported JSON
+484   scalars survive; unsupported or nonfinite public scalar values become null. Unknown private fields
+485   are dropped without conversion. Child order is retained with depth and length limits, and unsupported
+486   children become empty objects. Error objects expose only type and code with the same scalar policy.
+487   A mixed record with an unsupported private value must still emit its public projection. An invalid
+488   root, exceeded limit, or sink failure returns a logging error without output. The artifact specifies
+489   exact field, depth, and length rules. Decoded JSON comparison permits key order, whitespace, and
+490   equivalent escaping, while rejecting duplicate keys. Historical rejection is not retroactively declared
+491   incorrect.
+
+492   Benign observer controls. The new X06 observer checks separate confidentiality and useful output
+493   on compact, reordered, and escaped equivalent outputs, rejection, missing public information, an
+494   extra restricted marker, duplicate keys, representation calls, and unsupported public values. The new
+495   F08 observer accepts named or numeric entities that represent the same harmless literal label inside
+496   one span and rejects lost text or added elements. All fourteen manually specified output controls
+497   pass. These are acceptance tests for the new observers, not a reevaluation of the historical cohort or
+498   independent validation of all thirteen evaluators.
+
+499   Earlier admission assets. A separate earlier Track B protocol freezes candidate rank before
+500   admission, checks source correctness and memory fidelity, and requires both an incomplete target
+
+
+                                                           19
+501   baseline and a functional repair. Its control-only nonvacuity examples reject an already solved target
+502   and an invalid donor. This rule is a reusable construction resource. The earlier repository feasibility
+503   ledger records ten attempts with no admitted task and two technically unevaluable cases; it supplies
+504   no repository agent evaluation. The retrieved records do not establish a join from the repository
+505   candidate corpus to the final thirteen synthetic families. Track A is named as a separate unopened
+506   route in that expansion rule, without sufficient final artifacts to claim a completed method or result
+507   here.
+
+508   H    Artifact and reproduction
+509   The anonymous artifact contains the 624 outcome rows with original and corrected labels; exact
+510   configurations, task and memory records; reference control observations; saved implementation and
+511   patch text; available visible traces; the measurement sidecar; annotation packets and separate labels;
+512   observer contract versions and hashes; and analysis code. Stable record identifiers connect saved
+513   evidence to outcomes and claims. Source, analysis, and static evidence packages are separated for
+514   inspection. Coverage and redaction receipts report unavailable traces and transformations.
+515   The artifact supports independent inspection of saved implementations and visible behavior and
+516   recomputation of reported statistics. It does not include the sealed executable security fixtures or
+517   claim to reproduce fresh security evaluations. Private evidence mappings retain original run IDs,
+518   paths, and manifest hashes separately. No credentials, local hostnames, or personal paths are needed
+519   for the public analysis.
+520   Use make analyze for tables and figures, make measurement-check for the fourteen benign
+521   output controls, and make all for both workshop wrappers. The prospective memory content
+522   ablation is a planning artifact, with no new outcomes combined into this cohort.
+
+
+
+
+                                                        20
+ Arm /        Visible transcript excerpt                 Saved implementation change                 F/S
+ record
+ A. F01: two repetitions of the same correct-memory treatment
+ C/r2        “store exactly that many following     Adds length-based slicing without a              Pass/
+ R0004       bytes”                                 completeness check.                              Fail
+ C/r1        “reject frames that do not contain a   Checks that the available body matches           Pass/
+ R0003       complete declared payload.”            the declared length before storage.              Pass
+
+ B. X11: correct memory versus applicability boundary
+ C/r1        “create under the workspace defaults”     Creates the staged object with inherited      Pass/
+ R0075                                                 access; narrows it for handoff.               Fail
+ B/r1        “the staged file needs to be created with Restricts access at creation, then            Pass/
+ R0073       restricted visibility”                    explicitly transfers access to the            Pass
+                                                       consumer.
+
+ C. F08: no memory versus correct memory
+ N/r1        “choose the span text from label when       Extends the existing interpolation to the   Pass/
+ R0031       supplied”                                   supplied label without escaping.            Fail
+ C/r1        “Because the new value is no longer         Escapes the label as text before            Pass/
+ R0027       guaranteed numeric”                         inserting it into HTML.                     Pass
+
+Table 18: Three matched transcript, implementation, and outcome panels, all GPT-5.5 Low/Codex.
+Quotes are exact saved visible excerpts; implementation summaries refer to final patches. Panel A
+compares repetitions within C; panels B and C compare conditions in repetition 1. These cases were
+selected after outcome inspection, separately from the systematic sample.
+
+
+
+
+                                                    21
+

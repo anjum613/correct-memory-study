@@ -1,0 +1,320 @@
+## Audit result
+
+1. Local repository
+
+- HEAD is exactly `b4bdd8156b884ba9dfb9c08e1955a7e90a72bb09`.
+- Branch: `feat/bounded-candidate-canary-20260816`.
+- Status is clean: no staged, tracked, or untracked changes.
+- Final `git diff` and `git diff --cached` are empty.
+- The three requested commits exist locally:
+  - `7649b145ee9dc96a185c9b8c1adc0b8f22b11fb6`
+  - `a7b400f37133da521068649a6d83a8f25ab77203`
+  - `b4bdd8156b884ba9dfb9c08e1955a7e90a72bb09`
+
+2. HPC Git/worktree state
+
+The mount is a linked worktree:
+
+```text
+/home/anjum/hpc-candidate-canary-audit
+  -> /home/s224049759/projects/correct-memory-study/.git/worktrees/benchmark-selection-v1
+```
+
+Its `.git` pointer is visible at [.git](/home/anjum/hpc-candidate-canary-audit/.git), but the referenced HPC Git directory is not mounted. Therefore local `git -C` cannot inspect HPC HEAD, refs, object availability, status, or registered worktrees.
+
+The five files changed between `292fe438f` and the requested commits exactly match their `292fe438f` blobs in the mounted checkout. They do not match `7649b145e`, `a7b400f37`, or `b4bdd8156`. Thus the mounted candidate-discovery implementation is at the `292fe438f` content level, but that does not prove its actual HPC HEAD or whether the three newer commits exist in the HPC object database.
+
+Exact later HPC check:
+
+```bash
+set -euo pipefail
+export GIT_OPTIONAL_LOCKS=0
+
+HPC_REPO=/home/s224049759/projects/correct-memory-study
+
+git -C "$HPC_REPO" rev-parse --show-toplevel --git-dir HEAD
+git -C "$HPC_REPO" status --short --branch --untracked-files=all
+git -C "$HPC_REPO" worktree list --porcelain
+
+for commit in \
+  292fe438f8d022a303ac97c89be9366a06aa42af \
+  7649b145ee9dc96a185c9b8c1adc0b8f22b11fb6 \
+  a7b400f37133da521068649a6d83a8f25ab77203 \
+  b4bdd8156b884ba9dfb9c08e1955a7e90a72bb09
+do
+    if git -C "$HPC_REPO" cat-file -e "$commit^{commit}" 2>/dev/null; then
+        printf '%s EXISTS\n' "$commit"
+    else
+        printf '%s MISSING\n' "$commit"
+    fi
+done
+```
+
+## File-supported HPC settings
+
+Generic, established CPU settings—not proven specifically for candidate discovery:
+
+| Setting | File-supported value |
+|---|---|
+| User/home | `/home/s224049759` |
+| Account | `hpc` |
+| Partition | `Virtual` |
+| QoS | `normal` |
+| Nodes/tasks | 1 node, 1 task |
+| CPUs | 1 CPU per task |
+| Memory | 2 GB |
+| Modules | No module load is required by the established CPU preflight pattern |
+| Python | `/home/s224049759/environments/cmpilot-conda/bin/python` |
+| Python version recorded | 3.11.15 |
+| Main repository | `/home/s224049759/projects/correct-memory-study` |
+| Worktree parent | `/home/s224049759/projects/worktrees` |
+| Artifact parent | `/home/s224049759/run-artifacts` |
+| Slurm logs | `/home/s224049759/slurm-logs` |
+
+Representative evidence is in [mini_swe_adapter_preflight.sbatch](/home/anjum/hpc-candidate-canary-audit/slurm/mini_swe_adapter_preflight.sbatch:1) and [freeze-manifest.json](/home/anjum/hpc-candidate-canary-audit/qualification/qwen32b-v1/freeze-manifest.json:228).
+
+Candidate-discovery-specific evidence:
+
+- Existing discovery artifacts prove execution with commits through `292fe438f`.
+- They do not record account, partition, QoS, CPUs, memory, module state, or interpreter path.
+- The committed CLI default token location is `Path.home() / ".config/cmpilot/github-read-token"` in [execute_candidate_discovery_v03.py](/home/anjum/candidate-discovery-canary-20260816/scripts/execute_candidate_discovery_v03.py:53). For the established HPC home this derives:
+  `/home/s224049759/.config/cmpilot/github-read-token`.
+- The mount does not expose that credential file, so its existence, ownership, regular-file status, mode `0400`/`0600`, and validity remain unproven.
+
+## Canary contract
+
+Public syntax:
+
+```bash
+"$CMPILOT_PY" "$PROJECT/scripts/execute_candidate_discovery_v03.py" \
+  canary \
+  --run-directory "$RUN_DIR" \
+  --token-file /home/s224049759/.config/cmpilot/github-read-token \
+  --query-id TB-Q01
+```
+
+Offline verifier syntax:
+
+```bash
+"$CMPILOT_PY" "$PROJECT/scripts/execute_candidate_discovery_v03.py" \
+  verify-canary \
+  --run-directory "$RUN_DIR"
+```
+
+`TB-Q01` is the deterministic choice: it is the first query in frozen document order and the lexicographically lowest frozen query ID. Only its ID is supplied; the committed code resolves and verifies the unchanged frozen text. The frozen query is in [trust-boundary-issues-prs.json](/home/anjum/candidate-discovery-canary-20260816/benchmark-selection/discovery/prospective-v0.2/trust-boundary-issues-prs.json:83).
+
+Confirmed committed bounds:
+
+- Exactly one selected frozen query.
+- At most one logical GitHub Search request.
+- At most five unique source objects.
+- At most 100 physical API attempts across Search and detail requests.
+- Cooperative deadline: 2100 seconds.
+- Authoritative public hard termination:
+  `/usr/bin/timeout --signal=TERM --kill-after=15s 2085s ...`
+- TERM plus KILL ceiling: 2100 seconds.
+- The private worker rejects bypassing or changing that parent timeout contract.
+
+## Bundle creation
+
+Because HPC object availability is unknown, the safest bundle is self-contained. It advertises only the deployment branch but includes the ancestry required to import it without GitHub or pre-existing HPC objects.
+
+Do not execute until ready:
+
+```bash
+set -euo pipefail
+
+LOCAL_REPO=/home/anjum/candidate-discovery-canary-20260816
+EXPECTED=b4bdd8156b884ba9dfb9c08e1955a7e90a72bb09
+SOURCE_REF=refs/heads/feat/bounded-candidate-canary-20260816
+BUNDLE_NAME=candidate-canary-b4bdd8156.bundle
+BUNDLE="$LOCAL_REPO/$BUNDLE_NAME"
+
+cd "$LOCAL_REPO"
+test "$(git rev-parse "$SOURCE_REF^{commit}")" = "$EXPECTED"
+test ! -e "$BUNDLE"
+test ! -e "$BUNDLE.sha256"
+
+git bundle create "$BUNDLE" "$SOURCE_REF"
+git bundle verify "$BUNDLE"
+git bundle list-heads "$BUNDLE"
+test "$(git bundle list-heads "$BUNDLE" "$SOURCE_REF" | awk '{print $1}')" = "$EXPECTED"
+
+sha256sum "$BUNDLE_NAME" > "$BUNDLE_NAME.sha256"
+sha256sum -c "$BUNDLE_NAME.sha256"
+```
+
+A smaller three-commit bundle is safe only after HPC proves it has the prerequisite `292fe438f8d022a303ac97c89be9366a06aa42af`:
+
+```bash
+git bundle create candidate-canary-b4bdd8156-minimal.bundle \
+  292fe438f8d022a303ac97c89be9366a06aa42af..refs/heads/feat/bounded-candidate-canary-20260816
+```
+
+No file-supported, permitted local-to-HPC transfer channel was found. GitHub, SSH, SCP, and rsync are excluded, and the provided mount is read-only. An approved upload/shared-filesystem destination is therefore still required.
+
+## Later HPC import into a new worktree
+
+Assuming an approved transfer places both files at the paths below:
+
+```bash
+set -euo pipefail
+export GIT_OPTIONAL_LOCKS=0
+
+EXPECTED=b4bdd8156b884ba9dfb9c08e1955a7e90a72bb09
+HPC_REPO=/home/s224049759/projects/correct-memory-study
+BUNDLE_DIR=/home/s224049759/projects
+BUNDLE="$BUNDLE_DIR/candidate-canary-b4bdd8156.bundle"
+BUNDLE_SHA="$BUNDLE.bundle.sha256"
+IMPORT_REF=refs/canary-imports/b4bdd8156
+NEW_WORKTREE=/home/s224049759/projects/worktrees/candidate-canary-b4bdd8156
+
+test -f "$BUNDLE"
+test -f "$BUNDLE_SHA"
+test ! -e "$NEW_WORKTREE"
+if git -C "$HPC_REPO" show-ref --verify --quiet "$IMPORT_REF"; then
+    printf 'Import ref already exists: %s\n' "$IMPORT_REF" >&2
+    exit 1
+fi
+
+cd "$BUNDLE_DIR"
+sha256sum -c "$(basename "$BUNDLE_SHA")"
+git -C "$HPC_REPO" bundle verify "$BUNDLE"
+test "$(git -C "$HPC_REPO" bundle list-heads "$BUNDLE" \
+  refs/heads/feat/bounded-candidate-canary-20260816 | awk '{print $1}')" = "$EXPECTED"
+
+git -C "$HPC_REPO" fetch --no-tags "$BUNDLE" \
+  "refs/heads/feat/bounded-candidate-canary-20260816:$IMPORT_REF"
+
+test "$(git -C "$HPC_REPO" rev-parse "$IMPORT_REF^{commit}")" = "$EXPECTED"
+git -C "$HPC_REPO" worktree add --detach "$NEW_WORKTREE" "$EXPECTED"
+
+test "$(git -C "$NEW_WORKTREE" rev-parse HEAD)" = "$EXPECTED"
+test -z "$(git -C "$NEW_WORKTREE" status --porcelain=v1 --untracked-files=all)"
+git -C "$HPC_REPO" worktree list --porcelain
+```
+
+This adds objects, one isolated import ref, and one new registered worktree; it does not check out or rewrite any existing worktree.
+
+## Exact HPC preflight
+
+```bash
+set -euo pipefail
+export GIT_OPTIONAL_LOCKS=0
+export PYTHONDONTWRITEBYTECODE=1
+
+EXPECTED=b4bdd8156b884ba9dfb9c08e1955a7e90a72bb09
+PROJECT=/home/s224049759/projects/worktrees/candidate-canary-b4bdd8156
+CMPILOT_PY=/home/s224049759/environments/cmpilot-conda/bin/python
+TOKEN_FILE=/home/s224049759/.config/cmpilot/github-read-token
+
+test "$(id -un)" = s224049759
+test -d /home/s224049759/projects
+test -d /home/s224049759/projects/worktrees
+test -d /home/s224049759/run-artifacts
+test -d /home/s224049759/slurm-logs
+
+command -v sbatch
+command -v sacct
+command -v scontrol
+test -x /usr/bin/timeout
+test "$(readlink -f /usr/bin/timeout)" = /usr/bin/timeout
+
+scontrol show partition Virtual
+sacctmgr -nP show assoc where user=s224049759 account=hpc \
+  format=User,Account,Partition,QOS
+
+test -x "$CMPILOT_PY"
+"$CMPILOT_PY" --version
+test "$(git -C "$PROJECT" rev-parse HEAD)" = "$EXPECTED"
+test -z "$(git -C "$PROJECT" status --porcelain=v1 --untracked-files=all)"
+
+"$CMPILOT_PY" - "$PROJECT" "$TOKEN_FILE" <<'PY'
+import json
+import os
+from pathlib import Path
+import stat
+import sys
+
+project = Path(sys.argv[1])
+token_path = Path(sys.argv[2])
+sys.path.insert(0, str(project / "src"))
+
+from cmpilot.candidate_discovery_v03 import (
+    CANARY_DEADLINE_SECONDS,
+    CANARY_MAXIMUM_API_ATTEMPTS,
+    CANARY_MAXIMUM_SEARCH_REQUESTS,
+    CANARY_MAXIMUM_SOURCE_OBJECTS,
+    CANARY_TIMEOUT_KILL_AFTER_SECONDS,
+    CANARY_TIMEOUT_TERM_SECONDS,
+)
+from cmpilot.candidate_discovery_v03_io import read_token_file
+
+assert CANARY_MAXIMUM_SEARCH_REQUESTS == 1
+assert CANARY_MAXIMUM_SOURCE_OBJECTS == 5
+assert CANARY_MAXIMUM_API_ATTEMPTS == 100
+assert CANARY_DEADLINE_SECONDS == 2100
+assert CANARY_TIMEOUT_TERM_SECONDS == 2085
+assert CANARY_TIMEOUT_KILL_AFTER_SECONDS == 15
+assert CANARY_TIMEOUT_TERM_SECONDS + CANARY_TIMEOUT_KILL_AFTER_SECONDS <= 2100
+
+metadata = token_path.stat()
+assert stat.S_ISREG(metadata.st_mode)
+assert stat.S_IMODE(metadata.st_mode) in {0o400, 0o600}
+token = read_token_file(token_path)
+del token
+
+spec = json.loads((
+    project
+    / "benchmark-selection/discovery/prospective-v0.2/"
+      "trust-boundary-issues-prs.json"
+).read_text(encoding="utf-8"))
+assert len(spec["queries"]) == 8
+assert spec["queries"][0]["query_id"] == "TB-Q01"
+
+print("candidate_canary_preflight=PASS")
+PY
+
+"$CMPILOT_PY" "$PROJECT/scripts/execute_candidate_discovery_v03.py" --help
+```
+
+## Slurm script and submission
+
+A complete executable script and exact `sbatch --parsable` command are intentionally not issued. The user’s condition requires every value to be grounded first, but these required deployment facts remain unverified:
+
+- HPC Git object/ref state for the three requested commits.
+- An approved non-GitHub, non-SSH/SCP/rsync transfer channel and its exact destination.
+- Actual token-file existence and security validation.
+- Candidate-discovery-specific approval or demonstrated suitability of the generic CPU scheduler/interpreter settings.
+
+## Post-run decision procedure
+
+Once a grounded script exists, accounting should be checked with:
+
+```bash
+JOB_ID='<parsable-sbatch-job-id>'
+
+sacct -j "$JOB_ID" \
+  --format=JobIDRaw,JobName,Partition,Account,QOS,AllocCPUS,ReqMem,State,ExitCode,Elapsed,Timelimit \
+  --parsable2
+```
+
+Offline verification:
+
+```bash
+PROJECT=/home/s224049759/projects/worktrees/candidate-canary-b4bdd8156
+CMPILOT_PY=/home/s224049759/environments/cmpilot-conda/bin/python
+RUN_DIR='<exact-new-run-directory>'
+
+"$CMPILOT_PY" "$PROJECT/scripts/execute_candidate_discovery_v03.py" \
+  verify-canary \
+  --run-directory "$RUN_DIR"
+```
+
+Decision definitions:
+
+- `PASS`: Slurm job is `COMPLETED` with `ExitCode=0:0`; verifier exits zero; `pass=true`; status is `CANARY_COMPLETED_OPERATIONAL_SAMPLE`; termination reason is `CANARY_COMPLETED_WITHIN_BOUNDS`.
+- `BOUND_STOP_PASS`: Slurm job is `COMPLETED` with `ExitCode=0:0`; verifier exits zero; `pass=true`; status is `CANARY_STOPPED_AT_HARD_BOUND`; reason is exactly `CANARY_SEARCH_REQUEST_LIMIT_REACHED`, `CANARY_SOURCE_OBJECT_LIMIT_REACHED`, or `CANARY_API_ATTEMPT_LIMIT_REACHED`; the verifier proves the corresponding saturated count.
+- `FAIL`: Any other result, including missing/incomplete artifacts, verifier failure, identity/hash mismatch, nonzero Slurm exit, timeout/KILL, scheduler failure, `CANARY_RUNTIME_LIMIT_REACHED`, or any ordinary operational failure.
+
+STOPPED_HPC_AUDIT: HPC commit/object state, approved bundle transfer channel, actual token-file validation, and candidate-discovery-specific CPU deployment settings are not available from the mounted files

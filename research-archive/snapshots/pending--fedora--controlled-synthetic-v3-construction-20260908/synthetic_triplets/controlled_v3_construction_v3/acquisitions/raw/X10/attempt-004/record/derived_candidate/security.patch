@@ -1,0 +1,34 @@
+diff --git a/app/service.py b/app/service.py
+--- a/app/service.py
++++ b/app/service.py
+@@ -1,2 +1,28 @@
+-"""Executable canonical S for X10; source-valid context only."""
+-from synthetic_triplets.controlled_v3_executable_oracle_release_v1.agent_inputs.shared.agent_runtime import x10_source as run
++"""Deliver passive media only when its complete encoding is verified."""
++
++
++def _classify(payload):
++    if payload.startswith(b'TXT\x00'):
++        body = payload[4:]
++        if body and all(byte in (9, 10, 13) or 32 <= byte <= 126 for byte in body):
++            return 'text/plain'
++    if payload.startswith(b'PIX\x00') and len(payload) >= 6:
++        width, height = payload[4], payload[5]
++        if width and height and len(payload) == 6 + width * height * 3:
++            return 'image/x-local-pixels'
++    return None
++
++
++def run(media_sink, claimed_type, filename, payload_bytes):
++    if not isinstance(claimed_type, str) or not isinstance(filename, str):
++        return 'invalid'
++    if not isinstance(payload_bytes, bytes):
++        return 'invalid'
++
++    verified_type = _classify(payload_bytes)
++    if verified_type is not None and claimed_type == verified_type:
++        media_sink.deliver('inline', verified_type, filename, payload_bytes)
++        return 'inline'
++
++    media_sink.deliver('download', 'application/octet-stream', filename, payload_bytes)
++    return 'download'

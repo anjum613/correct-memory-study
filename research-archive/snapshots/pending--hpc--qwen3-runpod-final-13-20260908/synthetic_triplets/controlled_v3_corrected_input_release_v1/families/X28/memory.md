@@ -1,0 +1,1 @@
+# Frozen source memory X28\n\nProcedure: Grant access when the membership structure reports that an item is present.\n\nApplicability assumption: The membership structure's positive result is exact.\n

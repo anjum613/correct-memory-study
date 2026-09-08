@@ -1,0 +1,22 @@
+diff --git a/app/service.py b/app/service.py
+--- a/app/service.py
++++ b/app/service.py
+@@ -1,12 +1,16 @@
+-"""Handle registration with exact, case-sensitive ASCII identity."""
++"""Unicode handles with preserved display spelling and exact identity."""
++import unicodedata
+ from fixture_api import contracts as k
++
++if unicodedata.unidata_version != k.X03_UNICODE_VERSION:
++    raise RuntimeError("Unsupported Unicode database version")
+ 
+ 
+ def _valid(handle):
+     return (
+         isinstance(handle, str)
+         and k.X03_MIN_LENGTH <= len(handle) <= k.X03_MAX_LENGTH
+-        and all(c in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"
++        and all(c in "_-" or unicodedata.category(c)[0] in {"L", "M", "N"}
+                 for c in handle)
+     )
+ 

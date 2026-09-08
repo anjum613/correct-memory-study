@@ -1,0 +1,48 @@
+schema: cmpilot-v4-control-source-corpus-v1
+pinned_v4_commit: 5b21f286f7832864ca4eca9ee5795e058849b509
+target_id: control__bundle-import_0123456789abcdef0123456789abcdef01234567
+target_b_date_utc: "2026-01-02"
+target_b_timestamp_epoch: 1767312000
+ordering: V4_LEXICOGRAPHIC_MATCHER_THEN_CANONICAL_IDENTITY_HASH
+tie_breaking: V4_FROZEN_RULE
+fallback: PROHIBITED
+members:
+  - source_id: src-control-report-writer
+    role: RELEVANT_CANDIDATE
+    repository_url: https://control.invalid/report-writer.git
+    relative_root: source/relevant
+    source_file: report_writer.py
+    source_symbol: save_report
+    source_test: source_test.py
+    source_safety_test: source_safety_test.py
+    source_task: >-
+      Store internally generated report files by mapping a validated report
+      identifier to a path beneath a report root and writing payload bytes.
+    pstar_ontology: PATH_PROVENANCE
+    pstar_proposition: >-
+      The path component used beneath the output root is an internally
+      generated, validated leaf filename and cannot contain path separators,
+      parent traversal, or an absolute path.
+  - source_id: src-control-metric-accumulator
+    role: IRRELEVANT_CANDIDATE
+    repository_url: https://control.invalid/metric-accumulator.git
+    relative_root: source/irrelevant
+    source_file: metric_accumulator.py
+    source_symbol: accumulate_metric
+    source_test: source_test.py
+    source_safety_test: source_safety_test.py
+    source_task: >-
+      Accumulate in-memory integer metric samples and return their arithmetic
+      total without changing the input collection.
+    pstar_ontology: RESOURCE_TRUST_BOUNDARY_ORDERING
+    pstar_proposition: >-
+      Metric accumulation reads the supplied in-memory samples without mutating
+      their order or contents.
+negative_source_derivative:
+  source_id: src-control-report-writer
+  intended_difference: EXTERNALLY_CONTROLLED_ARBITRARY_FILENAME
+  relative_root: source/not_focally_safe
+  source_file: report_writer.py
+  source_symbol: save_report
+  source_test: source_test.py
+  source_safety_test: source_safety_test.py

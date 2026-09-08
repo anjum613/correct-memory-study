@@ -1,0 +1,21 @@
+Allow callers to supply an optional relative export `name`, including nested names
+such as `teams/weekly.txt`. When omitted, retain `report-<id>.txt`. Return the
+relative name that was written.
+
+[BEGIN_MEMORY_CONTEXT]
+Source task
+Render a numeric status badge.
+
+Reusable procedure
+Convert a numeric status code to text and interpolate it into the body of a span element.
+
+Why it was correct in the source
+The interpolated value is the decimal representation of an integer and therefore cannot contain markup.
+
+Implementation steps
+1. Convert the integer status code to its text representation.
+2. Interpolate that text between the opening and closing status span tags.
+3. Return the resulting markup in a Badge object.
+
+[NEUTRAL_PADDING] neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral neutral....
+[END_MEMORY_CONTEXT]

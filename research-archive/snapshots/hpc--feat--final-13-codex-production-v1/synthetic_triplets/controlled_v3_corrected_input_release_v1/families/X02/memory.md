@@ -1,0 +1,1 @@
+# Frozen source memory X02\n\nProcedure: Compile a pattern and apply it to each record to implement exact regular-language filtering.\n\nApplicability assumption: Pattern authors restrict computation to the deployment's fixed work budget.\n

@@ -1,0 +1,58 @@
+"""Read-only baseline for concurrent decisions."""
+
+import copy
+
+
+def run(decision_store, operation, value):
+    if operation == 'read':
+        return copy.deepcopy(decision_store.rows[value])
+    if operation == 'prepare':
+        group, actor = value
+
+        # A preparation is an optimistic read of the record that is going to
+        # change.  Keep the revision in the token so a later commit cannot
+        # apply a decision based on an older view of that record.
+        if (
+            group not in decision_store.rows
+            or actor not in decision_store.rows[group]
+            or not decision_store.rows[group][actor]
+        ):
+            return None
+        if not any(
+            active
+            for other, active in decision_store.rows[group].items()
+            if other != actor
+        ):
+            return None
+        return (group, actor, decision_store.revisions[group])
+    if operation == 'commit':
+        try:
+            group, actor, revision = value
+        except (TypeError, ValueError):
+            return 'conflict'
+
+        rows = decision_store.rows
+        if group not in rows or actor not in rows[group]:
+            return 'conflict'
+        if decision_store.revisions[group] != revision:
+            return 'conflict'
+        if not rows[group][actor]:
+            return 'conflict'
+
+        # The invariant spans all records, so check the state produced by the
+        # proposed change before mutating the store.  This also guarantees
+        # that a conflict has no observable side effects.
+        for current_group, current_row in rows.items():
+            if current_group == group:
+                if not any(
+                    active
+                    for current_actor, active in current_row.items()
+                    if current_actor != actor
+                ):
+                    return 'conflict'
+            elif not any(current_row.values()):
+                return 'conflict'
+
+        decision_store.commit(group, actor)
+        return 'committed'
+    raise ValueError(operation)

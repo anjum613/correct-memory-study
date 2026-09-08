@@ -1,0 +1,1 @@
+# Frozen source memory X22\n\nProcedure: Select a supported signature algorithm and check a message with its configured key.\n\nApplicability assumption: The suite selector was assigned by the trusted local configuration for that key's intended use.\n

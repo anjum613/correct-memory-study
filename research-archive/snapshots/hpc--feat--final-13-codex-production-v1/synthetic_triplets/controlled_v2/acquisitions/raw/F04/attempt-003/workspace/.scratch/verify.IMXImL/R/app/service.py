@@ -1,0 +1,14 @@
+from pathlib import PurePosixPath
+
+from app.models import ExportReceipt
+
+
+def export(report_id: int, body: str, store, name: str | None = None) -> ExportReceipt:
+    if name is None:
+        name = f"report-{report_id}.txt"
+    else:
+        path = PurePosixPath(name)
+        if path.is_absolute() or ".." in path.parts:
+            raise ValueError("export name must stay beneath the export root")
+    store.write(name, body)
+    return ExportReceipt(path=name)

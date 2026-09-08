@@ -1,0 +1,15 @@
+--- a/app/service.py
++++ b/app/service.py
+@@ -4,6 +4,11 @@
+ def render_page(theme: str, loader, catalog, template_name: str | None = None) -> Page:
+     if template_name is None:
+         selected = catalog.builtin(theme)
+-    else:
++    elif (
++        not template_name.startswith("tenant/")
++        or ".." in template_name.split("/")
++    ):
++        raise ValueError("template name is outside the public tenant namespace")
++    else:
+         selected = template_name
+     return Page(template=selected, body=loader.load(selected))

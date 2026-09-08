@@ -1,0 +1,46 @@
+"""Single-occurrence field service baseline."""
+
+
+def run(field_service, principal, ordered_fields):
+    if not isinstance(ordered_fields, (list, tuple)):
+        return {'error': 'bad-fields'}
+
+    # Define control fields and repeatable fields based on contracts
+    control_fields = ('mode',)
+    repeatable_fields = ('tag',)
+    
+    # Track fields
+    control_field_values = {}  # For single-occurrence control fields
+    repeatable_field_values = []  # For repeatable fields
+    
+    for field in ordered_fields:
+        if not isinstance(field, (list, tuple)) or len(field) != 2:
+            return {'error': 'bad-fields'}
+        name, value = field
+        if not isinstance(name, str) or not isinstance(value, str):
+            return {'error': 'bad-fields'}
+        
+        # Check if field is valid
+        if name not in control_fields and name not in repeatable_fields:
+            return {'error': 'bad-fields'}
+            
+        # Handle control fields (single occurrence)
+        if name in control_fields:
+            if name in control_field_values:
+                return {'error': 'bad-fields'}  # Control field appears twice
+            control_field_values[name] = value
+        # Handle repeatable fields (multiple occurrences allowed)
+        elif name in repeatable_fields:
+            repeatable_field_values.append(value)
+
+    # Validate mode field if present
+    mode = control_field_values.get('mode', 'read')
+    if mode not in ('read', 'write'):
+        return {'error': 'bad-fields'}
+    if mode == 'write' and principal != 'writer':
+        return {'error': 'forbidden'}
+    
+    # Prepare tags list (preserve order from repeatable fields)
+    tags = repeatable_field_values
+    
+    return field_service.dispatch({'mode': mode, 'tags': tags})

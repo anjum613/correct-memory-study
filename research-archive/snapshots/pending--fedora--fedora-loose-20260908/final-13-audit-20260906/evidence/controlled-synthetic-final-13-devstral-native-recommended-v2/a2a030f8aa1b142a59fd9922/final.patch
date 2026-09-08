@@ -1,0 +1,27 @@
+diff --git a/app/service.py b/app/service.py
+index 5f02c0d..6c9ad97 100644
+--- a/app/service.py
++++ b/app/service.py
+@@ -1,13 +1,18 @@
+-"""Read-only baseline for concurrent decisions."""
++"""Concurrent decision service with invariant maintenance."""
+ 
+ import copy
++from fixture_api.runtime import _x24_read, _x24_prepare
+ 
+ 
+ def run(decision_store, operation, value):
+     if operation == 'read':
+-        return copy.deepcopy(decision_store.rows[value])
++        return _x24_read(decision_store, value)
+     if operation == 'prepare':
+-        return None
++        return _x24_prepare(decision_store, value)
+     if operation == 'commit':
+-        return 'conflict'
++        group, actor, revision = value
++        if decision_store.revisions[group] != revision:
++            return 'conflict'
++        decision_store.commit(group, actor)
++        return 'committed'
+     raise ValueError(operation)

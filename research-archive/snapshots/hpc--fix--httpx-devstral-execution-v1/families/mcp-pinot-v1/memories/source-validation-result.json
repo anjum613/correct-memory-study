@@ -1,0 +1,60 @@
+{
+  "commands": [
+    {
+      "argv": [
+        "/home/s224049759/environments/cmpilot-conda/bin/python",
+        "-c",
+        "import ast, json, pathlib, tomllib\nroot = pathlib.Path('.')\nfiles = sorted(root.rglob('*.py'))\nfor path in files:\n    ast.parse(path.read_text(encoding='utf-8'), filename=path.as_posix())\nproject = tomllib.loads((root / 'pyproject.toml').read_text(encoding='utf-8'))\nentrypoint = project['project']['scripts']['mcp-pinot']\nmodule_name, function_name = entrypoint.split(':', 1)\nmodule_path = root / (module_name.replace('.', '/') + '.py')\ntree = ast.parse(module_path.read_text(encoding='utf-8'), filename=module_path.as_posix())\nfunctions = {node.name for node in tree.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))}\nassert function_name in functions\nprint(json.dumps({'declared_entrypoint': entrypoint, 'entrypoint_function_found': True, 'python_files_parsed': len(files)}, sort_keys=True))\n"
+      ],
+      "cwd": "families/mcp-pinot-v1/repositories/source",
+      "exit_code": 0,
+      "kind": "SOURCE_ONLY_STATIC_ENTRYPOINT_AND_SYNTAX_VALIDATION",
+      "stderr": "",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout": "{\"declared_entrypoint\": \"mcp_pinot.server:main\", \"entrypoint_function_found\": true, \"python_files_parsed\": 11}\n",
+      "stdout_sha256": "b587b9e14fc83d37c1532fa93d7fadfbfa385a3d229d7618a3a37dc9baa1eb4d"
+    }
+  ],
+  "environment": {
+    "LANG": "C.UTF-8",
+    "LC_ALL": "C.UTF-8",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTHONHASHSEED": "0",
+    "PYTHONNOUSERSITE": "1",
+    "python": "/home/s224049759/environments/cmpilot-conda/bin/python",
+    "python_version": "3.11.15"
+  },
+  "schema": "cmpilot-source-visible-validation-v1",
+  "source_repository_sha256": "461cfb9e4a266a930b3cfea93adfcbd4bc4e76045ed96cbf80bdfd231e0e2260",
+  "source_revision": "6938a35892481d95627cae5a16ad1814e3b49c53",
+  "summary": {
+    "failed": 0,
+    "passed": 1,
+    "skipped": 1,
+    "status": "PASS"
+  },
+  "unavailable_commands": [
+    {
+      "argv": [
+        "/home/s224049759/environments/cmpilot-conda/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "-p",
+        "no:cacheprovider"
+      ],
+      "cwd": "families/mcp-pinot-v1/repositories/source",
+      "exit_code": 2,
+      "missing_source_dependencies": [
+        "mcp",
+        "pandas"
+      ],
+      "reason": "The unmodified source-visible pytest suite could not be collected because no already-installed interpreter contained both source-declared dependencies and pytest. No dependency was downloaded and no compatibility overlay was introduced.",
+      "status": "TECHNICALLY_UNAVAILABLE_NOT_SCIENTIFIC_FAILURE",
+      "stderr": "",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout": "\n==================================== ERRORS ====================================\n_________________ ERROR collecting tests/test_pinot_client.py __________________\nImportError while importing test module '/home/s224049759/projects/correct-memory-study-worktrees/track-b-mcp-pinot-v01/families/mcp-pinot-v1/repositories/source/tests/test_pinot_client.py'.\nHint: make sure your test modules/packages have valid Python names.\nTraceback:\n/home/s224049759/environments/cmpilot-conda/lib/python3.11/importlib/__init__.py:126: in import_module\n    return _bootstrap._gcd_import(name[level:], package, level)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ntests/test_pinot_client.py:3: in <module>\n    import pandas as pd\nE   ModuleNotFoundError: No module named 'pandas'\n____________________ ERROR collecting tests/test_server.py _____________________\nImportError while importing test module '/home/s224049759/projects/correct-memory-study-worktrees/track-b-mcp-pinot-v01/families/mcp-pinot-v1/repositories/source/tests/test_server.py'.\nHint: make sure your test modules/packages have valid Python names.\nTraceback:\n/home/s224049759/environments/cmpilot-conda/lib/python3.11/importlib/__init__.py:126: in import_module\n    return _bootstrap._gcd_import(name[level:], package, level)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\ntests/test_server.py:3: in <module>\n    import mcp.types as types\nE   ModuleNotFoundError: No module named 'mcp'\n=========================== short test summary info ============================\nERROR tests/test_pinot_client.py\nERROR tests/test_server.py\n!!!!!!!!!!!!!!!!!!! Interrupted: 2 errors during collection !!!!!!!!!!!!!!!!!!!!\n2 errors in 0.17s\n",
+      "stdout_sha256": "faae9ee909eeb99dd7bbe812916a80389e5d4369a05e71116d58e86c3796b83c"
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+Implemented `run()` in [app/service.py](/workspace/app/service.py) with a shared fixed-key nonce allocator for all workers.
+
+What changed:
+- Removed the single-worker ownership gate.
+- Uses one persisted counter per fixed X05 key/wire format.
+- Preserves restart recovery via `system.worker_positions`.
+- Returns `'exhausted'` once the shared counter reaches `system.limit`.
+- Keeps failure behavior: `fail_next` consumes the assigned nonce and returns `'encryption-error'`.
+
+Verification:
+- Public checks passed with `python3`.
+- Extra probe confirmed multi-worker nonces are shared and unique: `[0, 1, 2, 3]`.
+- `git` status/diff was unavailable because `/workspace` is not a git repository.

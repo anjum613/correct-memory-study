@@ -1,0 +1,397 @@
+PROTOCOL_ID: EXTERNAL_AUDIT_HUMAN_VERIFICATION_V1
+STATUS: FROZEN_BEFORE_HUMAN_REVIEW
+STARTING_COMMIT: 81ad9416c5510dea1849ea88f32d1c289246f621
+FREEZE_PHASE: BEFORE_ANY_HUMAN_RESPONSE
+HUMAN_VERIFICATION_COMPLETED_AT_FREEZE: false
+PERSISTENT_RECORD_FORMAT: YAML_ONLY
+
+PURPOSE: >-
+  Independent human verification of a prospectively selected subset of the
+  external six-paper audit.
+
+SCOPE:
+  AUDIT_PAPERS: 6
+  AUDIT_RATING_CELLS: 108
+  TOTAL_PRIORITY_CELLS: 23
+  AI_DISAGREEMENT_CELLS: 17
+  SAMPLED_AI_AGREEMENT_CELLS: 6
+  COVERAGE:
+    - All 17 cells where Reviewer A and Reviewer B assigned different statuses.
+    - Exactly one mechanically sampled AI-agreement cell from each audited paper.
+  NOT_FULL_HUMAN_REPLICATION_OF_108_CELLS: true
+  DO_NOT_DESCRIBE_ENTIRE_EXTERNAL_AUDIT_AS_HUMAN_VERIFIED: true
+  PERMITTED_COMPLETION_DESCRIPTION: >-
+    independent human verification of all AI-review disagreements plus a
+    mechanically sampled set of agreements
+  FULL_AUDIT_VALIDATION_WORDING_CONDITION: >-
+    Wording that the external audit was independently human validated is
+    prohibited unless a later appropriate human review covers all 108 cells.
+
+REVIEWER_ELIGIBILITY:
+  REQUIRED:
+    REAL_HUMAN: true
+    NOT_EITHER_AI_REVIEW_PASS: true
+    ACCESS_TO_ORIGINAL_EVIDENCE_SOURCE_LOCATIONS: true
+    UNDERSTANDS_FROZEN_RATING_STATES_SUFFICIENTLY_TO_JUDGE_EVIDENCE: true
+    RELATIONSHIP_TO_PROJECT_DISCLOSED: true
+  ORGANIZATIONAL_INDEPENDENCE_REQUIRED: false
+  ALLOWED_RELATIONSHIP_LABELS:
+    - EXTERNAL_TO_PROJECT
+    - SUPERVISOR
+    - PROJECT_COLLABORATOR
+    - LAB_MEMBER_NOT_INVOLVED_IN_AUDIT
+    - OTHER_DISCLOSED
+  REQUIRED_RELATIONSHIP_DISCLOSURE_SCOPE:
+    - AUTHOR
+    - SUPERVISOR
+    - LAB_MEMBER
+    - EXTERNAL_REVIEWER
+    - OTHER_RELEVANT_PRIOR_INVOLVEMENT
+  INDEPENDENCE_DESCRIPTION_RULE: >-
+    Do not describe a reviewer or their verification as independent if the
+    reviewer substantially participated in the original external-audit ratings.
+  SENSITIVE_PERSONAL_DATA_REQUIRED: false
+  STABLE_PSEUDONYMOUS_IDENTIFIER_ALLOWED: true
+
+FROZEN_RATING_STATES:
+  - ESTABLISHED
+  - NOT_ESTABLISHED
+  - UNDETERMINED
+  - NOT_APPLICABLE
+
+HUMAN_RESPONSE_RULE:
+  EXACTLY_ONE_RESPONSE_PER_ASSIGNED_PRIORITY_CELL: true
+  ALLOWED_RESPONSES:
+    - AGREE
+    - DISAGREE
+    - CANNOT_DETERMINE
+  AGREE_DEFINITION: >-
+    The reviewer confirms that the AI-adjudicated rating is reasonably
+    supported by the cited original evidence under the frozen criterion
+    definition.
+  DISAGREE_REQUIREMENTS:
+    HUMAN_PREFERRED_STATUS_REQUIRED: true
+    HUMAN_PREFERRED_STATUS_ALLOWED_VALUES:
+      - ESTABLISHED
+      - NOT_ESTABLISHED
+      - UNDETERMINED
+      - NOT_APPLICABLE
+    CONCISE_RATIONALE_REQUIRED: true
+    ORIGINAL_SOURCE_EVIDENCE_LOCATION_REQUIRED: true
+    CORRECTION_BASIS_REQUIRED_VALUE: EVIDENCE_RATING_CORRECTION
+  CANNOT_DETERMINE_DEFINITION: >-
+    The human cannot confidently resolve the cell from accessible original
+    evidence.
+  CANNOT_DETERMINE_IS_AGREEMENT: false
+  RESPONSE_TO_HUMAN_VERIFICATION_STATUS:
+    AGREE: CONFIRMED
+    DISAGREE: DISPUTED
+    CANNOT_DETERMINE: UNRESOLVED
+  PACKET_RESPONSE_STORAGE:
+    FIELD: HUMAN_RESPONSES
+    VALUE_AT_FREEZE: []
+    RECORD_FIELDS:
+      - REVIEWER_ID_OR_PSEUDONYM
+      - HUMAN_RESPONSE
+      - HUMAN_PREFERRED_STATUS
+      - HUMAN_RATIONALE
+      - HUMAN_ORIGINAL_SOURCE_EVIDENCE_LOCATION
+      - CORRECTION_BASIS
+    DUPLICATE_REVIEWER_RESPONSE_FOR_SAME_CELL_PROHIBITED: true
+  MULTIPLE_HUMAN_RESPONSES:
+    PRIMARY_COMPLETION_REQUIRES_AT_LEAST_ONE_VALID_RESPONSE_PER_PRIORITY_CELL: true
+    CELL_STATUS_PRECEDENCE:
+      - If any valid response is DISAGREE, classify the cell as DISPUTED.
+      - Otherwise, if any valid response is AGREE, classify the cell as CONFIRMED.
+      - Otherwise, classify the cell as UNRESOLVED.
+    CELL_COUNTED_ONCE_IN_AGGREGATES: true
+
+REVIEW_MATERIAL:
+  REQUIRED_OR_PERMITTED:
+    - Frozen criterion definition.
+    - Official or original paper.
+    - Official supplement.
+    - Official artifact or repository when required to judge the criterion.
+    - Evidence location already supplied in the human-review packet.
+    - Surrounding original-source material needed to understand context.
+  PROHIBITED_AS_EVIDENCE:
+    - Blogs.
+    - Secondary summaries.
+    - This project's manuscript interpretation.
+    - Another human reviewer's answer.
+  BLINDING_PREFERENCE: >-
+    Preferably do not show the reviewer the project's desired novelty outcome.
+
+HUMAN_DISAGREEMENT_HANDLING:
+  FROZEN_AI_AUDIT_OVERWRITTEN: false
+  IMMUTABLE_HISTORICAL_FIELDS:
+    - REVIEWER_A_RATING
+    - REVIEWER_B_RATING
+    - AI_ADJUDICATED_STATUS
+  HUMAN_VERIFICATION_CREATES_NEW_OVERLAY: true
+  OVERLAY_NAME: HUMAN_VERIFIED_ANALYSIS
+  DISAGREE_PRESERVES_BOTH:
+    - AI_ADJUDICATED_STATUS
+    - HUMAN_PREFERRED_STATUS
+  HUMAN_DISAGREEMENT_AUTOMATICALLY_REPLACES_PUBLISHED_AUDIT_RATING: false
+  MATERIAL_DISPUTES_MUST_BE_DISCLOSED: true
+
+CORRECTION_RULE:
+  TARGET_LAYER: HUMAN_VERIFIED_ANALYSIS
+  ORIGINAL_AI_LAYER_REMAINS_IMMUTABLE: true
+  REPLACEMENT_ALLOWED_ONLY_WHEN:
+    - The human provides an original-source evidence location.
+    - The proposed replacement is one of the four frozen rating states.
+    - The frozen criterion definition remains unchanged.
+    - The reason is an evidence-rating correction rather than an attempt to strengthen novelty.
+    - The original AI-adjudicated rating remains preserved.
+    - The correction is recorded transparently.
+  CORRECTION_LABELS:
+    ONE_AVAILABLE_HUMAN_SUPPORTS_CHANGED_RATING: SINGLE_HUMAN_CORRECTION
+    TWO_INDEPENDENT_HUMANS_AGREE_ON_SAME_CHANGED_RATING: TWO_HUMAN_CORRECTION
+  SINGLE_HUMAN_APPLICATION_RULE: >-
+    Apply a SINGLE_HUMAN_CORRECTION only when exactly one human response is
+    available for the cell and that response is a valid DISAGREE record.
+  TWO_HUMAN_REQUIREMENTS:
+    - Both reviewers independently inspect the original source.
+    - Neither reviewer sees the other reviewer's answer before submitting.
+    - Both assign DISAGREE and the same HUMAN_PREFERRED_STATUS.
+    - Both satisfy reviewer eligibility.
+    - Neither substantially participated in the original external-audit ratings.
+    - No other determinate human response conflicts with the proposed status.
+  CONFLICTING_HUMAN_CHANGED_RATINGS: >-
+    Do not apply a changed rating as a two-human correction when two human
+    reviewers propose different statuses; retain the AI-adjudicated status in
+    the analysis matrix, classify the cell as disputed, and disclose the
+    unresolved correction conflict.
+  CONSENSUS_CLAIM_RULE: Do not claim consensus beyond the human agreement that occurred.
+
+AGGREGATE_REPORTING:
+  REQUIRED_FIELDS:
+    TOTAL_PRIORITY_CELLS: 23
+    HUMAN_CELLS_COMPLETED: DERIVED_FROM_VALID_NONBLANK_PRIORITY_RESPONSES
+    CONFIRMED: DERIVED
+    DISPUTED: DERIVED
+    UNRESOLVED: DERIVED
+    AGREEMENT_RATE_AMONG_DETERMINATE_HUMAN_JUDGMENTS: >-
+      CONFIRMED / (CONFIRMED + DISPUTED)
+  ZERO_DETERMINATE_DENOMINATOR_VALUE: null
+  REQUIRED_STRATIFIED_FIELDS:
+    AI_DISAGREEMENT_CELLS: 17
+    AI_DISAGREEMENT_CELLS_HUMAN_CONFIRMED: DERIVED
+    AI_DISAGREEMENT_CELLS_HUMAN_DISPUTED: DERIVED
+    AI_DISAGREEMENT_CELLS_HUMAN_UNRESOLVED: DERIVED
+    SAMPLED_AI_AGREEMENT_CELLS: 6
+    SAMPLED_AI_AGREEMENT_CELLS_HUMAN_CONFIRMED: DERIVED
+    SAMPLED_AI_AGREEMENT_CELLS_HUMAN_DISPUTED: DERIVED
+    SAMPLED_AI_AGREEMENT_CELLS_HUMAN_UNRESOLVED: DERIVED
+  MISLEADING_OVERALL_HUMAN_ACCURACY_STATISTIC_PROHIBITED: true
+
+EXTERNAL_AUDIT_CONCLUSION_RULE:
+  AI_ADJUDICATED_RESULT: FRAMEWORK_PARTIALLY_DISTINCTIVE
+  SINGLE_HUMAN_DISAGREEMENT_AUTOMATICALLY_CHANGES_RESULT: false
+  MATRIX_RECOMPUTATION_CONDITION: >-
+    Recompute the six-paper matrix in the separate HUMAN_VERIFIED_ANALYSIS
+    layer only when at least one human correction satisfies CORRECTION_RULE.
+  ORIGINAL_MATRIX_REMAINS_PRESERVED: true
+  ALLOWED_HUMAN_VERIFIED_RESULTS:
+    - FRAMEWORK_DISTINCTIVE
+    - FRAMEWORK_PARTIALLY_DISTINCTIVE
+    - FRAMEWORK_LARGELY_REDUNDANT
+  QUALITATIVE_REASSESSMENT_RULE_SOURCE: >-
+    protocols/external-identification-audit-v1.yaml field
+    NOVELTY_STRESS_TEST.DECISION_RULE
+  QUALITATIVE_REASSESSMENT_RULE: >-
+    Decide whether the complete combination of frozen requirements adds useful
+    distinctions or whether leading audited evaluations already implement
+    essentially the full applicable contract. Do not optimize for a particular
+    result.
+  WHEN_CORRECTIONS_ARE_APPLIED:
+    - Mechanically recompute the 108-cell matrix and status counts in the overlay.
+    - Record one allowed HUMAN_VERIFIED_RESULT under the unchanged qualitative rule.
+    - Record a concise rationale tied to the corrected matrix.
+    - Refuse to finalize the overlay if the result or rationale is missing.
+  RESULT_COMPARISON_REQUIRED:
+    - AI_ADJUDICATED_RESULT
+    - HUMAN_VERIFIED_RESULT
+  CHANGED_RESULT_REPORTING_RULE: >-
+    If corrections change the result, report both the original and corrected
+    result transparently.
+  UNCHANGED_RESULT_REPORTING_RULE: >-
+    If corrections do not change the result, state that the qualitative
+    external-audit conclusion was robust to the human-reviewed corrections.
+
+PAPER_CLAIM_RULES:
+  BEFORE_23_CELL_COMPLETION: >-
+    The manuscript must continue to state that human verification is pending.
+  AFTER_23_CELL_COMPLETION_ALLOWED_WORDING: >-
+    All 17 AI-review disagreements and a mechanically sampled agreement cell
+    from each audited work received independent human verification.
+  INDEPENDENT_WORDING_CONDITION: >-
+    Use independent only when the reviewers did not substantially participate
+    in the original external-audit ratings; otherwise state the disclosed
+    relationship without the independence claim.
+  FORBIDDEN_UNLESS_ALL_108_CELLS_APPROPRIATELY_HUMAN_REVIEWED: >-
+    the external audit was independently human validated
+  REMAINING_HUMAN_DISPUTES_MUST_BE_COUNTED_AND_DISCLOSED: true
+
+REVIEWER_METADATA_SCHEMA:
+  RECORD_LOCATION: >-
+    paper/human-review/reconciliation.yaml field HUMAN_REVIEWER_RECORDS
+  TEMPLATE_PATH: paper/human-review/reviewer-template.yaml
+  REQUIRED_FIELDS:
+    - REVIEWER_ID_OR_PSEUDONYM
+    - ROLE
+    - RELATIONSHIP_TO_PROJECT
+    - REVIEW_DATE
+    - CONFLICTS_OR_PRIOR_INVOLVEMENT
+    - PAPERS_REVIEWED
+    - CELLS_REVIEWED
+    - CONFIRMATION_THAT_REVIEWER_IS_HUMAN
+  ADDITIONAL_INTEGRITY_FIELDS:
+    - SUBSTANTIALLY_PARTICIPATED_IN_ORIGINAL_EXTERNAL_AUDIT_RATINGS
+    - REVIEWED_WITHOUT_ANOTHER_HUMAN_REVIEWERS_ANSWERS
+  NAME_REQUIRED: false
+  STABLE_REVIEWER_IDENTIFIER_REQUIRED: true
+  SENSITIVE_PERSONAL_DATA_PROHIBITED: true
+
+FROZEN_SAMPLE:
+  SAMPLING_RULE_PATH: paper/human-review/sampling-rule.yaml
+  SAMPLING_RULE_SHA256: 846aa1a50066e60612125698751e454a25582ea6199b742c72ef6d8b554fd5bd
+  DOMAIN_SEPARATOR: cmpilot-paper-human-review-agreement-v1
+  HASH_INPUT: DOMAIN_SEPARATOR || 0x00 || PAPER_ID || 0x00 || CRITERION_ID
+  HASH_ALGORITHM: SHA256
+  SELECTION: Lowest digest within each paper; impossible ties broken by CRITERION_ID
+  AGREEMENT_ELIGIBILITY: Reviewer A and Reviewer B assigned the same status
+  CELL_SELECTION_MUST_NOT_CHANGE: true
+  PACKET_PATHS:
+    - paper/human-review/01-basm-when-not-to-imitate.yaml
+    - paper/human-review/02-agent-skills-can-be-harmful.yaml
+    - paper/human-review/03-slbench.yaml
+    - paper/human-review/04-swe-skills-bench.yaml
+    - paper/human-review/05-experience-driven-self-evolving-safety.yaml
+    - paper/human-review/06-securevibebench.yaml
+  SELECTED_CELLS:
+    - PAPER_ID: BASM_WHEN_NOT_TO_IMITATE
+      CRITERION_ID: A1_TARGET_TASK_INCOMPLETENESS
+      SELECTION_BASIS: REVIEWER_DISAGREEMENT
+    - PAPER_ID: BASM_WHEN_NOT_TO_IMITATE
+      CRITERION_ID: C2_RESOURCE_BALANCED_COMPARISON
+      SELECTION_BASIS: REVIEWER_DISAGREEMENT
+    - PAPER_ID: BASM_WHEN_NOT_TO_IMITATE
+      CRITERION_ID: D1_UPTAKE_OR_BEHAVIORAL_ENGAGEMENT_MEASURED
+      SELECTION_BASIS: DETERMINISTIC_AGREEMENT_SAMPLE
+    - PAPER_ID: BASM_WHEN_NOT_TO_IMITATE
+      CRITERION_ID: D2_TASK_AND_SECURITY_JOINTLY_INTERPRETABLE
+      SELECTION_BASIS: REVIEWER_DISAGREEMENT
+    - PAPER_ID: BASM_WHEN_NOT_TO_IMITATE
+      CRITERION_ID: D3_UNIT_AND_REPLICATION_VALIDITY
+      SELECTION_BASIS: REVIEWER_DISAGREEMENT
+    - PAPER_ID: AGENT_SKILLS_CAN_BE_HARMFUL
+      CRITERION_ID: A1_TARGET_TASK_INCOMPLETENESS
+      SELECTION_BASIS: REVIEWER_DISAGREEMENT
+    - PAPER_ID: AGENT_SKILLS_CAN_BE_HARMFUL
+      CRITERION_ID: C4_OUTCOME_BLIND_SOURCE_OR_SKILL_SELECTION
+      SELECTION_BASIS: REVIEWER_DISAGREEMENT
+    - PAPER_ID: AGENT_SKILLS_CAN_BE_HARMFUL
+      CRITERION_ID: D3_UNIT_AND_REPLICATION_VALIDITY
+      SELECTION_BASIS: DETERMINISTIC_AGREEMENT_SAMPLE
+    - PAPER_ID: SLBENCH
+      CRITERION_ID: A3_SECURE_TASK_COMPLETING_CONTROL
+      SELECTION_BASIS: DETERMINISTIC_AGREEMENT_SAMPLE
+    - PAPER_ID: SLBENCH
+      CRITERION_ID: D2_TASK_AND_SECURITY_JOINTLY_INTERPRETABLE
+      SELECTION_BASIS: REVIEWER_DISAGREEMENT
+    - PAPER_ID: SLBENCH
+      CRITERION_ID: D3_UNIT_AND_REPLICATION_VALIDITY
+      SELECTION_BASIS: REVIEWER_DISAGREEMENT
+    - PAPER_ID: SWE_SKILLS_BENCH
+      CRITERION_ID: C3_APPROPRIATE_CONTROL_CONDITION
+      SELECTION_BASIS: REVIEWER_DISAGREEMENT
+    - PAPER_ID: SWE_SKILLS_BENCH
+      CRITERION_ID: C4_OUTCOME_BLIND_SOURCE_OR_SKILL_SELECTION
+      SELECTION_BASIS: DETERMINISTIC_AGREEMENT_SAMPLE
+    - PAPER_ID: SWE_SKILLS_BENCH
+      CRITERION_ID: D1_UPTAKE_OR_BEHAVIORAL_ENGAGEMENT_MEASURED
+      SELECTION_BASIS: REVIEWER_DISAGREEMENT
+    - PAPER_ID: SWE_SKILLS_BENCH
+      CRITERION_ID: D3_UNIT_AND_REPLICATION_VALIDITY
+      SELECTION_BASIS: REVIEWER_DISAGREEMENT
+    - PAPER_ID: EXPERIENCE_DRIVEN_SELF_EVOLVING_SAFETY
+      CRITERION_ID: B2_SOURCE_FOCAL_SAFETY
+      SELECTION_BASIS: REVIEWER_DISAGREEMENT
+    - PAPER_ID: EXPERIENCE_DRIVEN_SELF_EVOLVING_SAFETY
+      CRITERION_ID: B4_EXPLICIT_APPLICABILITY_PREDICATE
+      SELECTION_BASIS: REVIEWER_DISAGREEMENT
+    - PAPER_ID: EXPERIENCE_DRIVEN_SELF_EVOLVING_SAFETY
+      CRITERION_ID: B6_NO_SECOND_MAJOR_MISMATCH
+      SELECTION_BASIS: DETERMINISTIC_AGREEMENT_SAMPLE
+    - PAPER_ID: EXPERIENCE_DRIVEN_SELF_EVOLVING_SAFETY
+      CRITERION_ID: C2_RESOURCE_BALANCED_COMPARISON
+      SELECTION_BASIS: REVIEWER_DISAGREEMENT
+    - PAPER_ID: EXPERIENCE_DRIVEN_SELF_EVOLVING_SAFETY
+      CRITERION_ID: D3_UNIT_AND_REPLICATION_VALIDITY
+      SELECTION_BASIS: REVIEWER_DISAGREEMENT
+    - PAPER_ID: SECUREVIBEBENCH
+      CRITERION_ID: A3_SECURE_TASK_COMPLETING_CONTROL
+      SELECTION_BASIS: REVIEWER_DISAGREEMENT
+    - PAPER_ID: SECUREVIBEBENCH
+      CRITERION_ID: A4_FEATURE_RETENTION
+      SELECTION_BASIS: REVIEWER_DISAGREEMENT
+    - PAPER_ID: SECUREVIBEBENCH
+      CRITERION_ID: B6_NO_SECOND_MAJOR_MISMATCH
+      SELECTION_BASIS: DETERMINISTIC_AGREEMENT_SAMPLE
+
+FROZEN_SOURCE_INTEGRITY:
+  BYTE_IDENTITY_BASE_COMMIT: 81ad9416c5510dea1849ea88f32d1c289246f621
+  EXTERNAL_AUDIT_PROTOCOL:
+    PATH: protocols/external-identification-audit-v1.yaml
+    SHA256: c9916f3761e494a07756eac7755fb6249da33ed0ab36ba988dd8a20d21bb4bae
+  EXTERNAL_AUDIT_PAPER_RECORDS:
+    - PATH: audits/external-identification-v1/papers/01-basm-when-not-to-imitate.yaml
+      SHA256: b7d620de0eb8ad32db3c9749c5d32e06410ea091cab94d72764db21da20140e8
+    - PATH: audits/external-identification-v1/papers/02-agent-skills-can-be-harmful.yaml
+      SHA256: 440c9ae2ceadf36ad91d5c7b75c7a737e87cb21c1d3c5c0a25ba043399c7b6d1
+    - PATH: audits/external-identification-v1/papers/03-slbench.yaml
+      SHA256: 6f8c247e7047f55724044d609815be6b02b248ef363db536c5831931a03923a2
+    - PATH: audits/external-identification-v1/papers/04-swe-skills-bench.yaml
+      SHA256: 64b40638b5a67a06f4496fe6bd94b749c8e93c137e55baa8abbb90d2b0f3e0c8
+    - PATH: audits/external-identification-v1/papers/05-experience-driven-self-evolving-safety.yaml
+      SHA256: b902e0546378a0b0c97919ada3d1c650930993a6012b8ca09334bf7d08823cf5
+    - PATH: audits/external-identification-v1/papers/06-securevibebench.yaml
+      SHA256: 2d858c61a3befb83b33a6cc39323e020e095258eb44566dd3dfa93cd7eefff21
+  ORIGINAL_CROSS_PAPER_ANALYSIS:
+    PATH: audits/external-identification-v1/cross-paper-analysis.yaml
+    SHA256: a5d0c5800464dca630e713a374ae9c71b762665bda8a03eb2a17826ac1a4fb24
+  CLAIM_LEDGER:
+    PATH: paper/claim-ledger.yaml
+    SHA256: 1f5aa24f486b54e45be81a7ec624620fa5af7867e79598fc945a89a00713b055
+  POSITIVE_AND_NEGATIVE_CONTROL_SCOPES:
+    - protocols/v4-identification-nonvacuity-control.yaml
+    - controls/v4_identification_nonvacuity
+    - tests/test_identification_control_v4.py
+  FINAL_V4_EVIDENCE_SCOPES:
+    - protocols/context-dependent-memory-v4-final-development.yaml
+    - protocols/context-dependent-memory-v4-additional-development-exclusions.yaml
+    - artifacts/context-dependent-memory-confirmatory-v4-authoritative-2
+    - artifacts/context-dependent-memory-confirmatory-v4-extension
+
+COMPLETION_INTEGRITY_RULES:
+  NONPRIORITY_RESPONSE_MUST_REMAIN_BLANK: true
+  HUMAN_VERIFICATION_COMPLETED_REQUIRES_ALL_23_PRIORITY_CELLS_VALID: true
+  AI_ADJUDICATED_RATINGS_MUST_REMAIN_BYTE_IDENTICAL: true
+  FROZEN_CRITERION_DEFINITIONS_MUST_REMAIN_BYTE_IDENTICAL: true
+  SAMPLING_RULE_MUST_REMAIN_BYTE_IDENTICAL_AND_MECHANICALLY_REPRODUCIBLE: true
+  HUMAN_CORRECTION_WITHOUT_REQUIRED_EVIDENCE_OR_RATIONALE_MUST_FAIL: true
+
+NO_NEW_SCIENCE:
+  EVALUATED_MODEL_RUNS: 0
+  GPU_USE: 0
+  UNSEEN_CONFIRMATORY_TARGETS_SCREENED: 0
+  NEW_REAL_TARGETS_SCREENED: 0
+  NEW_EXTERNAL_AUDIT_PAPERS: 0
+  ADD_EXTERNAL_AUDIT_PAPERS: false
+  CHANGE_EXTERNAL_RATINGS: false
+  MODIFY_V4: false
+  MODIFY_POSITIVE_CONTROL_RESULTS: false
+  MODIFY_CLAIM_LEDGER: false

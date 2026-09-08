@@ -1,0 +1,64 @@
+diff --git a/app/service.py b/app/service.py
+--- a/app/service.py
++++ b/app/service.py
+@@ -1,4 +1,4 @@
+-"""Unicode handles with preserved display spelling and exact identity."""
++"""Unicode handles with consistent NFC identity and preserved display spelling."""
+ import unicodedata
+ from fixture_api import contracts as k
+ 
+@@ -15,32 +15,47 @@
+     )
+ 
+ 
++def _bindings(rows, handle):
++    """Resolve all existing spellings, including legacy raw-key entries."""
++    identity = unicodedata.normalize("NFC", handle)
++    return [key for key in rows
++            if isinstance(key, str)
++            and unicodedata.normalize("NFC", key) == identity]
++
++
+ def run(registry, operation, handle, argument=None):
+     if not _valid(handle):
+         return "invalid"
+     if operation == "register":
+-        if handle in registry.rows:
++        if _bindings(registry.rows, handle):
+             return "exists"
+         registry.rows[handle] = {"owner": argument, "display": handle}
+         return "registered"
+     if operation == "lookup":
+-        row = registry.rows.get(handle)
+-        return None if row is None else row["owner"]
++        matches = _bindings(registry.rows, handle)
++        if len(matches) != 1:
++            return None
++        return registry.rows[matches[0]]["owner"]
+     if operation == "rename":
+         if not isinstance(argument, (tuple, list)) or len(argument) != 2:
+             return "invalid"
+         owner, new_handle = argument
+         if not _valid(new_handle):
+             return "invalid"
+-        row = registry.rows.get(handle)
+-        if row is None:
++        matches = _bindings(registry.rows, handle)
++        if not matches:
+             return "missing"
++        if len(matches) != 1:
++            return "ambiguous"
++        old_key = matches[0]
++        row = registry.rows[old_key]
+         if row["owner"] != owner:
+             return "forbidden"
+-        if new_handle != handle and new_handle in registry.rows:
++        destinations = _bindings(registry.rows, new_handle)
++        if any(key != old_key for key in destinations):
+             return "exists"
+         replacement = dict(row, display=new_handle)
+-        del registry.rows[handle]
++        del registry.rows[old_key]
+         registry.rows[new_handle] = replacement
+         return "renamed"
+     return "invalid"

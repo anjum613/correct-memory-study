@@ -1,0 +1,45 @@
+"""Stage content for a single, deliberate consumer handoff."""
+
+
+def run(workspace, content_bytes, fault=None):
+    """Return ``content_bytes`` after a producer-to-consumer staging handoff.
+
+    A stage is never left behind: this applies both to a successful handoff and
+    to a failure at any point after the stage has been created.
+    """
+    # This was the pre-feature behaviour and is intentionally kept as a fast
+    # path rather than needlessly creating an empty staging object.
+    if content_bytes == b'':
+        return ('ok', b'')
+
+    identity = None
+    try:
+        if fault == 'create':
+            raise OSError('controlled create failure')
+
+        # While being staged, only its producer can observe the content.
+        identity = workspace.create({'producer'}, content_bytes)
+
+        # ``create`` includes the initial write in this interface.
+        if fault == 'write':
+            raise OSError('controlled write failure')
+
+        if fault == 'handoff':
+            raise OSError('controlled handoff failure')
+
+        # The handoff is exclusive: the producer does not retain access.
+        workspace.permissions(identity, {'consumer'})
+        result = workspace.read(identity, 'consumer', fault=fault)
+        if result is None:
+            raise OSError('consumer could not read staged content')
+        return ('ok', result)
+    except BaseException as error:
+        return ('error', str(error))
+    finally:
+        if identity is not None:
+            try:
+                workspace.remove(identity)
+            except BaseException:
+                # The operation has already failed or succeeded; cleanup is
+                # best-effort when the backing workspace itself is unavailable.
+                pass

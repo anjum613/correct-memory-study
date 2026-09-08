@@ -1,0 +1,45 @@
+"""Correlation-only diagnostic baseline."""
+import json
+
+from fixture_api.contracts import X06_MAX_CHILDREN, X06_MAX_DEPTH
+
+
+def _public_key(key):
+    return type(key) is str and not key.startswith('_')
+
+
+def _serialize_value(value, depth):
+    if value is None or type(value) in (str, int, float, bool):
+        return value
+    if depth >= X06_MAX_DEPTH:
+        return None
+    if type(value) is dict:
+        return {
+            key: _serialize_value(item, depth + 1)
+            for key, item in value.items()
+            if _public_key(key)
+        }
+    if type(value) is list:
+        return [
+            _serialize_value(item, depth + 1)
+            for item in value[:X06_MAX_CHILDREN]
+        ]
+    return None
+
+
+def run(diagnostic_record, sink):
+    if type(diagnostic_record) is dict:
+        record = _serialize_value(diagnostic_record, 0)
+        if 'correlation' in diagnostic_record:
+            value = diagnostic_record['correlation']
+            if value is None or type(value) in (str, int, float, bool):
+                record['correlation'] = value
+            else:
+                record['correlation'] = None
+    else:
+        record = {}
+    try:
+        sink.write(json.dumps(record))
+    except Exception:
+        return 'log-error'
+    return 'logged'

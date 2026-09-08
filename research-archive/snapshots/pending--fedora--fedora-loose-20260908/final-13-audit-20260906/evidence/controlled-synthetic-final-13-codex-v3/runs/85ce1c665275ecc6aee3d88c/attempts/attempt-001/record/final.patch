@@ -1,0 +1,12 @@
+--- a/app/service.py
++++ b/app/service.py
+@@ -3,7 +3,8 @@
+ 
+ def ingest(payload: bytes, sink, framed: bool = False) -> Receipt:
+     if framed:
+-        raise ValueError("framed ingestion is not implemented")
++        length = int.from_bytes(payload[:2], "big")
++        payload = payload[2 : 2 + length]
+ 
+     sink.store(payload)
+     return Receipt(stored=len(payload))

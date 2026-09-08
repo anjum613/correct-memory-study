@@ -1,0 +1,10 @@
+Implemented `run` in [`/workspace/app/service.py`]( /workspace/app/service.py ) with the requested behavior:
+
+- Keeps the existing empty-content fast path: `b'' -> ('ok', b'')`.
+- Creates a staging artifact with inherited permissions from `workspace.default_readers`.
+- Handoffs the staging content to the designated consumer via `workspace.permissions(..., {'consumer'})`.
+- Reads content back from the designated consumer using optional fault injection (`fault == 'read'`).
+- Simulates fault injection points for `create`, `write`, and `handoff` by returning a controlled error path.
+- Guarantees cleanup in all paths with `workspace.remove(...)` in `finally`, and returns `('error', 'staging unavailable')` on failure.
+
+If you want, I can also provide a tiny `invoke`-style check script to manually validate the fault matrix (`create`, `write`, `handoff`, `read`) against the expected cleanup behavior.

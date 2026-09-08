@@ -1,0 +1,319 @@
+diff --git a/src/cmpilot/candidate_discovery_v03.py b/src/cmpilot/candidate_discovery_v03.py
+index 2601fb444..c4b442d6c 100644
+--- a/src/cmpilot/candidate_discovery_v03.py
++++ b/src/cmpilot/candidate_discovery_v03.py
+@@ -2680,7 +2680,31 @@ def _captured_pr_episode(
+     )
+     final_owner = str(repository_value["owner"])
+     final_repository = str(repository_value["name"])
++    evidence_owner = final_owner
++    evidence_repository = final_repository
+     root = _api_repo_endpoint(final_owner, final_repository)
++    requested_root = _api_repo_endpoint(owner, repository)
++    if (
++        owner.casefold() == final_owner.casefold()
++        and repository.casefold() == final_repository.casefold()
++        and requested_root != root
++    ):
++        final_key = GitHubEvidence._key(
++            method="GET",
++            endpoint=f"{root}/pulls/{number}",
++            ordered_parameters=(),
++            json_body=None,
++        )
++        requested_key = GitHubEvidence._key(
++            method="GET",
++            endpoint=f"{requested_root}/pulls/{number}",
++            ordered_parameters=(),
++            json_body=None,
++        )
++        if final_key not in captured.entries and requested_key in captured.entries:
++            evidence_owner = owner
++            evidence_repository = repository
++            root = requested_root
+     payload = captured.get(
+         method="GET", endpoint=f"{root}/pulls/{number}", artifacts=artifacts
+     )
+@@ -2744,8 +2768,8 @@ def _captured_pr_episode(
+     merge_sha = _record_sha(payload.get("merge_commit_sha"), "PR merge commit SHA")
+     endpoint_commit = _captured_commit(
+         captured,
+-        owner=final_owner,
+-        repository=final_repository,
++        owner=evidence_owner,
++        repository=evidence_repository,
+         commit_sha=merge_sha,
+         artifacts=artifacts,
+     )
+@@ -2763,8 +2787,8 @@ def _captured_pr_episode(
+         raise SourceRecordRejected(error.code, str(error)) from error
+     _captured_commit(
+         captured,
+-        owner=final_owner,
+-        repository=final_repository,
++        owner=evidence_owner,
++        repository=evidence_repository,
+         commit_sha=episode.candidate_snapshot_commit_sha,
+         artifacts=artifacts,
+     )
+diff --git a/tests/test_candidate_discovery_v03.py b/tests/test_candidate_discovery_v03.py
+index 9cfef3677..2eb46b6e4 100644
+--- a/tests/test_candidate_discovery_v03.py
++++ b/tests/test_candidate_discovery_v03.py
+@@ -502,6 +502,256 @@ def test_issue_graphql_is_captured_before_unavailable_repository(
+     ]
+ 
+ 
++def _capture_and_materialize_linked_pr_case(
++    run_root: Path, *, graphql_name_with_owner: str
++) -> tuple[
++    CaptureContext,
++    GitHubEvidence,
++    list[dict[str, object]],
++    list[dict[str, object]],
++]:
++    context = CaptureContext.create(
++        run_root=run_root,
++        source_id=SEARCH_SOURCE_ID,
++        source_kind="TRUST_BOUNDARY_ISSUE_PR_SEARCH",
++        source_revision={
++            "kind": "FROZEN_QUERY_SPECIFICATION",
++            "value": "b" * 64,
++        },
++        token=FIXTURE_TOKEN,
++    )
++    snapshot, head, repair = "a" * 40, "b" * 40, "c" * 40
++    snapshot_tree, repair_tree = "d" * 40, "e" * 40
++
++    def transport(method, url, headers, body):  # type: ignore[no-untyped-def]
++        del headers
++        parsed = urlsplit(url)
++        if parsed.path == "/search/issues":
++            query = parse_qs(parsed.query)["q"][0]
++            items = (
++                [
++                    {
++                        "id": 86,
++                        "node_id": "issue-node-86",
++                        "number": 86,
++                        "repository_url": (
++                            "https://api.github.com/repos/issueowner/issues"
++                        ),
++                        "url": (
++                            "https://api.github.com/repos/issueowner/issues/issues/86"
++                        ),
++                        "html_url": "https://github.com/issueowner/issues/issues/86",
++                    }
++                ]
++                if '"fixture-0"' in query
++                else []
++            )
++            return _response(
++                {
++                    "total_count": len(items),
++                    "incomplete_results": False,
++                    "items": items,
++                }
++            )
++        if parsed.path == "/graphql":
++            assert method == "POST"
++            assert body is not None
++            return _response(
++                {
++                    "data": {
++                        "repository": {
++                            "databaseId": 11,
++                            "nameWithOwner": "issueowner/issues",
++                            "issue": {
++                                "closedByPullRequestsReferences": {
++                                    "nodes": [
++                                        {
++                                            "id": "pull-request-node-9",
++                                            "number": 9,
++                                            "merged": True,
++                                            "mergedAt": "2026-01-01T00:00:00Z",
++                                            "baseRefOid": "f" * 40,
++                                            "headRefOid": head,
++                                            "mergeCommit": {"oid": repair},
++                                            "repository": {
++                                                "databaseId": 7,
++                                                "nameWithOwner": graphql_name_with_owner,
++                                                "url": (
++                                                    "https://github.com/"
++                                                    f"{graphql_name_with_owner}"
++                                                ),
++                                                "visibility": "PUBLIC",
++                                            },
++                                        }
++                                    ],
++                                    "pageInfo": {
++                                        "hasNextPage": False,
++                                        "endCursor": None,
++                                    },
++                                }
++                            },
++                        }
++                    }
++                }
++            )
++        if parsed.path == "/repos/issueowner/issues":
++            return _response(
++                {
++                    "id": 11,
++                    "owner": {"login": "issueowner"},
++                    "name": "issues",
++                    "html_url": "https://github.com/issueowner/issues",
++                    "visibility": "public",
++                }
++            )
++        if parsed.path.casefold() == "/repos/exampleowner/examplerepository":
++            return _response(
++                {
++                    "id": 7,
++                    "owner": {"login": "exampleowner"},
++                    "name": "examplerepository",
++                    "html_url": (
++                        "https://github.com/exampleowner/examplerepository"
++                    ),
++                    "visibility": "public",
++                }
++            )
++        api_root = f"/repos/{graphql_name_with_owner}"
++        if parsed.path == f"{api_root}/pulls/9":
++            return _response(
++                {
++                    "number": 9,
++                    "merged": True,
++                    "merged_at": "2026-01-01T00:00:00Z",
++                    "commits": 2,
++                    "base": {"sha": "f" * 40},
++                    "head": {"sha": head},
++                    "merge_commit_sha": repair,
++                }
++            )
++        if parsed.path == f"{api_root}/pulls/9/commits":
++            return _response([{"sha": "1" * 40}, {"sha": head}])
++        if parsed.path == f"{api_root}/git/commits/{repair}":
++            return _response(
++                {
++                    "sha": repair,
++                    "tree": {"sha": repair_tree},
++                    "parents": [{"sha": snapshot}, {"sha": head}],
++                }
++            )
++        if parsed.path == f"{api_root}/git/trees/{repair_tree}":
++            return _response({"sha": repair_tree, "tree": []})
++        if parsed.path == f"{api_root}/git/commits/{snapshot}":
++            return _response(
++                {
++                    "sha": snapshot,
++                    "tree": {"sha": snapshot_tree},
++                    "parents": [],
++                }
++            )
++        if parsed.path == f"{api_root}/git/trees/{snapshot_tree}":
++            return _response({"sha": snapshot_tree, "tree": []})
++        raise AssertionError(f"unexpected offline request: {method} {url}")
++
++    context.api.transport = transport
++    context.api.clock = lambda: "2026-08-16T00:00:00Z"
++    evidence = GitHubEvidence(context)
++    search_spec = {
++        "queries": [
++            {
++                "query_id": f"TB-Q{index + 1:02d}",
++                "query": (
++                    f'"fixture-{index}" is:issue '
++                    "created:2020-01-01..2026-08-12"
++                ),
++                "object_type": "ISSUE",
++            }
++            for index in range(8)
++        ]
++    }
++    discovery_v03.capture_searches(context, evidence, search_spec=search_spec)
++    _, capture_digest = context.finalize(
++        status="CAPTURE_COMPLETE", evidence=evidence
++    )
++    manifest, _, index = load_verified_capture(context.root)
++    records, occurrences = discovery_v03.materialize_searches(
++        source_root=context.root,
++        manifest=manifest,
++        capture_digest=capture_digest,
++        index=index,
++        search_spec=search_spec,
++    )
++    return context, evidence, records, occurrences
++
++
++def test_linked_pr_repository_casing_matches_rest_materialization(
++    tmp_path: Path,
++) -> None:
++    mixed_context, mixed_evidence, mixed_records, mixed_occurrences = (
++        _capture_and_materialize_linked_pr_case(
++            tmp_path / "mixed",
++            graphql_name_with_owner="ExampleOwner/ExampleRepository",
++        )
++    )
++    _, control_evidence, control_records, control_occurrences = (
++        _capture_and_materialize_linked_pr_case(
++            tmp_path / "control",
++            graphql_name_with_owner="exampleowner/examplerepository",
++        )
++    )
++
++    assert len(mixed_records) == len(control_records) == 1
++    assert mixed_records[0]["disposition"] == "MATERIALIZED"
++    assert mixed_records[0]["rejection_reason_codes"] == []
++    assert mixed_records[0]["candidate_links"] == control_records[0]["candidate_links"]
++    assert len(mixed_occurrences) == len(control_occurrences) == 1
++    for field in (
++        "canonical_candidate_id",
++        "github_repository_id",
++        "candidate_snapshot_commit_sha",
++        "repair_commit_sha",
++        "pull_request_number",
++        "repository_capture_metadata",
++        "topology",
++    ):
++        assert mixed_occurrences[0][field] == control_occurrences[0][field]
++
++    linked_pr_path = "/repos/ExampleOwner/ExampleRepository/pulls/9"
++    mixed_linked_requests = [
++        request
++        for request in mixed_context.api.requests
++        if urlsplit(str(request["endpoint"])).path.casefold()
++        == linked_pr_path.casefold()
++    ]
++    assert len(mixed_linked_requests) == 1
++    assert urlsplit(str(mixed_linked_requests[0]["endpoint"])).path == linked_pr_path
++    assert len(mixed_evidence.entries) == len(control_evidence.entries)
++    assert len({entry["evidence_key"] for entry in mixed_evidence.entries}) == len(
++        mixed_evidence.entries
++    )
++
++    repository_paths = [
++        urlsplit(str(request["endpoint"])).path
++        for request in mixed_context.api.requests
++    ]
++    assert "/repos/ExampleOwner/ExampleRepository" in repository_paths
++    graphql_entry = next(
++        entry
++        for entry in mixed_evidence.entries
++        if entry.get("request_body") is not None
++    )
++    graphql_payload = mixed_evidence.read_payload(
++        root=mixed_context.root, entry=graphql_entry
++    )
++    assert isinstance(graphql_payload, dict)
++    linked_repository = graphql_payload["data"]["repository"]["issue"][
++        "closedByPullRequestsReferences"
++    ]["nodes"][0]["repository"]
++    assert linked_repository["nameWithOwner"] == (
++        "ExampleOwner/ExampleRepository"
++    )
++
++
+ def _record(record_id: str, candidate_id: str, episode: dict[str, object]) -> dict[str, object]:
+     return {
+         "source_record_id": record_id,

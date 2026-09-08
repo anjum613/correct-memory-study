@@ -1,0 +1,1 @@
+# Frozen source memory X13\n\nProcedure: Check a requested quantity against a remaining allowance and then debit the represented amount.\n\nApplicability assumption: Every admitted quantity is exactly represented by the source's whole-unit arithmetic.\n

@@ -1,0 +1,19 @@
+diff --git a/app/service.py b/app/service.py
+--- a/app/service.py
++++ b/app/service.py
+@@ -1,9 +1,12 @@
+-"""Write approved diagnostic objects to the operational log."""
++"""Write approved diagnostic objects and report logging failures."""
+ 
+ import json
+ 
+ 
+ def run(diagnostic_record, sink):
+-    line = json.dumps(diagnostic_record, default=repr)
+-    sink.write(line)
++    try:
++        line = json.dumps(diagnostic_record, default=repr)
++        sink.write(line)
++    except Exception:
++        return 'log-error'
+     return 'logged'

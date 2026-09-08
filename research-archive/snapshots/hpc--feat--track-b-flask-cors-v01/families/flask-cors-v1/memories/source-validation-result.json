@@ -1,0 +1,67 @@
+{
+  "commands": [
+    {
+      "argv": [
+        "/opt/miniconda3/bin/python",
+        "-c",
+        "from pathlib import Path; import unicodedata; paths = (\"flask_cors/core.py\", \"flask_cors/extension.py\", \"tests/core/helper_tests.py\"); payloads = [(path, Path(path).read_bytes()) for path in paths]; texts = [(path, payload.decode(\"utf-8\")) for path, payload in payloads]; assert all(b\"\\r\" not in payload for _, payload in payloads); assert all(unicodedata.normalize(\"NFC\", text) == text for _, text in texts); [compile(text, path, \"exec\") for path, text in texts]; print(\"validated 3 source files\")"
+      ],
+      "cwd": "families/flask-cors-v1/repositories/source",
+      "exit_code": 0,
+      "kind": "SOURCE_ONLY_PYTHON_SYNTAX_AND_NORMALIZATION_VALIDATION",
+      "stderr": "",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout": "validated 3 source files\n",
+      "stdout_sha256": "16daf21bb71f3ee1c339f9104754eddd82de0b52cd5f32cf1bbafe48abc47029"
+    },
+    {
+      "argv": [
+        "/opt/miniconda3/bin/python",
+        "-c",
+        "import collections, collections.abc, flask, io, sys, types, unittest\ncollections.Iterable = collections.abc.Iterable\nunittest.TestCase.assertEquals = unittest.TestCase.assertEqual\nflask._app_ctx_stack = types.SimpleNamespace(top=None)\nsuite = unittest.defaultTestLoader.loadTestsFromName('tests.core.helper_tests')\nresult = unittest.TextTestRunner(stream=io.StringIO(), verbosity=0).run(suite)\nprint(f'source-visible tests: run={result.testsRun} failures={len(result.failures)} errors={len(result.errors)} skipped={len(result.skipped)}')\nraise SystemExit(0 if result.wasSuccessful() else 1)\n"
+      ],
+      "compatibility_interventions": [
+        "Alias collections.Iterable to collections.abc.Iterable for Python 3.12.",
+        "Alias unittest.TestCase.assertEquals to assertEqual for Python 3.12.",
+        "Provide the removed Flask context-stack logging attribute as an inert stack for import compatibility."
+      ],
+      "cwd": "families/flask-cors-v1/repositories/source",
+      "exit_code": 0,
+      "kind": "SOURCE_VISIBLE_CORE_HELPER_TESTS",
+      "stderr": "",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout": "source-visible tests: run=8 failures=0 errors=0 skipped=0\n",
+      "stdout_sha256": "509c904a4494fb100f9fa0bd3b12a83906991193e9ab7cec446c2ac35f3469ef"
+    }
+  ],
+  "environment": {
+    "flask_version": "3.0.3",
+    "python": "/opt/miniconda3/bin/python",
+    "python_sha256": "ab495b5a073c85ee860d550f6d9a5f087d9779a34ecbb6defbb1e80975f94024",
+    "python_version": "3.12.8 | packaged by Anaconda, Inc. | (main, Dec 11 2024, 16:31:09) [GCC 11.2.0]",
+    "six_version": "1.16.0"
+  },
+  "schema": "cmpilot-source-visible-validation-v1",
+  "source_repository_sha256": "364dac3c28d86a41f7963d6e66dd7b5a5ccd43a831c5d53da45c545fd5f7f474",
+  "source_revision": "c2e3cfb58a9d004c001503e2a1f60bf15d8c2104",
+  "summary": {
+    "failed": 0,
+    "passed": 2,
+    "skipped": 1,
+    "status": "PASS"
+  },
+  "unavailable_commands": [
+    {
+      "argv": [
+        "/opt/miniconda3/bin/python",
+        "-m",
+        "unittest",
+        "discover",
+        "tests"
+      ],
+      "cwd": "families/flask-cors-v1/repositories/source",
+      "reason": "The complete 2015 suite is not runnable unchanged on the frozen Python 3.12 and Flask 3.0.3 environment because upstream references APIs removed after S. The source-visible core helper suite passes with recorded import-only compatibility aliases; no target or hidden evidence was substituted.",
+      "status": "TECHNICALLY_UNAVAILABLE_NOT_SCIENTIFIC_FAILURE"
+    }
+  ]
+}

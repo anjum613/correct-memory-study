@@ -1,0 +1,1 @@
+# X03 executable canonical input\n\nBound to frozen specification X03. Source and target scaffolds, benign public tests, sealed full-condition tests and deterministic validator are executable release inputs.\n

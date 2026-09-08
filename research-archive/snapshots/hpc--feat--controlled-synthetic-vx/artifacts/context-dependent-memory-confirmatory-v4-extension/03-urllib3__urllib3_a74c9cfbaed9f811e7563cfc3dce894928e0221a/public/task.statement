@@ -1,0 +1,46 @@
+# Missing URL Parsing Functionality in urllib3
+
+## Problem Summary
+
+The urllib3 library is currently missing critical URL parsing functionality in `src/urllib3/util/url.py`. The module lacks essential imports, constants, and functions required for proper URL parsing and validation, causing the library to be non-functional for URL-related operations.
+
+## What is Missing
+
+The `src/urllib3/util/url.py` module is missing:
+
+1. **Required imports** for RFC3986 parsing functionality:
+   - `six` and `rfc3986` packages
+   - RFC3986 exception classes (`RFC3986Exception`, `ValidationError`)
+   - RFC3986 validator classes (`Validator`)
+
+2. **Essential constants**:
+   - `NORMALIZABLE_SCHEMES` - tuple defining which URL schemes should be normalized (http, https, None)
+   - `SCHEME_REGEX` - compiled regex pattern for detecting URLs with schemes per RFC 3986 Section 3.1
+
+3. **Core utility functions**:
+   - `split_first()` - utility function for splitting strings on the first occurrence of delimiters
+   - `parse_url()` - the primary URL parsing function that converts URL strings into `Url` namedtuples
+
+## Impact
+
+Without these components:
+
+- The `parse_url` function cannot be imported or used, breaking URL parsing throughout the library
+- The `split_first` function is unavailable for string parsing operations
+- The `NORMALIZABLE_SCHEMES` constant cannot be imported by `connectionpool.py`, breaking host normalization
+- URL validation and RFC 3986 compliance is non-functional
+- The library cannot handle internationalized domain names (IDNA encoding)
+- Backward compatibility with `urlparse` module is broken
+
+## Expected Behavior
+
+The implementation should restore full URL parsing functionality by providing:
+
+- A working `parse_url(url)` function that accepts URL strings and returns `Url` namedtuples with proper RFC 3986 compliance
+- A `split_first(s, delims)` utility function for delimiter-based string splitting
+- Proper constants for scheme normalization and regex-based scheme detection
+- Support for IDNA encoding of internationalized domain names
+- Comprehensive error handling with `LocationParseError` exceptions
+- Backward compatibility with existing urllib3 API expectations
+
+The restored functionality must maintain the existing public interface and behavior expected by other urllib3 modules and external users of the library.

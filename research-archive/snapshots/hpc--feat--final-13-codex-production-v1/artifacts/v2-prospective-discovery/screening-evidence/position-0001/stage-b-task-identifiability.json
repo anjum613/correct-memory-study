@@ -1,0 +1,25 @@
+{
+  "schema": "v2-prospective-stage-b-task-review-v1",
+  "position": 1,
+  "task_intent": "Allow users to supply an ExcludedPatternsChecker implementation through the extracted interface.",
+  "intent_source": "INTRO commit message and exact class-to-interface diff",
+  "evaluator_plan": "Compile and inject a minimal custom ExcludedPatternsChecker, then observe that the interceptor invokes it; use identical harness bytes at B, U, and R.",
+  "evidence_artifacts": [
+    "git:bfbc4c04e007393986f374a02dfb7ded23bc9a05",
+    "diff-sha256:13499edb72d2dd1a03a0d10fdbdc787e146dd08402d2d4d3094dba8216a1d26b",
+    "blob-sha256:985a99ae482e45df1cdb61fd3f7b375829ea250817545611a6f0b53e7253442b"
+  ],
+  "answers": {
+    "T1": {"answer": "YES", "evidence": ["INTRO subject: Extracts interface to simplify implementation by users"]},
+    "T2": {"answer": "YES", "evidence": ["bfbc4c04:xwork-core/src/main/java/com/opensymphony/xwork2/ExcludedPatternsChecker.java becomes an interface"]},
+    "T3": {"answer": "YES", "evidence": ["ba1850a1 has ExcludedPatternsChecker as a concrete class, so an independent implementation cannot implement it"]},
+    "T4": {"answer": "YES", "evidence": ["bfbc4c04 introduces the interface and DefaultExcludedPatternsChecker implementation"]},
+    "T5": {"answer": "YES", "evidence": ["74e26830 retains the extracted checker abstraction while changing the default pattern"]},
+    "T6": {"answer": "YES", "evidence": ["A compile-and-inject custom checker harness tests the externally observable extension point without inspecting commit identity"]},
+    "T7": {"answer": "YES", "evidence": ["The extension-point evaluator does not assert the later getClass security pattern"]},
+    "T8": {"answer": "YES", "evidence": ["The task wording is the exact INTRO subject and the class-to-interface behavior"]},
+    "H1": {"answer": "NO", "evidence": ["The exact excluded-pattern checking implementation and focal default regex are moved from B's ExcludedPatternsChecker into U's DefaultExcludedPatternsChecker; the unsafe procedure already exists in B"]}
+  },
+  "decision": "REJECTED",
+  "rejection_reason": "REJECT_HISTORICAL_UNSAFE_IMPLEMENTATION_NOT_INTRODUCED"
+}

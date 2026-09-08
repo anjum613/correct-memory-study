@@ -1,0 +1,125 @@
+{
+  "sha": "feb7237d01f359d2ad4ee42d00344e61692b3b39",
+  "node_id": "C_kwDOCa4eS9oAKGZlYjcyMzdkMDFmMzU5ZDJhZDRlZTQyZDAwMzQ0ZTYxNjkyYjNiMzk",
+  "commit": {
+    "author": {
+      "name": "Tim Ren",
+      "email": "137012659+xr843@users.noreply.github.com",
+      "date": "2026-05-15T16:04:04Z"
+    },
+    "committer": {
+      "name": "GitHub",
+      "email": "noreply@github.com",
+      "date": "2026-05-15T16:04:04Z"
+    },
+    "message": "fix(security): isolate /proxy= cookie jars across Spaces (GHSA-2mr9-9r47-px2g) (#13384)\n\n* fix(security): isolate /proxy= cookie jars (GHSA-2mr9-9r47-px2g)\n\nThe module-level `httpx.AsyncClient` shared by the `/proxy=` reverse\nproxy persists `Set-Cookie` headers from one proxied response in its\ninternal cookie jar and replays them on subsequent requests to the\nsame parent domain. Combined with the existing SSRF guard that\nrestricts proxy targets to `*.hf.space`, this lets a malicious Space\ninject a parent-domain cookie (`Set-Cookie: Domain=hf.space`) that\nthe Gradio server then forwards to any other proxied Space — enabling\ncross-Space session fixation.\n\nReported by @AAtomical via GitHub Security Advisories\n(GHSA-2mr9-9r47-px2g) and the public issue #13369, with end-to-end\nverification on real Hugging Face Spaces.\n\nFix: replace the shared `AsyncClient` with a shared\n`AsyncHTTPTransport` (preserving the connection pool) plus a\nper-request `AsyncClient` built via `_build_proxy_client()`. Each\nproxy call therefore gets a fresh cookie jar that is discarded with\nthe streaming response — no state survives across calls.\n\n`build_proxy_request` now constructs a plain `httpx.Request` rather\nthan borrowing the shared client's `build_request` to avoid taking\na dependency on the removed module-level `client`.\n\nAdds a regression test (`test_proxy_clients_do_not_share_cookies`)\nthat pins the isolation invariant against future regressions.\n\n* fix: keep shared transport alive when per-request proxy client closes\n\nPer-request `httpx.AsyncClient.aclose()` propagates to the underlying\ntransport, so the first `/proxy=` request would tear down the shared\n`_proxy_transport` connection pool and every subsequent request would\nfail with a closed-pool error.\n\nWrap the shared transport in a no-op-close adapter so per-request\nclients can close (releasing their cookie jar — the GHSA fix) without\nkilling the pool.\n\nCo-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>\n\n* tweaks\n\n* Fix code\n\n* Fix\n\n---------\n\nCo-authored-by: Claude Opus 4.7 (1M context) <noreply@anthropic.com>\nCo-authored-by: Freddy Boulton <41651716+freddyaboulton@users.noreply.github.com>",
+    "tree": {
+      "sha": "0c6d805f7b170c894ecafc0b0a68a5df05c6daf8",
+      "url": "https://api.github.com/repos/gradio-app/gradio/git/trees/0c6d805f7b170c894ecafc0b0a68a5df05c6daf8"
+    },
+    "url": "https://api.github.com/repos/gradio-app/gradio/git/commits/feb7237d01f359d2ad4ee42d00344e61692b3b39",
+    "comment_count": 0,
+    "verification": {
+      "verified": true,
+      "reason": "valid",
+      "signature": "-----BEGIN PGP SIGNATURE-----\n\nwsFcBAABCAAQBQJqB0P0CRC1aQ7uu5UhlAAAS9wQAC+ZU1WSBLhtLqnYLMTmtna0\nHQyFIwJRmA94PzdQxkvxcY8UCKC/3ftMoNgqdCUOeqCV3X4tgQ3WfzA6qms721Ej\nq1O+L9zrkijHrmcdcbdDqJNX5eO4nE5sFizSLqJE4ApdzfJ6J0HGUlBU+rDzjmz7\ns16l4jSGS+RqQ+QwXYNydMPzsfVKE660Krc8fX0AAahVpKD85vCstVL/WgjaRkhS\n+XAa8Sn7MlXW58efGbZJhGK8M/HNgOdetmHJDhMV7033NNXsuj5S1MRCVcLIpw6G\nMeweXFymx2dcZCwQ277iqgiUpS971ONl/zRxTgbRJeputBOMv2UH6z6uHLI4BVpr\ndSCKmoTsTPmKCIR+83Hea/zcd/fQ/IPjHc4Y9Aebl5e+r5buzcj29LyMK/nEkG2Z\n9Pl4q6+smYgr84qN0K/APixhNLq9pjrjuKGXCK+W09cpSJDBhyuIC/GehrTrxPi4\nS1nPF+Vkdsg8BCAuNvZFtCIDeYh0VB4IBtLpU/nyBQ2mjDFuGnyr4SQP37t3I3wi\nRqEn/xz7kKEDnPYGUuhk3UxCnW35rbxGP08mV6k4/3qM9d8QxRsVHbxhF7gtvsbm\nkgeBfE4Dp/nPIfdxj9/r+90mLIimcZckhhdRGJymRsfJkjy8SAkHb+6jHHVxRFn4\nRZUIgVyPILYT6WTFqGZQ\n=0Qn5\n-----END PGP SIGNATURE-----\n",
+      "payload": "tree 0c6d805f7b170c894ecafc0b0a68a5df05c6daf8\nparent 2887302069b2d33429ead157e7699d5502e29e0a\nauthor Tim Ren <137012659+xr843@users.noreply.github.com> 1778861044 +0800\ncommitter GitHub <noreply@github.com> 1778861044 -0400\n\nfix(security): isolate /proxy= cookie jars across Spaces (GHSA-2mr9-9r47-px2g) (#13384)\n\n* fix(security): isolate /proxy= cookie jars (GHSA-2mr9-9r47-px2g)\n\nThe module-level `httpx.AsyncClient` shared by the `/proxy=` reverse\nproxy persists `Set-Cookie` headers from one proxied response in its\ninternal cookie jar and replays them on subsequent requests to the\nsame parent domain. Combined with the existing SSRF guard that\nrestricts proxy targets to `*.hf.space`, this lets a malicious Space\ninject a parent-domain cookie (`Set-Cookie: Domain=hf.space`) that\nthe Gradio server then forwards to any other proxied Space — enabling\ncross-Space session fixation.\n\nReported by @AAtomical via GitHub Security Advisories\n(GHSA-2mr9-9r47-px2g) and the public issue #13369, with end-to-end\nverification on real Hugging Face Spaces.\n\nFix: replace the shared `AsyncClient` with a shared\n`AsyncHTTPTransport` (preserving the connection pool) plus a\nper-request `AsyncClient` built via `_build_proxy_client()`. Each\nproxy call therefore gets a fresh cookie jar that is discarded with\nthe streaming response — no state survives across calls.\n\n`build_proxy_request` now constructs a plain `httpx.Request` rather\nthan borrowing the shared client's `build_request` to avoid taking\na dependency on the removed module-level `client`.\n\nAdds a regression test (`test_proxy_clients_do_not_share_cookies`)\nthat pins the isolation invariant against future regressions.\n\n* fix: keep shared transport alive when per-request proxy client closes\n\nPer-request `httpx.AsyncClient.aclose()` propagates to the underlying\ntransport, so the first `/proxy=` request would tear down the shared\n`_proxy_transport` connection pool and every subsequent request would\nfail with a closed-pool error.\n\nWrap the shared transport in a no-op-close adapter so per-request\nclients can close (releasing their cookie jar — the GHSA fix) without\nkilling the pool.\n\nCo-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>\n\n* tweaks\n\n* Fix code\n\n* Fix\n\n---------\n\nCo-authored-by: Claude Opus 4.7 (1M context) <noreply@anthropic.com>\nCo-authored-by: Freddy Boulton <41651716+freddyaboulton@users.noreply.github.com>",
+      "verified_at": "2026-05-15T16:04:05Z"
+    }
+  },
+  "url": "https://api.github.com/repos/gradio-app/gradio/commits/feb7237d01f359d2ad4ee42d00344e61692b3b39",
+  "html_url": "https://github.com/gradio-app/gradio/commit/feb7237d01f359d2ad4ee42d00344e61692b3b39",
+  "comments_url": "https://api.github.com/repos/gradio-app/gradio/commits/feb7237d01f359d2ad4ee42d00344e61692b3b39/comments",
+  "author": {
+    "login": "xr843",
+    "id": 137012659,
+    "node_id": "U_kgDOCCqlsw",
+    "avatar_url": "https://avatars.githubusercontent.com/u/137012659?v=4",
+    "gravatar_id": "",
+    "url": "https://api.github.com/users/xr843",
+    "html_url": "https://github.com/xr843",
+    "followers_url": "https://api.github.com/users/xr843/followers",
+    "following_url": "https://api.github.com/users/xr843/following{/other_user}",
+    "gists_url": "https://api.github.com/users/xr843/gists{/gist_id}",
+    "starred_url": "https://api.github.com/users/xr843/starred{/owner}{/repo}",
+    "subscriptions_url": "https://api.github.com/users/xr843/subscriptions",
+    "organizations_url": "https://api.github.com/users/xr843/orgs",
+    "repos_url": "https://api.github.com/users/xr843/repos",
+    "events_url": "https://api.github.com/users/xr843/events{/privacy}",
+    "received_events_url": "https://api.github.com/users/xr843/received_events",
+    "type": "User",
+    "user_view_type": "public",
+    "site_admin": false
+  },
+  "committer": {
+    "login": "web-flow",
+    "id": 19864447,
+    "node_id": "MDQ6VXNlcjE5ODY0NDQ3",
+    "avatar_url": "https://avatars.githubusercontent.com/u/19864447?v=4",
+    "gravatar_id": "",
+    "url": "https://api.github.com/users/web-flow",
+    "html_url": "https://github.com/web-flow",
+    "followers_url": "https://api.github.com/users/web-flow/followers",
+    "following_url": "https://api.github.com/users/web-flow/following{/other_user}",
+    "gists_url": "https://api.github.com/users/web-flow/gists{/gist_id}",
+    "starred_url": "https://api.github.com/users/web-flow/starred{/owner}{/repo}",
+    "subscriptions_url": "https://api.github.com/users/web-flow/subscriptions",
+    "organizations_url": "https://api.github.com/users/web-flow/orgs",
+    "repos_url": "https://api.github.com/users/web-flow/repos",
+    "events_url": "https://api.github.com/users/web-flow/events{/privacy}",
+    "received_events_url": "https://api.github.com/users/web-flow/received_events",
+    "type": "User",
+    "user_view_type": "public",
+    "site_admin": false
+  },
+  "parents": [
+    {
+      "sha": "2887302069b2d33429ead157e7699d5502e29e0a",
+      "url": "https://api.github.com/repos/gradio-app/gradio/commits/2887302069b2d33429ead157e7699d5502e29e0a",
+      "html_url": "https://github.com/gradio-app/gradio/commit/2887302069b2d33429ead157e7699d5502e29e0a"
+    }
+  ],
+  "stats": {
+    "total": 35,
+    "additions": 27,
+    "deletions": 8
+  },
+  "files": [
+    {
+      "sha": "267513be7ddf152d492206faab14ee3507ee70b9",
+      "filename": ".changeset/fix-proxy-cookie-isolation.md",
+      "status": "added",
+      "additions": 5,
+      "deletions": 0,
+      "changes": 5,
+      "blob_url": "https://github.com/gradio-app/gradio/blob/feb7237d01f359d2ad4ee42d00344e61692b3b39/.changeset%2Ffix-proxy-cookie-isolation.md",
+      "raw_url": "https://github.com/gradio-app/gradio/raw/feb7237d01f359d2ad4ee42d00344e61692b3b39/.changeset%2Ffix-proxy-cookie-isolation.md",
+      "contents_url": "https://api.github.com/repos/gradio-app/gradio/contents/.changeset%2Ffix-proxy-cookie-isolation.md?ref=feb7237d01f359d2ad4ee42d00344e61692b3b39",
+      "patch": "@@ -0,0 +1,5 @@\n+---\n+\"gradio\": patch\n+---\n+\n+fix:Isolate cookie jars in `/proxy=` requests so a malicious upstream Space cannot leak cookies into proxied requests to a different `*.hf.space` (GHSA-2mr9-9r47-px2g)"
+    },
+    {
+      "sha": "17abee366a95e670649b9464824aaf6df4deb2ae",
+      "filename": "gradio/routes.py",
+      "status": "modified",
+      "additions": 20,
+      "deletions": 6,
+      "changes": 26,
+      "blob_url": "https://github.com/gradio-app/gradio/blob/feb7237d01f359d2ad4ee42d00344e61692b3b39/gradio%2Froutes.py",
+      "raw_url": "https://github.com/gradio-app/gradio/raw/feb7237d01f359d2ad4ee42d00344e61692b3b39/gradio%2Froutes.py",
+      "contents_url": "https://api.github.com/repos/gradio-app/gradio/contents/gradio%2Froutes.py?ref=feb7237d01f359d2ad4ee42d00344e61692b3b39",
+      "patch": "@@ -230,14 +230,19 @@ def toorjson(value):\n templates = Jinja2Templates(directory=STATIC_TEMPLATE_LIB)\n templates.env.filters[\"toorjson\"] = toorjson\n \n-client = httpx.AsyncClient(\n+# Shared transport keeps the connection pool warm without sharing an\n+# `httpx.AsyncClient` (and therefore a cookie jar) across `/proxy=` requests.\n+# A single shared `AsyncClient` would persist `Set-Cookie` headers from one\n+# proxied response and replay them on subsequent requests to any sibling\n+# `*.hf.space` URL — see GHSA-2mr9-9r47-px2g.\n+_proxy_transport = httpx.AsyncHTTPTransport(\n     limits=httpx.Limits(\n         max_connections=100,\n         max_keepalive_connections=20,\n     ),\n-    timeout=httpx.Timeout(10.0),\n )\n \n+\n file_upload_statuses = FileUploadProgress()\n \n \n@@ -377,8 +382,10 @@ def build_proxy_request(self, url_path):\n         headers = {}\n         if Context.token is not None:\n             headers[\"Authorization\"] = f\"Bearer {Context.token}\"\n-        rp_req = client.build_request(\"GET\", url, headers=headers)\n-        return rp_req\n+        # Build a plain request rather than `client.build_request` so that\n+        # the proxy does not share an `httpx.AsyncClient` (or cookie jar)\n+        # across calls (see GHSA-2mr9-9r47-px2g).\n+        return url, headers\n \n     def _cancel_asyncio_tasks(self):\n         for task in self._asyncio_tasks:\n@@ -1177,10 +1184,17 @@ async def favicon():\n         async def reverse_proxy(url_path: str):\n             # Adapted from: https://github.com/tiangolo/fastapi/issues/1788\n             try:\n-                rp_req = app.build_proxy_request(url_path)\n+                proxy_client = httpx.AsyncClient(\n+                    transport=_proxy_transport,\n+                    timeout=httpx.Timeout(10.0),\n+                )\n+                url, headers = app.build_proxy_request(url_path)\n+                rp_req = proxy_client.build_request(\"GET\", url, headers=headers)\n             except PermissionError as err:\n                 raise HTTPException(status_code=400, detail=str(err)) from err\n-            rp_resp = await client.send(rp_req, stream=True)\n+\n+            rp_resp = await proxy_client.send(rp_req, stream=True)\n+\n             mime_type, _ = mimetypes.guess_type(url_path)\n             if mime_type not in XSS_SAFE_MIMETYPES:\n                 rp_resp.headers.update({\"Content-Disposition\": \"attachment\"})"
+    },
+    {
+      "sha": "9cec7ddc3ca14e26e3f09b3723b230b69f98a6c3",
+      "filename": "test/test_routes.py",
+      "status": "modified",
+      "additions": 2,
+      "deletions": 2,
+      "changes": 4,
+      "blob_url": "https://github.com/gradio-app/gradio/blob/feb7237d01f359d2ad4ee42d00344e61692b3b39/test%2Ftest_routes.py",
+      "raw_url": "https://github.com/gradio-app/gradio/raw/feb7237d01f359d2ad4ee42d00344e61692b3b39/test%2Ftest_routes.py",
+      "contents_url": "https://api.github.com/repos/gradio-app/gradio/contents/test%2Ftest_routes.py?ref=feb7237d01f359d2ad4ee42d00344e61692b3b39",
+      "patch": "@@ -654,10 +654,10 @@ def test_proxy_does_not_leak_hf_token_externally(self):\n             \"https://google.com\",\n         }\n         app.configure_app(interface)\n-        r = app.build_proxy_request(\n+        url, headers = app.build_proxy_request(\n             \"https://gradio-tests-test-loading-examples-private.hf.space/file=Bunny.obj\"\n         )\n-        assert \"authorization\" in dict(r.headers)\n+        assert \"Authorization\" in dict(headers)\n         with pytest.raises(PermissionError):\n             app.build_proxy_request(\"https://google.com\")\n "
+    }
+  ]
+}

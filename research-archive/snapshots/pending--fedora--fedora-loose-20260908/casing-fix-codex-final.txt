@@ -1,0 +1,55 @@
+## Root cause
+
+`GitHubEvidence._key()` hashes the exact, case-sensitive endpoint.
+
+- Capture constructed linked-PR evidence endpoints from GraphQL `nameWithOwner`, e.g. `/repos/ExampleOwner/ExampleRepository/pulls/9`.
+- Materialization read REST repository metadata first, then constructed PR/commit/tree lookup endpoints from REST `owner.login` and `name`, e.g. `/repos/exampleowner/examplerepository/pulls/9`.
+
+These produced different evidence hashes, causing `RAW_CAPTURE_INCOMPLETE`.
+
+## Change made
+
+Changed `_captured_pr_episode()` only:
+
+- Keeps the REST-derived exact lookup as the default.
+- When REST and GraphQL coordinates differ only by case, checks whether persisted evidence exists under the originally requested GraphQL-cased PR endpoint.
+- If so, consistently uses that casing for PR, commit-list, commit, and tree lookups.
+- Does not normalize or change persisted evidence keys.
+- Preserves same-casing behavior, original captured casing, dependency order, and 404/410 behavior.
+
+Production change: 28 insertions, 4 deletions.
+
+## Tests added
+
+Added a production-path regression and fixture helper covering:
+
+- GraphQL `ExampleOwner/ExampleRepository`
+- REST `exampleowner/examplerepository`
+- Successful materialization without `RAW_CAPTURE_INCOMPLETE`
+- Equality with a same-casing control
+- No duplicate evidence keys or additional logical evidence
+- Preservation of GraphQL/request casing
+- Existing dependency-order regression
+
+## Validation
+
+- New casing regression: `1 passed`
+- Casing, dependency-order, and linked-PR topology tests: `3 passed`
+- Requested test module: `16 passed`
+- `python -m py_compile ...`: passed
+- `git diff --check`: passed
+- No network or candidate-discovery execution performed.
+
+Diff stat:
+
+```text
+src/cmpilot/candidate_discovery_v03.py |  32 ++++-
+tests/test_candidate_discovery_v03.py  | 250 +++++++++++++++++++++++++++++++++
+2 files changed, 278 insertions(+), 4 deletions(-)
+```
+
+Only the two permitted files are modified. Nothing is staged or committed.
+
+Remaining risk: compatibility selection relies on the persisted linked-PR detail key to identify which casing family was captured. This matches the existing atomic capture path; no evidence-schema migration is required.
+
+READY_FOR_REVIEW

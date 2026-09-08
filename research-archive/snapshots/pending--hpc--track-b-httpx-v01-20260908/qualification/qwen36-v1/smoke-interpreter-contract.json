@@ -1,0 +1,124 @@
+{
+  "created_at_utc": "2026-08-09T11:23:33Z",
+  "helpers": [
+    {
+      "actual_launcher": "CMPILOT_PY",
+      "imports": [
+        "cmpilot.qualification",
+        "cmpilot.qualification_runtime_paths"
+      ],
+      "intended_interpreter_role": "project_harness",
+      "required_third_party_packages": [],
+      "script": "scripts/qualification_runtime_path.py"
+    },
+    {
+      "actual_launcher": "CMPILOT_PY",
+      "imports": [
+        "cmpilot.qwen36_candidate"
+      ],
+      "intended_interpreter_role": "project_harness",
+      "required_third_party_packages": [],
+      "script": "scripts/finalize_qwen36_smoke.py"
+    },
+    {
+      "actual_launcher": "CMPILOT_PY",
+      "imports": [],
+      "intended_interpreter_role": "project_harness",
+      "required_third_party_packages": [],
+      "script": "inline:cpu-gate-and-runtime-integrity-checks"
+    },
+    {
+      "actual_launcher": "VLLM_PY",
+      "imports": [
+        "cmpilot.environment_content_digest",
+        "cmpilot.environment_fingerprint",
+        "cmpilot.qwen36_candidate"
+      ],
+      "intended_interpreter_role": "qwen36_runtime",
+      "required_third_party_packages": [],
+      "script": "scripts/verify_qwen36_environment.py"
+    },
+    {
+      "actual_launcher": "CMPILOT_PY",
+      "imports": [],
+      "intended_interpreter_role": "project_harness",
+      "required_third_party_packages": [],
+      "script": "scripts/capture_gpu_diagnostic.py"
+    },
+    {
+      "actual_launcher": "TORCHRUN",
+      "imports": [
+        "torch",
+        "torch.distributed"
+      ],
+      "intended_interpreter_role": "qwen36_runtime",
+      "required_third_party_packages": [
+        "torch"
+      ],
+      "script": "scripts/qwen36_gpu_probe.py"
+    },
+    {
+      "actual_launcher": "VLLM_PY",
+      "imports": [
+        "vllm.entrypoints.openai.api_server"
+      ],
+      "intended_interpreter_role": "qwen36_runtime",
+      "required_third_party_packages": [
+        "torch",
+        "transformers",
+        "vllm"
+      ],
+      "script": "module:vllm.entrypoints.openai.api_server"
+    },
+    {
+      "actual_launcher": "VLLM_PY",
+      "imports": [
+        "cmpilot.integrations.miniswe.openai_transport",
+        "cmpilot.qwen36_candidate"
+      ],
+      "intended_interpreter_role": "qwen36_runtime",
+      "required_third_party_packages": [],
+      "script": "scripts/qwen36_smoke_client.py"
+    },
+    {
+      "actual_launcher": "VLLM_PYTHON",
+      "imports": [
+        "torch",
+        "transformers",
+        "vllm"
+      ],
+      "intended_interpreter_role": "qwen36_runtime",
+      "invocation_context": "cpu_preflight",
+      "required_third_party_packages": [
+        "torch",
+        "transformers",
+        "vllm"
+      ],
+      "script": "scripts/qwen36_compatibility_probe.py"
+    }
+  ],
+  "interpreters": {
+    "project_harness": {
+      "environment_fingerprint": "6325999d4038c8c93c1c313e10a66386a5afe803bf966a951317ff12a3d35128",
+      "executable": "/home/s224049759/environments/cmpilot-conda/bin/python",
+      "package_count": 10,
+      "python_version": "3.11.15"
+    },
+    "qwen36_runtime": {
+      "content_digest": "b36b9c47b130dba7c2a0ae60161029d3f5b0b522e8bd0f5b0f0749bae86b3a74",
+      "environment_fingerprint": "fe63e366ca33bc2392eb173281764bdb8bd543ed3ce8d36c3b3fe6727df80bab",
+      "executable": "/home/s224049759/environments/qwen36-vllm-v1/bin/python",
+      "python_version": "3.12.8",
+      "torchrun": "/home/s224049759/environments/qwen36-vllm-v1/bin/torchrun",
+      "vllm_entrypoint": "vllm.entrypoints.openai.api_server"
+    }
+  },
+  "policy": {
+    "activation_allowed": false,
+    "path_lookup_allowed": false,
+    "project_harness_helpers_use_project_harness": true,
+    "qwen36_model_and_client_helpers_use_qwen36_runtime": true,
+    "unqualified_python_allowed": false
+  },
+  "schema": "qwen36-smoke-interpreter-contract-v1"
+}

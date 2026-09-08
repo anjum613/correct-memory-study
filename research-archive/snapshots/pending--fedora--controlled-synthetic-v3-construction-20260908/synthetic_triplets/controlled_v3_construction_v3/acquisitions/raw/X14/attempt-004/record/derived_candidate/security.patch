@@ -1,0 +1,35 @@
+diff --git a/app/service.py b/app/service.py
+--- a/app/service.py
++++ b/app/service.py
+@@ -1,2 +1,29 @@
+-"""Executable canonical S for X14; source-valid context only."""
+-from synthetic_triplets.controlled_v3_executable_oracle_release_v1.agent_inputs.shared.agent_runtime import x14_source as run
++"""Completion callbacks with observation and notification authority only."""
++
++
++def _append_action(destination):
++    # Capture the permitted destination, never the producer context or its
++    # full reference graph. Captured actions remain valid after completion.
++    append = destination.append
++
++    def action(value):
++        append(value)
++        return "ok"
++
++    return action
++
++
++def run(context, ordered_callbacks):
++    results = []
++    for callback in ordered_callbacks:
++        try:
++            # Each callback owns its mapping. Changes to it cannot change
++            # which actions a later callback receives.
++            references = {
++                "notify": _append_action(context.notifications),
++                "observe": _append_action(context.observations),
++            }
++            results.append(callback.invoke(references))
++        except Exception:
++            results.append("callback-error")
++    return results

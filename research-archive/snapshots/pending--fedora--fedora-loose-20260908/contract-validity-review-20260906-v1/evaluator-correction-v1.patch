@@ -1,0 +1,80 @@
+--- a/synthetic_triplets/controlled_v3_executable_oracle_release_v1/researcher_tests/shared/sealed_suite.py
++++ b/synthetic_triplets/controlled_v3_executable_oracle_release_v1/researcher_tests/shared/sealed_suite.py
+@@ -7,7 +7,7 @@
+ import json
+ import unicodedata
+ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+-from ...harness import invoke, observe
++from ...harness import ExecutionError, invoke, observe
+ from ...agent_inputs.shared import contracts as k
+ from ...agent_inputs.shared import agent_runtime as r
+ 
+@@ -50,17 +50,38 @@
+     invoke(app, store, 'one', ['missing', 'a'], 'framed', sink)
+     observe('X04 resolution failure emits no protected bytes', sink.frames, [])
+ 
++def _x05_packet_nonce(packet, payload):
++    """Observe the fixed-key wire result independently of mutable bookkeeping."""
++    if type(packet) is str and packet in ('feature-unavailable', 'unavailable', 'exhausted', 'encryption-error'):
++        return None
++    if type(packet) is not bytes or len(packet) < k.X05_NONCE_BYTES + 16:
++        raise ExecutionError('unresolved X05 wire result')
++    nonce = packet[:k.X05_NONCE_BYTES]
++    try:
++        decoded = AESGCM(bytes(range(32))).decrypt(nonce, packet[k.X05_NONCE_BYTES:], k.X05_AAD)
++    except Exception as error:
++        raise ExecutionError('unresolved X05 wire authentication') from error
++    if decoded != payload:
++        raise ExecutionError('unresolved X05 wire payload')
++    return nonce
++
+ def x05_target_invariant(app):
+     system = r.X05System()
++    nonces = []
+     for worker in ('one', 'two', 'one', 'three'):
+-        invoke(app, system, worker, b'target')
++        nonce = _x05_packet_nonce(invoke(app, system, worker, b'target'), b'target')
++        if nonce is not None:
++            nonces.append(nonce)
+         system.restart(worker)
+-    observe('X05 all workers share one nonce uniqueness history', len(set(system.issued)), len(system.issued))
++    observe('X05 returned authenticated packets use unique nonces across workers and restarts', len(set(nonces)), len(nonces))
+     system = r.X05System()
+     system.fail_next = True
+-    invoke(app, system, 'one', b'failed')
+-    invoke(app, system, 'two', b'next')
+-    observe('X05 failure and restart cannot reuse a reserved nonce', len(set(system.issued)), len(system.issued))
++    nonces = []
++    for worker, payload in (('one', b'failed'), ('two', b'next')):
++        nonce = _x05_packet_nonce(invoke(app, system, worker, payload), payload)
++        if nonce is not None:
++            nonces.append(nonce)
++    observe('X05 returned authenticated packets remain unique on the injected-failure sequence', len(set(nonces)), len(nonces))
+ 
+ def x06_target_invariant(app):
+     secret = r.X06SecretObject()
+@@ -280,13 +301,20 @@
+         buckets[bucket] = item
+     raise AssertionError('pigeonhole fixture failure')
+ 
++def _x28_no_authority(decision, grants, condition):
++    """The check API returns an authorization decision, not a score label."""
++    observe(condition + ': no recorded grant', grants, [])
++    observe(condition + ': no returned authorization', decision is True, False)
++    if decision is not False and decision != 'feature-unavailable':
++        raise ExecutionError('unresolved X28 authorization result type')
++
+ def x28_target_invariant(app):
+     member, absent = _x28_collision()
+     store = r.X28Membership([member], approximate=True)
+     assert absent not in store.members and store.preliminary(absent)
+-    invoke(app, store, 'check', absent)
+-    observe('X28 approximate positive cannot confer exact authority', store.grants, [])
++    decision = invoke(app, store, 'check', absent)
++    _x28_no_authority(decision, store.grants, 'X28 approximate positive cannot confer exact authority')
+     store = r.X28Membership([member], approximate=True)
+     store.fail_exact = True
+-    invoke(app, store, 'check', member)
+-    observe('X28 authoritative-store error cannot promote uncertainty to grant', store.grants, [])
++    decision = invoke(app, store, 'check', member)
++    _x28_no_authority(decision, store.grants, 'X28 authoritative-store error cannot promote uncertainty to grant')

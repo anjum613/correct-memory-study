@@ -1,0 +1,1873 @@
+diff --git a/scripts/execute_candidate_discovery_v03.py b/scripts/execute_candidate_discovery_v03.py
+index 238edfb50..f9d9878c6 100644
+--- a/scripts/execute_candidate_discovery_v03.py
++++ b/scripts/execute_candidate_discovery_v03.py
+@@ -1,5 +1,5 @@
+ #!/usr/bin/env python3
+-"""Execute or verify the frozen candidate-source v0.3 discovery run."""
++"""Execute or verify discovery, or run its separate operational canary."""
+ 
+ from __future__ import annotations
+ 
+@@ -14,7 +14,9 @@ ROOT = Path(__file__).resolve().parents[1]
+ sys.path.insert(0, str(ROOT / "src"))
+ 
+ from cmpilot.candidate_discovery_v03 import (  # noqa: E402
++    execute_canary,
+     execute_discovery,
++    verify_canary_run,
+     verify_discovery_run,
+ )
+ from cmpilot.candidate_discovery_v03_io import redacted_execution_error  # noqa: E402
+@@ -22,18 +24,27 @@ from cmpilot.candidate_discovery_v03_io import redacted_execution_error  # noqa:
+ 
+ def build_parser() -> argparse.ArgumentParser:
+     parser = argparse.ArgumentParser(description=__doc__)
+-    parser.add_argument("operation", choices=("execute", "verify"))
++    parser.add_argument(
++        "operation", choices=("execute", "verify", "canary", "verify-canary")
++    )
+     parser.add_argument("--run-directory", type=Path, required=True)
+     parser.add_argument(
+         "--token-file",
+         type=Path,
+         default=Path.home() / ".config/cmpilot/github-read-token",
+     )
++    parser.add_argument(
++        "--query-id",
++        help="required frozen query ID for the operational canary",
++    )
+     return parser
+ 
+ 
+ def main(argv: Sequence[str] | None = None) -> int:
+-    arguments = build_parser().parse_args(argv)
++    parser = build_parser()
++    arguments = parser.parse_args(argv)
++    if arguments.operation == "canary" and arguments.query_id is None:
++        parser.error("the canary operation requires --query-id")
+     run_root = arguments.run_directory.resolve()
+     try:
+         if arguments.operation == "execute":
+@@ -42,8 +53,17 @@ def main(argv: Sequence[str] | None = None) -> int:
+                 run_root=run_root,
+                 token_path=arguments.token_file.resolve(),
+             )
+-        else:
++        elif arguments.operation == "verify":
+             result = verify_discovery_run(project_root=ROOT, run_root=run_root)
++        elif arguments.operation == "canary":
++            result = execute_canary(
++                project_root=ROOT,
++                run_root=run_root,
++                token_path=arguments.token_file.resolve(),
++                query_id=arguments.query_id,
++            )
++        else:
++            result = verify_canary_run(project_root=ROOT, run_root=run_root)
+     except BaseException as error:
+         safe_error = redacted_execution_error(
+             error,
+@@ -66,7 +86,7 @@ def main(argv: Sequence[str] | None = None) -> int:
+         )
+         return 1
+     print(json.dumps(result, indent=2, sort_keys=True))
+-    return 0
++    return 0 if result.get("pass", True) is not False else 1
+ 
+ 
+ if __name__ == "__main__":
+diff --git a/src/cmpilot/candidate_discovery_v03.py b/src/cmpilot/candidate_discovery_v03.py
+index c4b442d6c..38031744b 100644
+--- a/src/cmpilot/candidate_discovery_v03.py
++++ b/src/cmpilot/candidate_discovery_v03.py
+@@ -24,14 +24,18 @@ import shutil
+ import subprocess
+ import tempfile
+ import threading
++import time
+ from typing import Any
+ from urllib.parse import quote, urlsplit
+ 
+ from cmpilot.candidate_discovery_v03_io import (
+     ACCEPT,
+     API_VERSION,
++    Clock,
+     CONNECT_TIMEOUT_SECONDS,
+     MAXIMUM_ATTEMPTS,
++    MonotonicClock,
++    OperationalCanaryBudget,
+     READ_TIMEOUT_SECONDS,
+     REDIRECT_STATUSES,
+     RETRY_DELAYS_SECONDS,
+@@ -39,12 +43,15 @@ from cmpilot.candidate_discovery_v03_io import (
+     ApiCaptureClient,
+     DiscoveryExecutionError,
+     RawArtifactStore,
++    Sleeper,
++    Transport,
+     assert_no_sensitive_values,
+     canonical_document_bytes,
+     read_token_file,
+     redacted_execution_error,
+     sha256_bytes,
+     sha256_file,
++    https_transport,
+     utc_now,
+     write_hash_sidecar,
+     write_new_bytes,
+@@ -128,6 +135,28 @@ SOURCE_BLOB_MEDIA_TYPE = "application/octet-stream"
+ MATERIALIZATION_MANIFEST_SCHEMA = "candidate-source-materialization-manifest-v0.3"
+ CANDIDATE_POOL_SCHEMA = "candidate-pool-manifest-v0.3"
+ DISCOVERY_REPORT_SCHEMA = "candidate-discovery-run-report-v0.3"
++CANARY_CAPTURE_INDEX_MEDIA_TYPE = (
++    "application/vnd.cmvp.operational-canary-capture-index-v0.1+json"
++)
++CANARY_CAPTURE_INDEX_SCHEMA = (
++    "candidate-discovery-operational-canary-capture-index-v0.1"
++)
++CANARY_CAPTURE_MANIFEST_SCHEMA = (
++    "candidate-discovery-operational-canary-capture-manifest-v0.1"
++)
++CANARY_REPORT_SCHEMA = "candidate-discovery-operational-canary-report-v0.1"
++CANARY_MAXIMUM_SEARCH_REQUESTS = 1
++CANARY_MAXIMUM_SOURCE_OBJECTS = 5
++CANARY_MAXIMUM_API_ATTEMPTS = 100
++CANARY_DEADLINE_SECONDS = 2100
++CANARY_HARD_STOP_CODES = frozenset(
++    {
++        "CANARY_SEARCH_REQUEST_LIMIT_REACHED",
++        "CANARY_SOURCE_OBJECT_LIMIT_REACHED",
++        "CANARY_API_ATTEMPT_LIMIT_REACHED",
++        "CANARY_RUNTIME_LIMIT_REACHED",
++    }
++)
+ GRAPHQL_DOCUMENT = (
+     "query ClosingPullRequests($owner: String!, $repository: String!, "
+     "$number: Int!, $cursor: String) { repository(owner: $owner, name: "
+@@ -178,6 +207,7 @@ class CaptureContext:
+         source_kind: str,
+         source_revision: Mapping[str, str],
+         token: str,
++        operational_budget: OperationalCanaryBudget | None = None,
+     ) -> "CaptureContext":
+         root = run_root / "sources" / source_id
+         if root.exists():
+@@ -193,7 +223,11 @@ class CaptureContext:
+             source_revision=dict(source_revision),
+             started_at_utc=utc_now(),
+             raw_store=raw_store,
+-            api=ApiCaptureClient(raw_store, token=token),
++            api=ApiCaptureClient(
++                raw_store,
++                token=token,
++                operational_budget=operational_budget,
++            ),
+             source_objects=[],
+             source_object_ids=[],
+             partition_nodes=[],
+@@ -347,7 +381,12 @@ class CaptureContext:
+         return safe_error, manifest, digest
+ 
+ 
+-def _run_git(arguments: Sequence[str], *, cwd: Path | None = None) -> bytes:
++def _run_git(
++    arguments: Sequence[str],
++    *,
++    cwd: Path | None = None,
++    timeout_seconds: float | None = None,
++) -> bytes:
+     environment = os.environ.copy()
+     environment.update(
+         {
+@@ -356,13 +395,20 @@ def _run_git(arguments: Sequence[str], *, cwd: Path | None = None) -> bytes:
+             "GIT_OPTIONAL_LOCKS": "0",
+         }
+     )
+-    result = subprocess.run(
+-        list(arguments),
+-        cwd=cwd,
+-        env=environment,
+-        check=False,
+-        capture_output=True,
+-    )
++    try:
++        result = subprocess.run(
++            list(arguments),
++            cwd=cwd,
++            env=environment,
++            check=False,
++            capture_output=True,
++            timeout=timeout_seconds,
++        )
++    except subprocess.TimeoutExpired:
++        raise DiscoveryExecutionError(
++            "CANARY_RUNTIME_LIMIT_REACHED",
++            "bounded local subprocess reached the canary deadline",
++        ) from None
+     if result.returncode != 0:
+         command = " ".join(arguments[:3])
+         raise DiscoveryExecutionError(
+@@ -2406,6 +2452,557 @@ def capture_searches(
+             )
+ 
+ 
++def _selected_canary_query(
++    search_spec: Mapping[str, Any], query_id: str
++) -> Mapping[str, Any]:
++    """Return exactly one unchanged query from the frozen eight-query spec."""
++
++    queries = search_spec.get("queries")
++    if not isinstance(queries, list) or len(queries) != 8:
++        raise DiscoveryExecutionError(
++            "SOURCE_SCHEMA_DRIFT", "frozen search specification must have eight queries"
++        )
++    selected: list[Mapping[str, Any]] = []
++    seen_ids: set[str] = set()
++    for raw_query in queries:
++        query = _mapping(raw_query, "query specification")
++        candidate_id = query.get("query_id")
++        query_text = query.get("query")
++        object_type = query.get("object_type")
++        if (
++            not isinstance(candidate_id, str)
++            or not isinstance(query_text, str)
++            or object_type not in {"ISSUE", "PULL_REQUEST"}
++            or candidate_id in seen_ids
++        ):
++            raise DiscoveryExecutionError(
++                "SOURCE_SCHEMA_DRIFT", "frozen query specification is malformed"
++            )
++        seen_ids.add(candidate_id)
++        if candidate_id == query_id:
++            selected.append(query)
++    if len(selected) != 1:
++        raise DiscoveryExecutionError(
++            "CANARY_QUERY_ID_INVALID",
++            "canary query ID must select exactly one frozen query",
++        )
++    return selected[0]
++
++
++def _capture_canary_search_page(
++    evidence: GitHubEvidence,
++    *,
++    query_id: str,
++    query_text: str,
++) -> tuple[Mapping[str, Any], dict[str, Any]]:
++    """Capture one non-partitioned page using the exact frozen query text."""
++
++    payload, entry = evidence.capture(
++        method="GET",
++        endpoint="https://api.github.com/search/issues",
++        ordered_parameters=(
++            ("q", query_text),
++            ("sort", "created"),
++            ("order", "asc"),
++            ("per_page", "100"),
++            ("page", "1"),
++        ),
++        exact_query=query_text,
++        page=1,
++        sort="created",
++        order="asc",
++        allow_one_redirect=False,
++        capture_scope=f"operational-canary:{query_id}:single-search-response",
++    )
++    if not isinstance(payload, Mapping):
++        raise DiscoveryExecutionError(
++            "GITHUB_SEARCH_RESPONSE_MALFORMED", "canary response is not an object"
++        )
++    total = payload.get("total_count")
++    incomplete = payload.get("incomplete_results")
++    items = payload.get("items")
++    if (
++        isinstance(total, bool)
++        or not isinstance(total, int)
++        or total < 0
++        or not isinstance(incomplete, bool)
++        or not isinstance(items, list)
++    ):
++        raise DiscoveryExecutionError(
++            "GITHUB_SEARCH_RESPONSE_MALFORMED", "canary envelope is malformed"
++        )
++    return payload, entry
++
++
++def capture_search_canary(
++    context: CaptureContext,
++    evidence: GitHubEvidence,
++    *,
++    query: Mapping[str, Any],
++    budget: OperationalCanaryBudget,
++) -> None:
++    """Capture one bounded Search sample without a scientific coverage claim."""
++
++    query_id = str(query["query_id"])
++    query_text = str(query["query"])
++    object_type = str(query["object_type"])
++    context.source_capture = {
++        "schema": "github-search-operational-canary-capture-v0.1",
++        "operational_canary": True,
++        "scientific_candidate_discovery_protocol": False,
++        "complete_population_claim": False,
++        "query_id": query_id,
++        "query_text": query_text,
++        "query_sha256": sha256_bytes(query_text.encode("utf-8")),
++        "source": "Search",
++        "page": 1,
++        "per_page": 100,
++        "recursive_partitioning_allowed": False,
++        "recapture_allowed": False,
++        "pagination_allowed": False,
++    }
++    budget.checkpoint()
++    payload, entry = _capture_canary_search_page(
++        evidence,
++        query_id=query_id,
++        query_text=query_text,
++    )
++    metadata = _request_observation_metadata(context, entry)
++    total = int(payload["total_count"])
++    incomplete = bool(payload["incomplete_results"])
++    items = payload["items"]
++    identities = [_search_item_identity(item) for item in items]
++    context.source_capture.update(
++        {
++            "reported_total_count": total,
++            "returned_item_count": len(items),
++            "unique_item_count": len(set(identities)),
++            "incomplete_results": incomplete,
++            "request_number": metadata["request_number"],
++            "raw_response_sha256": metadata["raw_response_sha256"],
++            "capture_started_at_utc": metadata["capture_started_at_utc"],
++            "capture_completed_at_utc": metadata["capture_completed_at_utc"],
++        }
++    )
++    context.partition_nodes.append(
++        {
++            "query_id": query_id,
++            "path": "",
++            "disposition": "OPERATIONAL_CANARY_SINGLE_RESPONSE",
++            "reported_total_count": total,
++            "returned_item_count": len(items),
++            "incomplete_results": incomplete,
++            "request_number": metadata["request_number"],
++            "raw_response_sha256": metadata["raw_response_sha256"],
++            "scientific_coverage_claim": False,
++        }
++    )
++
++    if incomplete:
++        context.source_capture["blocked_follow_up_reason"] = (
++            "INCOMPLETE_RESULTS_RECAPTURE_WOULD_REQUIRE_SECOND_SEARCH_REQUEST"
++        )
++        budget.begin_logical_request("https://api.github.com/search/issues")
++    if total > TERMINAL_LEAF_RESULT_CAP:
++        context.source_capture["blocked_follow_up_reason"] = (
++            "RECURSIVE_PARTITION_WOULD_REQUIRE_SECOND_SEARCH_REQUEST"
++        )
++        budget.begin_logical_request("https://api.github.com/search/issues")
++
++    observed: list[tuple[dict[str, Any], Mapping[str, Any]]] = []
++    seen_node_ids: set[str] = set()
++    for item_index, item in enumerate(items):
++        node_id = identities[item_index]
++        if node_id in seen_node_ids:
++            continue
++        seen_node_ids.add(node_id)
++        observed.append(
++            (
++                {
++                    "query_id": query_id,
++                    "node_id": node_id,
++                    "partition_path": "",
++                    "page": 1,
++                    "item_index": item_index,
++                    "search_evidence_key": entry["evidence_key"],
++                    "request_number": metadata["request_number"],
++                    "raw_response_sha256": metadata["raw_response_sha256"],
++                    "capture_completed_at_utc": metadata[
++                        "capture_completed_at_utc"
++                    ],
++                },
++                _mapping(item, "search item"),
++            )
++        )
++
++    for item_ref, item in observed:
++        budget.begin_source_object()
++        context.add_source_object(
++            {
++                "source_object_id": f"GITHUB_SEARCH:{item_ref['node_id']}",
++                "source_native_identity": {
++                    "api_version": API_VERSION,
++                    "github_search_node_id": item_ref["node_id"],
++                },
++                **item_ref,
++                "observed_query_ids": [query_id],
++                "observed_leaf_provenance": [dict(item_ref)],
++                "operational_canary": True,
++            }
++        )
++        try:
++            owner, repository = _repository_coordinates_from_api_url(
++                item.get("repository_url")
++            )
++            number = _positive_int(item.get("number"), "search item number")
++        except DiscoveryExecutionError:
++            continue
++        if object_type == "PULL_REQUEST":
++            repository_payload, _ = _capture_repository(evidence, owner, repository)
++            if repository_payload is None:
++                continue
++            try:
++                normalized = _normalized_repository_payload(repository_payload)
++            except SourceRecordRejected:
++                continue
++            _capture_pull_request(
++                evidence,
++                str(normalized["owner"]),
++                str(normalized["name"]),
++                number,
++            )
++        elif object_type == "ISSUE":
++            nodes = _capture_issue_relations(
++                evidence,
++                owner=owner,
++                repository=repository,
++                number=number,
++            )
++            repository_payload, _ = _capture_repository(evidence, owner, repository)
++            if repository_payload is None:
++                continue
++            for node in nodes:
++                repository_node = node.get("repository")
++                name_with_owner = (
++                    repository_node.get("nameWithOwner")
++                    if isinstance(repository_node, Mapping)
++                    else None
++                )
++                pr_number = node.get("number")
++                if (
++                    isinstance(name_with_owner, str)
++                    and name_with_owner.count("/") == 1
++                    and isinstance(pr_number, int)
++                    and not isinstance(pr_number, bool)
++                    and pr_number > 0
++                ):
++                    pr_owner, pr_repository = name_with_owner.split("/", 1)
++                    _capture_repository(evidence, pr_owner, pr_repository)
++                    _capture_pull_request(
++                        evidence, pr_owner, pr_repository, pr_number
++                    )
++        else:
++            raise DiscoveryExecutionError(
++                "SOURCE_SCHEMA_DRIFT", "query object_type is invalid"
++            )
++
++
++def _materialize_canary_object_ledger(
++    context: CaptureContext, budget: OperationalCanaryBudget
++) -> dict[str, Any]:
++    """Create a non-scientific, deterministic ledger of captured objects."""
++
++    objects: list[dict[str, Any]] = []
++    for source_object in context.source_objects:
++        budget.checkpoint()
++        objects.append(
++            {
++                "source_object_id": source_object["source_object_id"],
++                "source_native_identity": source_object["source_native_identity"],
++                "query_id": source_object["query_id"],
++                "search_evidence_key": source_object["search_evidence_key"],
++            }
++        )
++    return {
++        "schema": "candidate-discovery-operational-canary-object-ledger-v0.1",
++        "status": "CANARY_OPERATIONAL_OBJECT_LEDGER_COMPLETE",
++        "operational_canary": True,
++        "scientific_candidate_materialization_performed": False,
++        "candidate_selection_performed": False,
++        "source_object_count": len(objects),
++        "objects": objects,
++    }
++
++
++def _finalize_canary_run(
++    *,
++    run_root: Path,
++    context: CaptureContext,
++    evidence: GitHubEvidence,
++    query: Mapping[str, Any],
++    tested_git_commit: str,
++    budget: OperationalCanaryBudget,
++    execution_started_at_utc: str,
++    execution_completed_at_utc: str,
++    error: DiscoveryExecutionError | None,
++    operational_materialization: Mapping[str, Any] | None,
++) -> dict[str, Any]:
++    """Persist separate canary evidence without a normal completion status."""
++
++    if error is None:
++        status = "CANARY_COMPLETED_OPERATIONAL_SAMPLE"
++        completion_state = "COMPLETED_WITHIN_HARD_BOUNDS"
++        termination_reason = "CANARY_COMPLETED_WITHIN_BOUNDS"
++        validation_state = "READY_FOR_OFFLINE_CANARY_VERIFICATION"
++    elif error.code in CANARY_HARD_STOP_CODES:
++        status = "CANARY_STOPPED_AT_HARD_BOUND"
++        completion_state = "BOUNDED_PARTIAL_EVIDENCE_PRESERVED"
++        termination_reason = error.code
++        validation_state = "READY_FOR_OFFLINE_CANARY_VERIFICATION"
++    else:
++        status = "CANARY_FAILED_OPERATIONAL_SAMPLE"
++        completion_state = "FAILED_WITH_DIAGNOSTIC_EVIDENCE_PRESERVED"
++        termination_reason = error.code
++        validation_state = "CANARY_EXECUTION_FAILED"
++
++    materialization = (
++        dict(operational_materialization)
++        if operational_materialization is not None
++        else {
++            "schema": (
++                "candidate-discovery-operational-canary-object-ledger-v0.1"
++            ),
++            "status": "NOT_PERFORMED_AFTER_CANARY_STOP",
++            "operational_canary": True,
++            "scientific_candidate_materialization_performed": False,
++            "candidate_selection_performed": False,
++            "source_object_count": 0,
++            "objects": [],
++        }
++    )
++    query_text = str(query["query"])
++    query_identity = {
++        "query_id": str(query["query_id"]),
++        "query_text": query_text,
++        "query_sha256": sha256_bytes(query_text.encode("utf-8")),
++    }
++    canary_limits = budget.configured_limits()
++    observed_counts = budget.observed_counts()
++    capture_index = {
++        "schema": CANARY_CAPTURE_INDEX_SCHEMA,
++        "operational_canary": True,
++        "scientific_candidate_discovery_protocol": False,
++        "normal_capture_complete_claimed": False,
++        "source": "Search",
++        "source_id": SEARCH_SOURCE_ID,
++        "query": query_identity,
++        "source_capture": context.source_capture,
++        "source_objects": context.source_objects,
++        "api_evidence": evidence.entries,
++        "partial_raw_artifacts": context.raw_store.sorted_descriptors(),
++        "operational_materialization": materialization,
++        "candidate_pool_materialized": False,
++        "experiment_accessed": False,
++        "treatment_results_consulted": False,
++    }
++    assert_no_sensitive_values(
++        capture_index, forbidden_values=(context.api.token,)
++    )
++    index_descriptor = context.raw_store.put(
++        canonical_document_bytes(capture_index),
++        media_type=CANARY_CAPTURE_INDEX_MEDIA_TYPE,
++    )
++    context.raw_store.verify_all()
++    capture_manifest = {
++        "schema": CANARY_CAPTURE_MANIFEST_SCHEMA,
++        "status": status,
++        "operational_canary": True,
++        "scientific_candidate_discovery_protocol": False,
++        "normal_capture_complete_claimed": False,
++        "tested_git_commit": tested_git_commit,
++        "source": "Search",
++        "source_id": SEARCH_SOURCE_ID,
++        "source_kind": "TRUST_BOUNDARY_ISSUE_PR_SEARCH",
++        "source_revision": {
++            "kind": "FROZEN_QUERY_SPECIFICATION",
++            "value": SEARCH_SPEC_SHA256,
++        },
++        "query": query_identity,
++        "canary_limits": canary_limits,
++        "observed_counts": observed_counts,
++        "elapsed_seconds": round(budget.elapsed_seconds(), 6),
++        "termination_reason": termination_reason,
++        "canary_completion_state": completion_state,
++        "canary_validation_state": validation_state,
++        "execution_started_at_utc": execution_started_at_utc,
++        "execution_completed_at_utc": execution_completed_at_utc,
++        "requests": context.api.requests,
++        "partition_nodes": context.partition_nodes,
++        "source_object_accounting": {
++            "encountered_source_object_ids": list(context.source_object_ids),
++            "scientific_disposition_phase": "NOT_STARTED",
++        },
++        "raw_artifacts": context.raw_store.sorted_descriptors(),
++        "canary_capture_index_sha256": index_descriptor["sha256"],
++        "operational_materialization_state": materialization["status"],
++        "candidate_pool_materialized": False,
++        "credentials_recorded": False,
++        "experiment_accessed": False,
++        "treatment_results_consulted": False,
++    }
++    assert_no_sensitive_values(
++        capture_manifest, forbidden_values=(context.api.token,)
++    )
++    capture_manifest_path = context.root / "canary-capture-manifest.json"
++    capture_digest = write_new_json(capture_manifest_path, capture_manifest)
++    write_hash_sidecar(capture_manifest_path, capture_digest)
++
++    report = {
++        "schema": CANARY_REPORT_SCHEMA,
++        "status": status,
++        "operational_canary": True,
++        "scientific_candidate_discovery_protocol": False,
++        "normal_capture_complete_claimed": False,
++        "tested_git_commit": tested_git_commit,
++        "source": "Search",
++        "source_id": SEARCH_SOURCE_ID,
++        "query": query_identity,
++        "canary_limits": canary_limits,
++        "observed_counts": observed_counts,
++        "elapsed_seconds": capture_manifest["elapsed_seconds"],
++        "termination_reason": termination_reason,
++        "canary_completion_state": completion_state,
++        "canary_validation_state": validation_state,
++        "capture_manifest": {
++            "path": str(
++                capture_manifest_path.relative_to(run_root).as_posix()
++            ),
++            "sha256": capture_digest,
++        },
++        "operational_materialization_state": materialization["status"],
++        "scientific_candidate_materialization_performed": False,
++        "candidate_pool_materialized": False,
++        "credentials_recorded": False,
++        "experiment_accessed": False,
++        "treatment_results_consulted": False,
++    }
++    assert_no_sensitive_values(report, forbidden_values=(context.api.token,))
++    report_path = run_root / "operational-canary-report.json"
++    report_digest = write_new_json(report_path, report)
++    write_hash_sidecar(report_path, report_digest)
++    return {
++        "pass": error is None or error.code in CANARY_HARD_STOP_CODES,
++        "report": report,
++        "report_sha256": report_digest,
++        "capture_manifest_sha256": capture_digest,
++    }
++
++
++def execute_canary(
++    *,
++    project_root: Path,
++    run_root: Path,
++    token_path: Path,
++    query_id: str,
++    transport: Transport = https_transport,
++    clock: Clock = utc_now,
++    sleeper: Sleeper = time.sleep,
++    monotonic: MonotonicClock = time.monotonic,
++    tested_git_commit: str | None = None,
++) -> dict[str, Any]:
++    """Run one explicitly selected, operational, non-scientific Search sample."""
++
++    budget = OperationalCanaryBudget(
++        maximum_search_requests=CANARY_MAXIMUM_SEARCH_REQUESTS,
++        maximum_source_objects=CANARY_MAXIMUM_SOURCE_OBJECTS,
++        maximum_api_attempts=CANARY_MAXIMUM_API_ATTEMPTS,
++        deadline_seconds=CANARY_DEADLINE_SECONDS,
++        monotonic=monotonic,
++    )
++    source_root = run_root / "sources" / SEARCH_SOURCE_ID
++    if source_root.exists() or (run_root / "operational-canary-report.json").exists():
++        raise DiscoveryExecutionError(
++            "CAPTURE_DESTINATION_EXISTS", "canary capture destination already exists"
++        )
++    search_spec_path = (
++        project_root
++        / "benchmark-selection/discovery/prospective-v0.2/"
++        "trust-boundary-issues-prs.json"
++    )
++    budget.checkpoint()
++    if sha256_file(search_spec_path) != SEARCH_SPEC_SHA256:
++        raise DiscoveryExecutionError(
++            "V02_SPECIFICATION_HASH_MISMATCH", "search specification hash mismatch"
++        )
++    search_spec = _load_json_object(search_spec_path)
++    query = _selected_canary_query(search_spec, query_id)
++    token = read_token_file(token_path)
++    budget.checkpoint()
++    if tested_git_commit is None:
++        tested_git_commit = _run_git(
++            ["git", "-C", str(project_root), "rev-parse", "HEAD"],
++            timeout_seconds=budget.remaining_seconds(),
++        ).decode("ascii").strip()
++    if SHA1_PATTERN.fullmatch(tested_git_commit) is None:
++        raise DiscoveryExecutionError(
++            "EXECUTION_CONFIGURATION_INVALID", "tested Git commit is malformed"
++        )
++    budget.checkpoint()
++    started_at = clock()
++    context = CaptureContext.create(
++        run_root=run_root,
++        source_id=SEARCH_SOURCE_ID,
++        source_kind="TRUST_BOUNDARY_ISSUE_PR_SEARCH",
++        source_revision={
++            "kind": "FROZEN_QUERY_SPECIFICATION",
++            "value": SEARCH_SPEC_SHA256,
++        },
++        token=token,
++        operational_budget=budget,
++    )
++    context.api.transport = transport
++    context.api.clock = clock
++    context.api.sleeper = sleeper
++    evidence = GitHubEvidence(context)
++    safe_error: DiscoveryExecutionError | None = None
++    operational_materialization: Mapping[str, Any] | None = None
++    try:
++        with _catchable_source_signal_boundary():
++            try:
++                capture_search_canary(
++                    context,
++                    evidence,
++                    query=query,
++                    budget=budget,
++                )
++                budget.checkpoint()
++                operational_materialization = _materialize_canary_object_ledger(
++                    context, budget
++                )
++                budget.checkpoint()
++            except BaseException as error:
++                safe_error = redacted_execution_error(error)
++                if (
++                    safe_error.code in CANARY_HARD_STOP_CODES
++                    and budget.termination_reason is None
++                ):
++                    budget.termination_reason = safe_error.code
++    finally:
++        token = ""
++    return _finalize_canary_run(
++        run_root=run_root,
++        context=context,
++        evidence=evidence,
++        query=query,
++        tested_git_commit=tested_git_commit,
++        budget=budget,
++        execution_started_at_utc=started_at,
++        execution_completed_at_utc=clock(),
++        error=safe_error,
++        operational_materialization=operational_materialization,
++    )
++
++
+ def load_verified_capture(
+     source_root: Path,
+ ) -> tuple[dict[str, Any], str, dict[str, Any]]:
+@@ -4399,9 +4996,382 @@ def _forbidden_keys(value: Any) -> set[str]:
+     return found
+ 
+ 
++def _load_hashed_json_object(path: Path) -> tuple[dict[str, Any], str]:
++    """Load an immutable JSON object whose adjacent sidecar binds its bytes."""
++
++    try:
++        data = path.read_bytes()
++        sidecar = path.with_name(path.name + ".sha256").read_text(
++            encoding="ascii"
++        ).strip()
++    except OSError:
++        raise DiscoveryExecutionError(
++            "CANARY_ARTIFACT_INCOMPLETE", "canary artifact or sidecar is missing"
++        ) from None
++    digest = sha256_bytes(data)
++    if sidecar != digest:
++        raise DiscoveryExecutionError(
++            "RAW_ARTIFACT_HASH_MISMATCH", "canary artifact sidecar mismatch"
++        )
++    try:
++        value = json.loads(data)
++    except (UnicodeDecodeError, json.JSONDecodeError):
++        raise DiscoveryExecutionError(
++            "CANARY_ARTIFACT_INCOMPLETE", "canary artifact is not valid JSON"
++        ) from None
++    if not isinstance(value, dict):
++        raise DiscoveryExecutionError(
++            "CANARY_ARTIFACT_INCOMPLETE", "canary artifact is not an object"
++        )
++    return value, digest
++
++
++def _load_verified_canary_capture(
++    source_root: Path,
++) -> tuple[dict[str, Any], str, dict[str, Any]]:
++    manifest, manifest_digest = _load_hashed_json_object(
++        source_root / "canary-capture-manifest.json"
++    )
++    if (
++        manifest.get("schema") != CANARY_CAPTURE_MANIFEST_SCHEMA
++        or manifest.get("operational_canary") is not True
++        or manifest.get("scientific_candidate_discovery_protocol") is not False
++        or manifest.get("normal_capture_complete_claimed") is not False
++        or manifest.get("status") == "CAPTURE_COMPLETE"
++        or manifest.get("source") != "Search"
++        or manifest.get("source_id") != SEARCH_SOURCE_ID
++        or manifest.get("candidate_pool_materialized") is not False
++        or manifest.get("credentials_recorded") is not False
++        or manifest.get("experiment_accessed") is not False
++        or manifest.get("treatment_results_consulted") is not False
++    ):
++        raise DiscoveryExecutionError(
++            "CANARY_IDENTITY_INVALID", "canary capture identity is invalid"
++        )
++    raw_artifacts = manifest.get("raw_artifacts")
++    if not isinstance(raw_artifacts, list):
++        raise DiscoveryExecutionError(
++            "CANARY_ARTIFACT_INCOMPLETE", "canary raw-artifact list is missing"
++        )
++    index_descriptor: Mapping[str, Any] | None = None
++    for raw_descriptor in raw_artifacts:
++        if not isinstance(raw_descriptor, Mapping):
++            raise DiscoveryExecutionError(
++                "CANARY_ARTIFACT_INCOMPLETE", "canary artifact descriptor is malformed"
++            )
++        _read_artifact(source_root, raw_descriptor)
++        if raw_descriptor.get("media_type") == CANARY_CAPTURE_INDEX_MEDIA_TYPE:
++            if index_descriptor is not None:
++                raise DiscoveryExecutionError(
++                    "CANARY_ARTIFACT_INCOMPLETE", "multiple canary indexes exist"
++                )
++            index_descriptor = raw_descriptor
++    if index_descriptor is None:
++        raise DiscoveryExecutionError(
++            "CANARY_ARTIFACT_INCOMPLETE", "canary capture index is missing"
++        )
++    if manifest.get("canary_capture_index_sha256") != index_descriptor.get(
++        "sha256"
++    ):
++        raise DiscoveryExecutionError(
++            "RAW_ARTIFACT_HASH_MISMATCH", "canary manifest does not bind its index"
++        )
++    try:
++        index_value = json.loads(_read_artifact(source_root, index_descriptor))
++    except (UnicodeDecodeError, json.JSONDecodeError):
++        raise DiscoveryExecutionError(
++            "CANARY_ARTIFACT_INCOMPLETE", "canary capture index is invalid"
++        ) from None
++    if not isinstance(index_value, dict):
++        raise DiscoveryExecutionError(
++            "CANARY_ARTIFACT_INCOMPLETE", "canary capture index is malformed"
++        )
++    index = index_value
++    if (
++        index.get("schema") != CANARY_CAPTURE_INDEX_SCHEMA
++        or index.get("operational_canary") is not True
++        or index.get("scientific_candidate_discovery_protocol") is not False
++        or index.get("normal_capture_complete_claimed") is not False
++        or index.get("source") != "Search"
++        or index.get("source_id") != SEARCH_SOURCE_ID
++        or index.get("candidate_pool_materialized") is not False
++        or index.get("experiment_accessed") is not False
++        or index.get("treatment_results_consulted") is not False
++        or _forbidden_keys(index)
++    ):
++        raise DiscoveryExecutionError(
++            "CANARY_IDENTITY_INVALID", "canary index identity is invalid"
++        )
++    return manifest, manifest_digest, index
++
++
++def verify_canary_run(*, project_root: Path, run_root: Path) -> dict[str, Any]:
++    """Verify one operational canary locally without accepting it scientifically."""
++
++    report_path = run_root / "operational-canary-report.json"
++    report, report_digest = _load_hashed_json_object(report_path)
++    if (
++        report.get("schema") != CANARY_REPORT_SCHEMA
++        or report.get("operational_canary") is not True
++        or report.get("scientific_candidate_discovery_protocol") is not False
++        or report.get("normal_capture_complete_claimed") is not False
++        or report.get("status") == "CAPTURE_COMPLETE"
++        or report.get("source") != "Search"
++        or report.get("source_id") != SEARCH_SOURCE_ID
++        or report.get("candidate_pool_materialized") is not False
++        or report.get("scientific_candidate_materialization_performed") is not False
++        or report.get("credentials_recorded") is not False
++        or report.get("experiment_accessed") is not False
++        or report.get("treatment_results_consulted") is not False
++        or report.get("canary_validation_state")
++        != "READY_FOR_OFFLINE_CANARY_VERIFICATION"
++    ):
++        raise DiscoveryExecutionError(
++            "CANARY_IDENTITY_INVALID", "operational canary identity is invalid"
++        )
++    capture_reference = report.get("capture_manifest")
++    expected_capture_path = (
++        f"sources/{SEARCH_SOURCE_ID}/canary-capture-manifest.json"
++    )
++    if (
++        not isinstance(capture_reference, Mapping)
++        or capture_reference.get("path") != expected_capture_path
++    ):
++        raise DiscoveryExecutionError(
++            "CANARY_ARTIFACT_INCOMPLETE", "canary capture reference is invalid"
++        )
++    source_root = run_root / "sources" / SEARCH_SOURCE_ID
++    manifest, capture_digest, index = _load_verified_canary_capture(source_root)
++    if capture_reference.get("sha256") != capture_digest:
++        raise DiscoveryExecutionError(
++            "RAW_ARTIFACT_HASH_MISMATCH", "canary report does not bind capture"
++        )
++
++    expected_limits: dict[str, int] = {
++        "maximum_search_requests": CANARY_MAXIMUM_SEARCH_REQUESTS,
++        "maximum_source_objects": CANARY_MAXIMUM_SOURCE_OBJECTS,
++        "maximum_api_attempts": CANARY_MAXIMUM_API_ATTEMPTS,
++        "deadline_seconds": CANARY_DEADLINE_SECONDS,
++    }
++    if (
++        report.get("canary_limits") != expected_limits
++        or manifest.get("canary_limits") != expected_limits
++    ):
++        raise DiscoveryExecutionError(
++            "CANARY_LIMITS_INVALID", "configured canary limits changed"
++        )
++    requests = manifest.get("requests")
++    source_objects = index.get("source_objects")
++    if not isinstance(requests, list) or not isinstance(source_objects, list):
++        raise DiscoveryExecutionError(
++            "CANARY_ARTIFACT_INCOMPLETE", "canary accounting inputs are missing"
++        )
++    physical_attempts = 0
++    search_requests: list[Mapping[str, Any]] = []
++    for raw_request in requests:
++        if not isinstance(raw_request, Mapping) or not isinstance(
++            raw_request.get("attempts"), list
++        ):
++            raise DiscoveryExecutionError(
++                "CANARY_ARTIFACT_INCOMPLETE", "canary request is malformed"
++            )
++        physical_attempts += len(raw_request["attempts"])
++        if raw_request.get("endpoint") == "https://api.github.com/search/issues":
++            search_requests.append(raw_request)
++    actual_counts = {
++        "actual_search_requests": len(search_requests),
++        "actual_source_objects": len(source_objects),
++        "actual_physical_api_attempts": physical_attempts,
++    }
++    source_object_accounting = manifest.get("source_object_accounting")
++    accounted_ids = (
++        source_object_accounting.get("encountered_source_object_ids")
++        if isinstance(source_object_accounting, Mapping)
++        else None
++    )
++    object_ids = [
++        source_object.get("source_object_id")
++        if isinstance(source_object, Mapping)
++        else None
++        for source_object in source_objects
++    ]
++    if (
++        report.get("observed_counts") != actual_counts
++        or manifest.get("observed_counts") != actual_counts
++        or accounted_ids != object_ids
++        or any(not isinstance(object_id, str) for object_id in object_ids)
++        or len(object_ids) != len(set(object_ids))
++        or actual_counts["actual_search_requests"]
++        > expected_limits["maximum_search_requests"]
++        or actual_counts["actual_source_objects"]
++        > expected_limits["maximum_source_objects"]
++        or actual_counts["actual_physical_api_attempts"]
++        > expected_limits["maximum_api_attempts"]
++    ):
++        raise DiscoveryExecutionError(
++            "CANARY_BUDGET_ACCOUNTING_INVALID", "canary budget accounting overflowed"
++        )
++    if len(search_requests) != 1:
++        raise DiscoveryExecutionError(
++            "CANARY_QUERY_ID_INVALID", "canary did not execute exactly one Search query"
++        )
++
++    search_spec_path = (
++        project_root
++        / "benchmark-selection/discovery/prospective-v0.2/"
++        "trust-boundary-issues-prs.json"
++    )
++    if sha256_file(search_spec_path) != SEARCH_SPEC_SHA256:
++        raise DiscoveryExecutionError(
++            "V02_SPECIFICATION_HASH_MISMATCH", "search specification hash mismatch"
++        )
++    reported_query = report.get("query")
++    if not isinstance(reported_query, Mapping) or not isinstance(
++        reported_query.get("query_id"), str
++    ):
++        raise DiscoveryExecutionError(
++            "CANARY_QUERY_ID_INVALID", "reported canary query is malformed"
++        )
++    expected_query = _selected_canary_query(
++        _load_json_object(search_spec_path), str(reported_query["query_id"])
++    )
++    expected_query_text = str(expected_query["query"])
++    expected_query_identity = {
++        "query_id": expected_query["query_id"],
++        "query_text": expected_query_text,
++        "query_sha256": sha256_bytes(expected_query_text.encode("utf-8")),
++    }
++    search_request = search_requests[0]
++    ordered_parameters = search_request.get("ordered_parameters")
++    if (
++        dict(reported_query) != expected_query_identity
++        or manifest.get("query") != expected_query_identity
++        or index.get("query") != expected_query_identity
++        or search_request.get("exact_query") != expected_query_text
++        or not isinstance(ordered_parameters, list)
++        or not ordered_parameters
++        or ordered_parameters[0] != ["q", expected_query_text]
++        or search_request.get("page") != 1
++    ):
++        raise DiscoveryExecutionError(
++            "CANARY_QUERY_ID_INVALID", "canary query text or identity changed"
++        )
++    tested_git_commit = report.get("tested_git_commit")
++    if (
++        not isinstance(tested_git_commit, str)
++        or SHA1_PATTERN.fullmatch(tested_git_commit) is None
++        or manifest.get("tested_git_commit") != tested_git_commit
++    ):
++        raise DiscoveryExecutionError(
++            "CANARY_IDENTITY_INVALID", "tested Git commit is invalid"
++        )
++
++    status = report.get("status")
++    termination_reason = report.get("termination_reason")
++    if (
++        manifest.get("status") != status
++        or manifest.get("termination_reason") != termination_reason
++        or manifest.get("canary_completion_state")
++        != report.get("canary_completion_state")
++    ):
++        raise DiscoveryExecutionError(
++            "CANARY_STATUS_INVALID", "canary status records disagree"
++        )
++    if status == "CANARY_COMPLETED_OPERATIONAL_SAMPLE":
++        if termination_reason != "CANARY_COMPLETED_WITHIN_BOUNDS":
++            raise DiscoveryExecutionError(
++                "CANARY_STATUS_INVALID", "completed canary reason is invalid"
++            )
++    elif status == "CANARY_STOPPED_AT_HARD_BOUND":
++        if termination_reason not in CANARY_HARD_STOP_CODES:
++            raise DiscoveryExecutionError(
++                "CANARY_STATUS_INVALID", "bounded canary reason is invalid"
++            )
++        expected_saturated_count = {
++            "CANARY_SEARCH_REQUEST_LIMIT_REACHED": (
++                "actual_search_requests",
++                CANARY_MAXIMUM_SEARCH_REQUESTS,
++            ),
++            "CANARY_SOURCE_OBJECT_LIMIT_REACHED": (
++                "actual_source_objects",
++                CANARY_MAXIMUM_SOURCE_OBJECTS,
++            ),
++            "CANARY_API_ATTEMPT_LIMIT_REACHED": (
++                "actual_physical_api_attempts",
++                CANARY_MAXIMUM_API_ATTEMPTS,
++            ),
++        }.get(str(termination_reason))
++        if (
++            expected_saturated_count is not None
++            and actual_counts[expected_saturated_count[0]]
++            != expected_saturated_count[1]
++        ):
++            raise DiscoveryExecutionError(
++                "CANARY_BUDGET_ACCOUNTING_INVALID",
++                "canary stopped without saturating the reported hard bound",
++            )
++    else:
++        raise DiscoveryExecutionError(
++            "CANARY_STATUS_INVALID", "failed canary is not locally validatable"
++        )
++    elapsed = report.get("elapsed_seconds")
++    if (
++        isinstance(elapsed, bool)
++        or not isinstance(elapsed, (int, float))
++        or elapsed < 0
++        or manifest.get("elapsed_seconds") != elapsed
++        or (
++            termination_reason != "CANARY_RUNTIME_LIMIT_REACHED"
++            and elapsed > CANARY_DEADLINE_SECONDS
++        )
++    ):
++        raise DiscoveryExecutionError(
++            "CANARY_STATUS_INVALID", "canary elapsed time is invalid"
++        )
++
++    normal_artifacts = (
++        run_root / "discovery-run-report.json",
++        run_root / "candidate-pool-manifest.json",
++        run_root / "candidate-pool.jsonl",
++        source_root / "capture-manifest.json",
++        source_root / "materialization-manifest.json",
++        source_root / "source-records.jsonl",
++    )
++    if any(path.exists() for path in normal_artifacts):
++        raise DiscoveryExecutionError(
++            "CANARY_SCIENTIFIC_SEPARATION_VIOLATION",
++            "normal scientific discovery artifacts exist in a canary run",
++        )
++    assert_no_sensitive_values(report)
++    assert_no_sensitive_values(manifest)
++    assert_no_sensitive_values(index)
++    return {
++        "pass": True,
++        "network_accessed": False,
++        "operational_canary": True,
++        "scientific_candidate_discovery_protocol": False,
++        "normal_capture_complete_claimed": False,
++        "canary_validation_state": "VALIDATED_OPERATIONAL_CANARY",
++        "status": status,
++        "termination_reason": termination_reason,
++        "tested_git_commit": tested_git_commit,
++        "query": expected_query_identity,
++        "canary_limits": expected_limits,
++        "observed_counts": actual_counts,
++        "elapsed_seconds": elapsed,
++        "report_sha256": report_digest,
++        "capture_manifest_sha256": capture_digest,
++    }
++
++
+ def verify_discovery_run(*, project_root: Path, run_root: Path) -> dict[str, Any]:
+     """Verify all immutable manifests and scientific separation without network."""
+ 
++    if (run_root / "operational-canary-report.json").exists():
++        raise DiscoveryExecutionError(
++            "OPERATIONAL_CANARY_NOT_SCIENTIFIC_CAPTURE",
++            "normal verification cannot accept an operational canary",
++        )
+     del project_root
+     capture_hashes: dict[str, str] = {}
+     source_record_count = 0
+diff --git a/src/cmpilot/candidate_discovery_v03_io.py b/src/cmpilot/candidate_discovery_v03_io.py
+index 920321e1a..0986d8c03 100644
+--- a/src/cmpilot/candidate_discovery_v03_io.py
++++ b/src/cmpilot/candidate_discovery_v03_io.py
+@@ -162,6 +162,110 @@ Transport = Callable[
+ ]
+ Clock = Callable[[], str]
+ Sleeper = Callable[[float], None]
++MonotonicClock = Callable[[], float]
++
++
++@dataclass
++class OperationalCanaryBudget:
++    """Fail-closed counters and monotonic deadline for an operational canary."""
++
++    maximum_search_requests: int = 1
++    maximum_source_objects: int = 5
++    maximum_api_attempts: int = 100
++    deadline_seconds: float = 2100
++    monotonic: MonotonicClock = time.monotonic
++    search_requests: int = field(default=0, init=False)
++    source_objects: int = field(default=0, init=False)
++    api_attempts: int = field(default=0, init=False)
++    termination_reason: str | None = field(default=None, init=False)
++    started_monotonic: float = field(init=False)
++
++    def __post_init__(self) -> None:
++        if (
++            self.maximum_search_requests <= 0
++            or self.maximum_source_objects <= 0
++            or self.maximum_api_attempts <= 0
++            or self.deadline_seconds <= 0
++        ):
++            raise DiscoveryExecutionError(
++                "CANARY_CONFIGURATION_INVALID",
++                "operational canary limits must be positive",
++            )
++        self.started_monotonic = self.monotonic()
++
++    @property
++    def deadline_monotonic(self) -> float:
++        return self.started_monotonic + self.deadline_seconds
++
++    def elapsed_seconds(self) -> float:
++        return max(0.0, self.monotonic() - self.started_monotonic)
++
++    def remaining_seconds(self) -> float:
++        return max(0.0, self.deadline_monotonic - self.monotonic())
++
++    def configured_limits(self) -> dict[str, int | float]:
++        return {
++            "maximum_search_requests": self.maximum_search_requests,
++            "maximum_source_objects": self.maximum_source_objects,
++            "maximum_api_attempts": self.maximum_api_attempts,
++            "deadline_seconds": self.deadline_seconds,
++        }
++
++    def observed_counts(self) -> dict[str, int]:
++        return {
++            "actual_search_requests": self.search_requests,
++            "actual_source_objects": self.source_objects,
++            "actual_physical_api_attempts": self.api_attempts,
++        }
++
++    def _stop(self, code: str) -> None:
++        if self.termination_reason is None:
++            self.termination_reason = code
++        raise DiscoveryExecutionError(code, "operational canary hard bound reached")
++
++    def checkpoint(self) -> None:
++        if self.monotonic() >= self.deadline_monotonic:
++            self._stop("CANARY_RUNTIME_LIMIT_REACHED")
++
++    def begin_logical_request(self, endpoint: str) -> None:
++        """Reserve a Search logical request before any wait or transport."""
++
++        self.checkpoint()
++        if _github_rate_limit_resource(endpoint) != "search":
++            return
++        if self.search_requests >= self.maximum_search_requests:
++            self._stop("CANARY_SEARCH_REQUEST_LIMIT_REACHED")
++        self.search_requests += 1
++
++    def begin_source_object(self) -> None:
++        """Reserve a source object before any of its detail requests."""
++
++        self.checkpoint()
++        if self.source_objects >= self.maximum_source_objects:
++            self._stop("CANARY_SOURCE_OBJECT_LIMIT_REACHED")
++        self.source_objects += 1
++
++    def before_transport(self) -> None:
++        """Reserve one physical API attempt immediately before transport."""
++
++        self.checkpoint()
++        if self.api_attempts >= self.maximum_api_attempts:
++            self._stop("CANARY_API_ATTEMPT_LIMIT_REACHED")
++        self.api_attempts += 1
++
++    def sleep(self, seconds: float, sleeper: Sleeper) -> None:
++        """Sleep only when the full delay fits strictly before the deadline."""
++
++        if seconds < 0:
++            raise DiscoveryExecutionError(
++                "CANARY_CONFIGURATION_INVALID", "canary delay cannot be negative"
++            )
++        self.checkpoint()
++        if seconds and seconds >= self.remaining_seconds():
++            self._stop("CANARY_RUNTIME_LIMIT_REACHED")
++        if seconds:
++            sleeper(seconds)
++        self.checkpoint()
+ 
+ 
+ def utc_now() -> str:
+@@ -418,6 +522,8 @@ def https_transport(
+     url: str,
+     headers: Mapping[str, str],
+     body: bytes | None,
++    *,
++    deadline_monotonic: float | None = None,
+ ) -> TransportResponse | TransportFailure:
+     """Perform one API attempt with separate connect/read/total bounds."""
+ 
+@@ -435,13 +541,33 @@ def https_transport(
+     request_target = parsed.path or "/"
+     if parsed.query:
+         request_target += "?" + parsed.query
+-    connection = http.client.HTTPSConnection(
+-        "api.github.com",
+-        443,
+-        timeout=CONNECT_TIMEOUT_SECONDS,
+-        context=ssl.create_default_context(),
+-    )
+-    started = time.monotonic()
++    if deadline_monotonic is None:
++        connection = http.client.HTTPSConnection(
++            "api.github.com",
++            443,
++            timeout=CONNECT_TIMEOUT_SECONDS,
++            context=ssl.create_default_context(),
++        )
++        started = time.monotonic()
++        attempt_deadline = started + TOTAL_TIMEOUT_SECONDS
++    else:
++        started = time.monotonic()
++        attempt_deadline = min(
++            started + TOTAL_TIMEOUT_SECONDS, deadline_monotonic
++        )
++        remaining = attempt_deadline - started
++        if remaining <= 0:
++            return TransportFailure("READ_TIMEOUT")
++        ssl_context = ssl.create_default_context()
++        remaining = attempt_deadline - time.monotonic()
++        if remaining <= 0:
++            return TransportFailure("READ_TIMEOUT")
++        connection = http.client.HTTPSConnection(
++            "api.github.com",
++            443,
++            timeout=min(CONNECT_TIMEOUT_SECONDS, remaining),
++            context=ssl_context,
++        )
+     try:
+         request_error: DiscoveryExecutionError | None = None
+         try:
+@@ -456,7 +582,7 @@ def https_transport(
+             )
+         if request_error is not None:
+             raise request_error
+-        remaining = TOTAL_TIMEOUT_SECONDS - (time.monotonic() - started)
++        remaining = attempt_deadline - time.monotonic()
+         if remaining <= 0:
+             return TransportFailure("READ_TIMEOUT")
+         if connection.sock is not None:
+@@ -466,7 +592,7 @@ def https_transport(
+             response = connection.getresponse()
+             chunks: list[bytes] = []
+             while True:
+-                remaining = TOTAL_TIMEOUT_SECONDS - (time.monotonic() - started)
++                remaining = attempt_deadline - time.monotonic()
+                 if remaining <= 0:
+                     return TransportFailure("READ_TIMEOUT")
+                 if connection.sock is not None:
+@@ -509,6 +635,7 @@ class ApiCaptureClient:
+     clock: Clock = utc_now
+     sleeper: Sleeper = time.sleep
+     requests: list[dict[str, Any]] = field(default_factory=list)
++    operational_budget: OperationalCanaryBudget | None = None
+     primary_quota_state: dict[str, dict[str, Any]] = field(
+         default_factory=dict, init=False, repr=False
+     )
+@@ -529,6 +656,15 @@ class ApiCaptureClient:
+                 "a response contained credential material and was not persisted",
+             )
+ 
++    def sleep(self, seconds: float) -> None:
++        """Apply a delay under the canary deadline when one is active."""
++
++        if self.operational_budget is None:
++            if seconds:
++                self.sleeper(seconds)
++            return
++        self.operational_budget.sleep(seconds, self.sleeper)
++
+     def _observe_successful_primary_quota(
+         self,
+         *,
+@@ -586,6 +722,8 @@ class ApiCaptureClient:
+ 
+         if method not in {"GET", "POST"}:
+             raise DiscoveryExecutionError("API_METHOD_INVALID", method)
++        if self.operational_budget is not None:
++            self.operational_budget.begin_logical_request(endpoint)
+         parameters = [(str(key), str(value)) for key, value in ordered_parameters]
+         url = endpoint
+         if parameters:
+@@ -690,12 +828,12 @@ class ApiCaptureClient:
+             ensure_request_record()
+             quota_state["proactive_gate_consumed"] = True
+             if scheduled_wait:
+-                self.sleeper(scheduled_wait)
++                self.sleep(scheduled_wait)
+             wait_evidence["actual_resume_timestamp_utc"] = self.clock()
+ 
+         while True:
+             if delay:
+-                self.sleeper(delay)
++                self.sleep(delay)
+             if pending_primary_wait_attempt is not None:
+                 pending_primary_wait_attempt["actual_resume_timestamp_utc"] = (
+                     self.clock()
+@@ -703,13 +841,42 @@ class ApiCaptureClient:
+                 pending_primary_wait_attempt = None
+             started = self.clock()
+             transport_error: DiscoveryExecutionError | None = None
++            if self.operational_budget is not None:
++                self.operational_budget.before_transport()
+             try:
+-                result = self.transport(method, current_url, headers, body)
++                if (
++                    self.operational_budget is not None
++                    and self.transport is https_transport
++                ):
++                    result = https_transport(
++                        method,
++                        current_url,
++                        headers,
++                        body,
++                        deadline_monotonic=(
++                            self.operational_budget.deadline_monotonic
++                        ),
++                    )
++                else:
++                    result = self.transport(method, current_url, headers, body)
+             except Exception as error:
+                 transport_error = redacted_execution_error(
+                     error, default_code="API_TRANSPORT_CLIENT_FAILURE"
+                 )
+             if transport_error is not None:
++                if self.operational_budget is not None:
++                    attempts.append(
++                        {
++                            "attempt_number": attempt_number,
++                            "retry_count": attempt_number - 1,
++                            "delay_before_attempt_seconds": delay,
++                            "started_at_utc": started,
++                            "completed_at_utc": self.clock(),
++                            "response_headers": {},
++                            "transport_error": transport_error.code,
++                        }
++                    )
++                    ensure_request_record()
+                 raise transport_error
+             completed = self.clock()
+             attempt: dict[str, Any] = {
+@@ -727,6 +894,9 @@ class ApiCaptureClient:
+                     )
+                 attempt["transport_error"] = result.code
+                 attempts.append(attempt)
++                if self.operational_budget is not None:
++                    ensure_request_record()
++                    self.operational_budget.checkpoint()
+                 decision = request_decision(
+                     attempt_number=attempt_number,
+                     transport_error=result.code,
+@@ -812,6 +982,9 @@ class ApiCaptureClient:
+                     }
+                 )
+             attempts.append(attempt)
++            if self.operational_budget is not None:
++                ensure_request_record()
++                self.operational_budget.checkpoint()
+ 
+             if result.status in REDIRECT_STATUSES:
+                 location = result.headers.get("location")
+diff --git a/tests/test_candidate_discovery_operational_v042.py b/tests/test_candidate_discovery_operational_v042.py
+index 0c69ee974..4bbe4a5b4 100644
+--- a/tests/test_candidate_discovery_operational_v042.py
++++ b/tests/test_candidate_discovery_operational_v042.py
+@@ -4,15 +4,20 @@ from datetime import datetime, timedelta, timezone
+ import hashlib
+ import json
+ from pathlib import Path
++import re
+ from typing import Any
++from urllib.parse import parse_qs, urlsplit
+ 
+ import cmpilot.candidate_discovery_v03 as discovery_v03
+ import pytest
++import scripts.execute_candidate_discovery_v03 as discovery_cli
+ 
+ from cmpilot.candidate_discovery_v03_io import (
+     ApiCaptureClient,
+     DiscoveryExecutionError,
++    OperationalCanaryBudget,
+     RawArtifactStore,
++    TransportFailure,
+     TransportResponse,
+     assert_no_sensitive_values,
+ )
+@@ -34,6 +39,13 @@ def _sha256(path: Path) -> str:
+     return hashlib.sha256(path.read_bytes()).hexdigest()
+ 
+ 
++def _token_file(tmp_path: Path) -> Path:
++    path = tmp_path / "github-token"
++    path.write_text(FIXTURE_TOKEN, encoding="ascii")
++    path.chmod(0o600)
++    return path
++
++
+ class ControlledClock:
+     def __init__(self, value: str) -> None:
+         self.current = datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(
+@@ -467,3 +479,387 @@ def test_primary_reset_in_past_never_schedules_negative_sleep(tmp_path: Path) ->
+     first = record["attempts"][0]
+     assert first["scheduled_delay_seconds"] == 0
+     assert first["actual_resume_timestamp_utc"] == "2026-08-13T00:00:10Z"
++
++
++def test_normal_capture_client_has_no_canary_truncation(tmp_path: Path) -> None:
++    calls = 0
++
++    def transport(*_args: Any) -> TransportResponse:
++        nonlocal calls
++        calls += 1
++        return _response(200, {"ok": True})
++
++    client = ApiCaptureClient(
++        RawArtifactStore(tmp_path),
++        token=FIXTURE_TOKEN,
++        transport=transport,
++        clock=lambda: "2026-08-16T00:00:00Z",
++        sleeper=lambda _seconds: None,
++    )
++
++    for number in range(1, 102):
++        client.request_json(
++            method="GET",
++            endpoint=f"https://api.github.com/repos/o/r/issues/{number}",
++        )
++
++    assert client.operational_budget is None
++    assert calls == 101
++    assert len(client.requests) == 101
++
++
++def test_normal_execute_cli_dispatch_is_unchanged(
++    tmp_path: Path,
++    monkeypatch: pytest.MonkeyPatch,
++    capsys: pytest.CaptureFixture[str],
++) -> None:
++    received: dict[str, Path] = {}
++
++    def execute_discovery(**kwargs: Path) -> dict[str, bool]:
++        received.update(kwargs)
++        return {"normal_execute": True}
++
++    monkeypatch.setattr(discovery_cli, "execute_discovery", execute_discovery)
++    run_root = tmp_path / "normal-run"
++    token_path = tmp_path / "normal-token"
++
++    return_code = discovery_cli.main(
++        [
++            "execute",
++            "--run-directory",
++            str(run_root),
++            "--token-file",
++            str(token_path),
++        ]
++    )
++
++    assert return_code == 0
++    assert received == {
++        "project_root": ROOT,
++        "run_root": run_root.resolve(),
++        "token_path": token_path.resolve(),
++    }
++    assert json.loads(capsys.readouterr().out) == {"normal_execute": True}
++
++
++def test_canary_cli_requires_explicit_query_id(tmp_path: Path) -> None:
++    with pytest.raises(SystemExit) as captured:
++        discovery_cli.main(
++            ["canary", "--run-directory", str(tmp_path / "missing-query")]
++        )
++
++    assert captured.value.code == 2
++
++
++def test_canary_executes_one_exact_selected_query_and_verifies_offline(
++    tmp_path: Path,
++) -> None:
++    calls: list[str] = []
++
++    def transport(_method, url, _headers, _body):  # type: ignore[no-untyped-def]
++        calls.append(url)
++        return _response(
++            200,
++            {"total_count": 0, "incomplete_results": False, "items": []},
++            resource="search",
++            remaining=29,
++            reset=0,
++        )
++
++    run_root = tmp_path / "canary"
++    result = discovery_v03.execute_canary(
++        project_root=ROOT,
++        run_root=run_root,
++        token_path=_token_file(tmp_path),
++        query_id="TB-Q05",
++        transport=transport,
++        clock=lambda: "2026-08-16T00:00:00Z",
++        sleeper=lambda _seconds: None,
++        monotonic=lambda: 10.0,
++        tested_git_commit="a" * 40,
++    )
++
++    frozen = json.loads(
++        (
++            ROOT
++            / "benchmark-selection/discovery/prospective-v0.2/"
++            "trust-boundary-issues-prs.json"
++        ).read_bytes()
++    )
++    selected = next(
++        query for query in frozen["queries"] if query["query_id"] == "TB-Q05"
++    )
++    assert result["pass"] is True
++    assert len(calls) == 1
++    assert parse_qs(urlsplit(calls[0]).query)["q"] == [selected["query"]]
++    assert all(
++        other["query"] not in calls[0]
++        for other in frozen["queries"]
++        if other["query_id"] != "TB-Q05"
++    )
++    report = result["report"]
++    assert report["operational_canary"] is True
++    assert report["source"] == "Search"
++    assert report["tested_git_commit"] == "a" * 40
++    assert report["query"]["query_id"] == "TB-Q05"
++    assert report["query"]["query_text"] == selected["query"]
++    assert report["canary_limits"] == {
++        "maximum_search_requests": 1,
++        "maximum_source_objects": 5,
++        "maximum_api_attempts": 100,
++        "deadline_seconds": 2100,
++    }
++    assert report["observed_counts"] == {
++        "actual_search_requests": 1,
++        "actual_source_objects": 0,
++        "actual_physical_api_attempts": 1,
++    }
++    assert report["termination_reason"] == "CANARY_COMPLETED_WITHIN_BOUNDS"
++    assert report["normal_capture_complete_claimed"] is False
++    assert "CAPTURE_COMPLETE" not in json.dumps(report)
++
++    verification = discovery_v03.verify_canary_run(
++        project_root=ROOT, run_root=run_root
++    )
++    assert verification["pass"] is True
++    assert verification["network_accessed"] is False
++    assert verification["canary_validation_state"] == (
++        "VALIDATED_OPERATIONAL_CANARY"
++    )
++    with pytest.raises(DiscoveryExecutionError) as captured:
++        discovery_v03.verify_discovery_run(project_root=ROOT, run_root=run_root)
++    assert captured.value.code == "OPERATIONAL_CANARY_NOT_SCIENTIFIC_CAPTURE"
++    assert not (run_root / "discovery-run-report.json").exists()
++    assert not (run_root / "candidate-pool-manifest.json").exists()
++    assert not (
++        run_root
++        / "sources"
++        / discovery_v03.SEARCH_SOURCE_ID
++        / "capture-manifest.json"
++    ).exists()
++    report_path = run_root / "operational-canary-report.json"
++    report_path.chmod(0o600)
++    report_path.write_bytes(report_path.read_bytes() + b"\n")
++    with pytest.raises(DiscoveryExecutionError) as tampered:
++        discovery_v03.verify_canary_run(project_root=ROOT, run_root=run_root)
++    assert tampered.value.code == "RAW_ARTIFACT_HASH_MISMATCH"
++
++
++def test_canary_blocks_recursive_partition_before_second_search_transport(
++    tmp_path: Path,
++) -> None:
++    calls = 0
++
++    def transport(*_args: Any) -> TransportResponse:
++        nonlocal calls
++        calls += 1
++        return _response(
++            200,
++            {"total_count": 101, "incomplete_results": False, "items": []},
++        )
++
++    run_root = tmp_path / "partition-canary"
++    result = discovery_v03.execute_canary(
++        project_root=ROOT,
++        run_root=run_root,
++        token_path=_token_file(tmp_path),
++        query_id="TB-Q01",
++        transport=transport,
++        clock=lambda: "2026-08-16T00:00:00Z",
++        sleeper=lambda _seconds: None,
++        monotonic=lambda: 20.0,
++        tested_git_commit="b" * 40,
++    )
++
++    assert calls == 1
++    assert result["pass"] is True
++    assert result["report"]["status"] == "CANARY_STOPPED_AT_HARD_BOUND"
++    assert result["report"]["termination_reason"] == (
++        "CANARY_SEARCH_REQUEST_LIMIT_REACHED"
++    )
++    assert result["report"]["observed_counts"]["actual_search_requests"] == 1
++    verification = discovery_v03.verify_canary_run(
++        project_root=ROOT, run_root=run_root
++    )
++    assert verification["pass"] is True
++
++
++def test_canary_stops_before_sixth_source_object_detail_request(
++    tmp_path: Path,
++) -> None:
++    paths: list[str] = []
++    items = [
++        {
++            "node_id": f"pull-node-{number}",
++            "number": number,
++            "repository_url": f"https://api.github.com/repos/o/r{number}",
++        }
++        for number in range(1, 7)
++    ]
++
++    def transport(_method, url, _headers, _body):  # type: ignore[no-untyped-def]
++        path = urlsplit(url).path
++        paths.append(path)
++        if path == "/search/issues":
++            return _response(
++                200,
++                {
++                    "total_count": len(items),
++                    "incomplete_results": False,
++                    "items": items,
++                },
++            )
++        match = re.fullmatch(r"/repos/o/r([1-6])", path)
++        if match:
++            number = int(match.group(1))
++            return _response(
++                200,
++                {
++                    "id": number,
++                    "owner": {"login": "o"},
++                    "name": f"r{number}",
++                    "html_url": f"https://github.com/o/r{number}",
++                    "visibility": "public",
++                },
++            )
++        if re.fullmatch(r"/repos/o/r[1-5]/pulls/[1-5]", path):
++            return _response(200, {})
++        raise AssertionError(f"unexpected or forbidden transport: {url}")
++
++    run_root = tmp_path / "object-canary"
++    result = discovery_v03.execute_canary(
++        project_root=ROOT,
++        run_root=run_root,
++        token_path=_token_file(tmp_path),
++        query_id="TB-Q02",
++        transport=transport,
++        clock=lambda: "2026-08-16T00:00:00Z",
++        sleeper=lambda _seconds: None,
++        monotonic=lambda: 30.0,
++        tested_git_commit="c" * 40,
++    )
++
++    assert result["report"]["termination_reason"] == (
++        "CANARY_SOURCE_OBJECT_LIMIT_REACHED"
++    )
++    assert result["report"]["observed_counts"] == {
++        "actual_search_requests": 1,
++        "actual_source_objects": 5,
++        "actual_physical_api_attempts": 11,
++    }
++    assert "/repos/o/r6" not in paths
++    assert all("/repos/o/r6/" not in path for path in paths)
++    discovery_v03.verify_canary_run(project_root=ROOT, run_root=run_root)
++
++
++def test_canary_physical_attempt_100_allowed_and_101_blocked(
++    tmp_path: Path,
++) -> None:
++    calls = 0
++    budget = OperationalCanaryBudget(monotonic=lambda: 0.0)
++
++    def transport(*_args: Any) -> TransportResponse:
++        nonlocal calls
++        calls += 1
++        return _response(200, {"ok": True})
++
++    client = ApiCaptureClient(
++        RawArtifactStore(tmp_path),
++        token=FIXTURE_TOKEN,
++        transport=transport,
++        clock=lambda: "2026-08-16T00:00:00Z",
++        sleeper=lambda _seconds: None,
++        operational_budget=budget,
++    )
++    for number in range(1, 101):
++        client.request_json(
++            method="GET",
++            endpoint=f"https://api.github.com/repos/o/r/issues/{number}",
++        )
++    with pytest.raises(DiscoveryExecutionError) as captured:
++        client.request_json(
++            method="GET",
++            endpoint="https://api.github.com/repos/o/r/issues/101",
++        )
++
++    assert captured.value.code == "CANARY_API_ATTEMPT_LIMIT_REACHED"
++    assert calls == 100
++    assert budget.api_attempts == 100
++    assert sum(len(request["attempts"]) for request in client.requests) == 100
++
++
++def test_canary_retries_consume_physical_attempt_budget(tmp_path: Path) -> None:
++    results = iter(
++        [
++            TransportFailure("CONNECT_TIMEOUT"),
++            _response(200, {"ok": True}),
++        ]
++    )
++    delays: list[float] = []
++    budget = OperationalCanaryBudget(monotonic=lambda: 0.0)
++    client = ApiCaptureClient(
++        RawArtifactStore(tmp_path),
++        token=FIXTURE_TOKEN,
++        transport=lambda *_args: next(results),
++        clock=lambda: "2026-08-16T00:00:00Z",
++        sleeper=delays.append,
++        operational_budget=budget,
++    )
++
++    _, record = client.request_json(
++        method="GET", endpoint="https://api.github.com/repos/o/r/issues/1"
++    )
++
++    assert budget.api_attempts == 2
++    assert len(record["attempts"]) == 2
++    assert delays == [2]
++
++
++@pytest.mark.parametrize("rate_limit_kind", ["primary", "secondary"])
++def test_canary_rate_limit_wait_crossing_deadline_stops_before_sleep(
++    tmp_path: Path, rate_limit_kind: str
++) -> None:
++    clock = ControlledClock("2026-08-16T00:00:00Z")
++    if rate_limit_kind == "primary":
++        response = _primary_limit(resource="core", reset=clock.epoch + 30)
++    else:
++        response = TransportResponse(
++            status=403,
++            headers={
++                "content-type": "application/json",
++                "retry-after": "31",
++            },
++            body=json.dumps(
++                {"message": "You have exceeded a secondary rate limit."},
++                separators=(",", ":"),
++            ).encode(),
++        )
++    calls = 0
++    sleeps: list[float] = []
++    budget = OperationalCanaryBudget(
++        deadline_seconds=30,
++        monotonic=lambda: 0.0,
++    )
++
++    def transport(*_args: Any) -> TransportResponse:
++        nonlocal calls
++        calls += 1
++        return response
++
++    client = ApiCaptureClient(
++        RawArtifactStore(tmp_path),
++        token=FIXTURE_TOKEN,
++        transport=transport,
++        clock=clock,
++        sleeper=sleeps.append,
++        operational_budget=budget,
++    )
++    with pytest.raises(DiscoveryExecutionError) as captured:
++        client.request_json(
++            method="GET", endpoint="https://api.github.com/repos/o/r/issues/1"
++        )
++
++    assert captured.value.code == "CANARY_RUNTIME_LIMIT_REACHED"
++    assert calls == 1
++    assert sleeps == []
++    assert budget.api_attempts == 1

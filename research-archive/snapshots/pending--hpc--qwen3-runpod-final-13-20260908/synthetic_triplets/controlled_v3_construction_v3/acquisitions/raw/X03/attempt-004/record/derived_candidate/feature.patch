@@ -1,0 +1,50 @@
+diff --git a/app/service.py b/app/service.py
+--- a/app/service.py
++++ b/app/service.py
+@@ -1,44 +1,2 @@
+-"""Case-sensitive ASCII handle registration and exact resolution."""
+-
+-
+-def _valid(handle):
+-    return (
+-        isinstance(handle, str)
+-        and 1 <= len(handle) <= 32
+-        and all(
+-            'A' <= character <= 'Z'
+-            or 'a' <= character <= 'z'
+-            or '0' <= character <= '9'
+-            or character in '_-'
+-            for character in handle
+-        )
+-    )
+-
+-
+-def run(registry, operation, handle, argument=None):
+-    if not _valid(handle):
+-        return 'invalid'
+-    rows = registry.rows
+-    if operation == 'register':
+-        if handle in rows:
+-            return 'exists'
+-        rows[handle] = {'owner': argument, 'display': handle}
+-        return 'registered'
+-    if operation == 'lookup':
+-        return rows[handle]['owner'] if handle in rows else None
+-    if operation == 'rename':
+-        if not isinstance(argument, (tuple, list)) or len(argument) != 2:
+-            return 'invalid'
+-        owner, new_handle = argument
+-        if not _valid(new_handle):
+-            return 'invalid'
+-        if handle not in rows or rows[handle]['owner'] != owner:
+-            return 'forbidden'
+-        if new_handle != handle and new_handle in rows:
+-            return 'exists'
+-        replacement = dict(rows[handle])
+-        replacement['display'] = new_handle
+-        del rows[handle]
+-        rows[new_handle] = replacement
+-        return 'renamed'
+-    return 'invalid'
++"""Executable canonical S for X03; source-valid context only."""
++from synthetic_triplets.controlled_v3_executable_oracle_release_v1.agent_inputs.shared.agent_runtime import x03_source as run

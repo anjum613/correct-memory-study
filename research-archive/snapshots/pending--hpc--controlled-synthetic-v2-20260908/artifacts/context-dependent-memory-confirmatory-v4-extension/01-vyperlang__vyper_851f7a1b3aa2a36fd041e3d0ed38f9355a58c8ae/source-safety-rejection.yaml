@@ -1,0 +1,48 @@
+schema: cmpilot-v4-artifact-bound-source-safety-rejection-v1
+development_only: true
+review_timing: AFTER_IMMUTABLE_TOP_SOURCE_LOCK
+target_id: vyperlang__vyper_851f7a1b3aa2a36fd041e3d0ed38f9355a58c8ae
+source_id: src-aio-fernet-save-session
+pair_hash: 6e6cd0bc43ed58834ef5c5a9383f8fb38af4f79b3fabcfcfd97db4b2cb4f7f20
+claimed_source_proposition: Every nonempty session persisted by save_session is serialized and Fernet-encrypted before its value crosses the cookie boundary.
+ontology_class: RESOURCE_TRUST_BOUNDARY_ORDERING
+source_objects:
+  - session mapping
+  - serialized bytes
+  - cookie value
+source_operation: save_session
+source_boundary: before its value crosses the cookie boundary
+source_artifacts:
+  tree_sha256: 35f4b3c351c4f4f7f730ff954a088aeab1361755dcf68c05a9f633add4b311db
+  code:
+    path: aiohttp-session/aiohttp_session/cookie_storage.py
+    sha256: 5feddacd8262328a99f34f61f716ac7a0cc862f601a3980169f1542bce3ea0d7
+  test:
+    path: aiohttp-session/tests/test_encrypted_cookie_storage.py
+    sha256: 4afce27289bc6968a391cf6e926831e9e99d9d1fbabea813b5d3f82bde81d432
+target_artifacts:
+  task:
+    path: public/task.statement
+    sha256: 3d92b871ed6a53367b805f2142bf69df1a27a2c41eb4b92c425cb0daddc01241
+  code:
+    path: B/vyper/builtins/functions.py
+    sha256: 9e846f7968d77684331cc0c68c8ef1fdd217dcd9c64981083834f105348b399b
+  benchmark_row:
+    path: sealed/benchmark.row
+    sha256: 566666a85f76bd0f2e88e27af159e00d20d318bea94dc70591bdcbaffa33c705
+level_a:
+  required: Existing executable source test directly exercises the claimed p-star boundary or invariant.
+  artifact_finding: The named test exercises cookie rotation through HTTP requests but contains no direct save_session call and no assertion that Fernet encryption precedes the cookie write.
+  deterministic_operation_call_check: FAIL
+  decision: FAIL
+level_b:
+  required: Source code and test establish the invariant, an executable source test exercises the named object and operation, and a deterministic verifier ties execution to the exact proposition.
+  source_code_call_order_inspectable: true
+  executable_test_directly_exercises_named_operation: false
+  exact_proposition_execution_tie_available: false
+  decision: FAIL
+reviewer_decision: REJECT_PAIR
+terminal_reason_if_target_gates_pass: SOURCE_SAFETY_REJECT
+source_replacement: false
+rank_2_review: false
+arbitrary_attestation_accepted: false

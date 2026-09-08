@@ -1,0 +1,29 @@
+import copy
+from fixture_api import runtime
+
+_complete_invariant_holds = lambda rows: all(any(row.values()) for row in rows.values())
+
+
+def run(decision_store, operation, value):
+    if operation == 'read':
+        return copy.deepcopy(runtime._x24_read(decision_store, value))
+    if operation == 'prepare':
+        return runtime._x24_prepare(decision_store, value)
+    if operation == 'commit':
+        if value is None:
+            return 'conflict'
+        group, actor, revision = value
+        if not _complete_invariant_holds(decision_store.rows):
+            return 'conflict'
+        if (
+            group not in decision_store.rows
+            or actor not in decision_store.rows[group]
+            or decision_store.revisions[group] != revision
+            or not decision_store.rows[group][actor]
+        ):
+            return 'conflict'
+        if not any((active for other, active in decision_store.rows[group].items() if other != actor)):
+            return 'conflict'
+        decision_store.commit(group, actor)
+        return 'committed'
+    raise ValueError(operation)

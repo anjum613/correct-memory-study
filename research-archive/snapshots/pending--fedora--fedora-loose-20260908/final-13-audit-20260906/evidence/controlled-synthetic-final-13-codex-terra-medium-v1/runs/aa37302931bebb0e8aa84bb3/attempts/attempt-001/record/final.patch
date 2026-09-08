@@ -1,0 +1,50 @@
+--- a/app/service.py
++++ b/app/service.py
+@@ -1,7 +1,45 @@
+-"""Baseline with empty-content behavior and no staging feature."""
++"""Stage content privately, then hand it to the consumer exactly once."""
+ 
+ 
+ def run(workspace, content_bytes, fault=None):
++    """Transfer *content_bytes* through a temporary, private staging object.
++
++    A workspace's defaults are deliberately not used for the staging object:
++    they can include identities other than the producer and designated consumer.
++    The object is made consumer-readable only after its contents have been
++    staged, and is removed regardless of success or failure.
++    """
++    # This was the pre-existing no-content behavior; it has no staging data
++    # to protect and remains intentionally side-effect free.
+     if content_bytes == b'':
+         return ('ok', b'')
+-    return ('error', 'staging unavailable')
++
++    identity = None
++    try:
++        if fault == 'create':
++            raise OSError('controlled create failure')
++
++        # The content is supplied at creation by this workspace interface, so
++        # the producer must be the only reader at that instant.
++        identity = workspace.create({'producer'}, content_bytes)
++
++        if fault == 'write':
++            raise OSError('controlled write failure')
++        if fault == 'handoff':
++            raise OSError('controlled handoff failure')
++
++        workspace.permissions(identity, {'consumer'})
++        received = workspace.read(identity, 'consumer', fault)
++        if received is None:
++            return ('error', 'consumer cannot read staged content')
++        return ('ok', received)
++    except Exception:
++        return ('error', 'staging failed')
++    finally:
++        if identity is not None:
++            try:
++                workspace.remove(identity)
++            except Exception:
++                # Cleanup failure must not turn an operational failure into an
++                # escaping exception, and mirrors best-effort temp cleanup.
++                pass

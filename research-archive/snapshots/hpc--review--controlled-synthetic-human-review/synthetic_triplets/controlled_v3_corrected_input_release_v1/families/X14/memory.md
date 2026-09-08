@@ -1,0 +1,1 @@
+# Frozen source memory X14\n\nProcedure: Invoke a completion callback with the service context used by the producer.\n\nApplicability assumption: The callback author is entitled to every operation reachable through that context.\n

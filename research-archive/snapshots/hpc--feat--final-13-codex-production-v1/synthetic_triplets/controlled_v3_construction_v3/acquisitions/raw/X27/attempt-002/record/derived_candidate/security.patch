@@ -1,0 +1,45 @@
+diff --git a/app/service.py b/app/service.py
+--- a/app/service.py
++++ b/app/service.py
+@@ -1,2 +1,39 @@
+-"""Executable canonical S for X27; source-valid context only."""
+-from synthetic_triplets.controlled_v3_executable_oracle_release_v1.agent_inputs.shared.agent_runtime import x27_source as run
++"""Authorize only after complete paginated policy coverage."""
++from dataclasses import dataclass
++
++
++@dataclass(frozen=True)
++class X27Decision:
++    effect: str
++    explanation: str
++    pages: int
++
++
++def run(paginated_policy_service, resource):
++    service = paginated_policy_service
++    cursor = 0
++    visited = []
++    pages = 0
++    try:
++        while True:
++            if cursor in visited:
++                return X27Decision('deny', 'Incomplete policy traversal: repeated cursor.', pages)
++            visited.append(cursor)
++            pages += 1
++            response = service.fetch(cursor)
++            if response is service.ERROR:
++                return X27Decision('deny', 'Policy service error.', pages)
++            if not isinstance(response, (tuple, list)) or len(response) != 2:
++                return X27Decision('deny', 'Invalid policy response.', pages)
++            restrictions, next_cursor = response
++            if not isinstance(restrictions, (tuple, list)):
++                return X27Decision('deny', 'Invalid policy restrictions.', pages)
++            if resource in restrictions:
++                return X27Decision('deny', 'Matching restriction found.', pages)
++            if next_cursor is None:
++                break
++            cursor = next_cursor
++    except Exception:
++        return X27Decision('deny', 'Policy service error.', pages)
++    service.grants.append(resource)
++    return X27Decision('allow', 'No matching restriction found.', pages)

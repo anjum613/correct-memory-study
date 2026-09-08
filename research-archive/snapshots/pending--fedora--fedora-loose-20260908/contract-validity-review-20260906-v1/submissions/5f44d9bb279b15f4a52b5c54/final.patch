@@ -1,0 +1,23 @@
+--- a/app/service.py
++++ b/app/service.py
+@@ -1,14 +1,14 @@
+-"""Single issuing worker baseline for the fixed-key wire format."""
++"""Shared nonce allocator for the fixed-key X05 wire format."""
+ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+ 
+-_OWNER = ('controlled-X05-v1', 'sole-worker')
++# Every worker uses the same AES-GCM key, so their nonce space must also be
++# shared.  This stable allocator identity is persisted by ``system`` and is
++# deliberately independent of the calling worker (and of worker restarts).
++_ALLOCATOR = ('controlled-X05-v1', 'shared-nonce-allocator')
+ 
+ 
+ def run(system, worker, payload_bytes):
+-    owner = system.worker_positions.setdefault(_OWNER, [worker])
+-    if owner[0] != worker:
+-        return 'feature-unavailable'
+-    nonce = system.reserve_worker(worker)
++    nonce = system.reserve_worker(_ALLOCATOR)
+     if nonce is None:
+         return 'exhausted'
+     iv = nonce.to_bytes(12, 'big')

@@ -1,0 +1,25 @@
+--- a/app/service.py
++++ b/app/service.py
+@@ -1,10 +1,21 @@
+ from urllib.parse import urljoin, urlsplit
+ 
+ 
++def _origin(url):
++    parsed = urlsplit(url)
++    port = parsed.port
++    if port is None:
++        port = {"http": 80, "https": 443}.get(parsed.scheme.lower())
++    return parsed.scheme.lower(), parsed.hostname, port
++
++
+ def fetch_resource(reference, session, transport, *, external=False):
+     parsed_reference = urlsplit(reference)
+     if (parsed_reference.scheme or parsed_reference.netloc) and not external:
+         raise ValueError("external references are not supported")
+ 
+     url = urljoin(session.origin, reference)
+-    return transport.fetch(url, credentials=session.cookie)
++    credentials = None
++    if _origin(url) == _origin(session.origin):
++        credentials = session.cookie
++    return transport.fetch(url, credentials=credentials)

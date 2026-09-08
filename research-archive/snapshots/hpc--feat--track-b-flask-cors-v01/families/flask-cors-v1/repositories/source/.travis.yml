@@ -1,0 +1,40 @@
+language: python
+python:
+- '2.6'
+- '2.7'
+- '3.3'
+- '3.4'
+- pypy
+- pypy3
+env:
+- FLASK=0.10.1
+- FLASK=0.10
+- FLASK=0.9
+matrix:
+  allow_failures:
+  - python: '3.3'
+    env: FLASK=0.9
+  - python: 'pypy3'
+    env: FLASK=0.9
+  - python: '3.4'
+    env: FLASK=0.9
+install:
+- pip install pep8 coveralls six
+- pip install -U "pip>=1.4" "setuptools>=0.9" "wheel>=0.21"
+- pip install flask==$FLASK
+script:
+- coverage erase
+- nosetests --with-coverage --cover-package=flask_cors
+- python setup.py clean build install
+after_success:
+- pep8 flask_cors.py
+- coveralls
+deploy:
+  provider: pypi
+  user: CoryDolphin
+  password:
+    secure: c/z1OYmniNlJ7F7G+TipOlJfVLCEz0F09JCJJ4+TPB/DTxajxarMEygX/LrvBOLvbe1EvAKO9p/SOagAul00YXU/rb2i1k1tJnKF2A6KKSLOsZbTcGWNcInOaLKql4Cv8Ts1cOfMiTVHBQLR+1FCw+IuZ44N+KhF0tsFOejEmRc=
+  on:
+    tags: true
+    repo: corydolphin/flask-cors
+    condition: $TRAVIS_PYTHON_VERSION != *2.6* # Ensures we release a 2.7X wheel

@@ -1,0 +1,550 @@
+commit a37f6f8394ac2a7ee8360c3abea811efe54512b1
+Author:     hlky <hlky@hlky.ac>
+AuthorDate: Thu Apr 23 06:37:43 2026 +0100
+Commit:     GitHub <noreply@github.com>
+CommitDate: Thu Apr 23 11:07:43 2026 +0530
+
+    Improve `trust_remote_code` (#13448)
+    
+    * Robust trust check for custom_pipeline parameter of DiffusionPipeline.from_pretrained method
+    
+    * test_custom_components_from_local_dir
+    
+    * Apply style fixes
+    
+    * fix
+    
+    * Update src/diffusers/utils/dynamic_modules_utils.py
+    
+    Co-authored-by: Dhruv Nair <dhruv.nair@gmail.com>
+    
+    * Adjust tests and allow community pipeline
+    
+    * DIFFUSERS_DISABLE_REMOTE_CODE
+    
+    ---------
+    
+    Co-authored-by: github-actions[bot] <github-actions[bot]@users.noreply.github.com>
+    Co-authored-by: Dhruv Nair <dhruv.nair@gmail.com>
+---
+ src/diffusers/models/auto_model.py                 |   3 +
+ .../modular_pipelines/modular_pipeline.py          |   1 +
+ src/diffusers/pipelines/pipeline_loading_utils.py  |  20 +++-
+ src/diffusers/pipelines/pipeline_utils.py          |  25 ++---
+ src/diffusers/utils/dynamic_modules_utils.py       |  36 ++++++-
+ tests/models/test_models_auto.py                   |   2 +
+ tests/pipelines/test_pipelines.py                  | 118 +++++++++++++++++++--
+ 7 files changed, 178 insertions(+), 27 deletions(-)
+
+diff --git a/src/diffusers/models/auto_model.py b/src/diffusers/models/auto_model.py
+index 1c001e23..8b2a74a0 100644
+--- a/src/diffusers/models/auto_model.py
++++ b/src/diffusers/models/auto_model.py
+@@ -120,6 +120,7 @@ class AutoModel(ConfigMixin):
+                 subfolder=subfolder,
+                 module_file=module_file,
+                 class_name=class_name,
++                trust_remote_code=trust_remote_code,
+                 **hub_kwargs,
+             )
+         else:
+@@ -143,6 +144,7 @@ class AutoModel(ConfigMixin):
+                 importable_classes=ALL_IMPORTABLE_CLASSES,
+                 pipelines=None,
+                 is_pipeline_module=False,
++                trust_remote_code=trust_remote_code,
+             )
+ 
+         if model_cls is None:
+@@ -318,6 +320,7 @@ class AutoModel(ConfigMixin):
+                 subfolder=subfolder,
+                 module_file=module_file,
+                 class_name=class_name,
++                trust_remote_code=trust_remote_code,
+                 **hub_kwargs,
+             )
+         else:
+diff --git a/src/diffusers/modular_pipelines/modular_pipeline.py b/src/diffusers/modular_pipelines/modular_pipeline.py
+index d00bf716..1bb4c84a 100644
+--- a/src/diffusers/modular_pipelines/modular_pipeline.py
++++ b/src/diffusers/modular_pipelines/modular_pipeline.py
+@@ -437,6 +437,7 @@ class ModularPipelineBlocks(ConfigMixin, PushToHubMixin):
+             pretrained_model_name_or_path,
+             module_file=module_file,
+             class_name=class_name,
++            trust_remote_code=trust_remote_code,
+             **hub_kwargs,
+         )
+         expected_kwargs, optional_kwargs = block_cls._get_signature_keys(block_cls)
+diff --git a/src/diffusers/pipelines/pipeline_loading_utils.py b/src/diffusers/pipelines/pipeline_loading_utils.py
+index 779e6c3f..d695f5e7 100644
+--- a/src/diffusers/pipelines/pipeline_loading_utils.py
++++ b/src/diffusers/pipelines/pipeline_loading_utils.py
+@@ -410,7 +410,14 @@ def simple_get_class_obj(library_name, class_name):
+ 
+ 
+ def get_class_obj_and_candidates(
+-    library_name, class_name, importable_classes, pipelines, is_pipeline_module, component_name=None, cache_dir=None
++    library_name,
++    class_name,
++    importable_classes,
++    pipelines,
++    is_pipeline_module,
++    component_name=None,
++    cache_dir=None,
++    trust_remote_code: bool = False,
+ ):
+     """Simple helper method to retrieve class object of module as well as potential parent class objects"""
+     component_folder = os.path.join(cache_dir, component_name) if component_name and cache_dir else None
+@@ -426,7 +433,10 @@ def get_class_obj_and_candidates(
+     elif component_folder and os.path.isfile(os.path.join(component_folder, library_name + ".py")):
+         # load custom component
+         class_obj = get_class_from_dynamic_module(
+-            component_folder, module_file=library_name + ".py", class_name=class_name
++            component_folder,
++            module_file=library_name + ".py",
++            class_name=class_name,
++            trust_remote_code=trust_remote_code,
+         )
+         class_candidates = dict.fromkeys(importable_classes.keys(), class_obj)
+     else:
+@@ -450,6 +460,7 @@ def _get_custom_pipeline_class(
+     class_name=None,
+     cache_dir=None,
+     revision=None,
++    trust_remote_code: bool = False,
+ ):
+     if custom_pipeline.endswith(".py"):
+         path = Path(custom_pipeline)
+@@ -473,6 +484,7 @@ def _get_custom_pipeline_class(
+         class_name=class_name,
+         cache_dir=cache_dir,
+         revision=revision,
++        trust_remote_code=trust_remote_code,
+     )
+ 
+ 
+@@ -486,6 +498,7 @@ def _get_pipeline_class(
+     class_name=None,
+     cache_dir=None,
+     revision=None,
++    trust_remote_code: bool = False,
+ ):
+     if custom_pipeline is not None:
+         return _get_custom_pipeline_class(
+@@ -495,6 +508,7 @@ def _get_pipeline_class(
+             class_name=class_name,
+             cache_dir=cache_dir,
+             revision=revision,
++            trust_remote_code=trust_remote_code,
+         )
+ 
+     if class_obj.__name__ != "DiffusionPipeline" and class_obj.__name__ != "ModularPipeline":
+@@ -766,6 +780,7 @@ def load_sub_model(
+     disable_mmap: bool,
+     quantization_config: Any | None = None,
+     use_flashpack: bool = False,
++    trust_remote_code: bool = False,
+ ):
+     """Helper method to load the module `name` from `library_name` and `class_name`"""
+     from ..quantizers import PipelineQuantizationConfig
+@@ -780,6 +795,7 @@ def load_sub_model(
+         is_pipeline_module,
+         component_name=name,
+         cache_dir=cached_folder,
++        trust_remote_code=trust_remote_code,
+     )
+ 
+     load_method_name = None
+diff --git a/src/diffusers/pipelines/pipeline_utils.py b/src/diffusers/pipelines/pipeline_utils.py
+index 6ddd345a..1fa4db90 100644
+--- a/src/diffusers/pipelines/pipeline_utils.py
++++ b/src/diffusers/pipelines/pipeline_utils.py
+@@ -787,6 +787,7 @@ class DiffusionPipeline(ConfigMixin, PushToHubMixin):
+         quantization_config = kwargs.pop("quantization_config", None)
+         use_flashpack = kwargs.pop("use_flashpack", False)
+         disable_mmap = kwargs.pop("disable_mmap", False)
++        trust_remote_code = kwargs.pop("trust_remote_code", False)
+ 
+         if torch_dtype is not None and not isinstance(torch_dtype, dict) and not isinstance(torch_dtype, torch.dtype):
+             torch_dtype = torch.float32
+@@ -871,6 +872,7 @@ class DiffusionPipeline(ConfigMixin, PushToHubMixin):
+                 variant=variant,
+                 dduf_file=dduf_file,
+                 load_connected_pipeline=load_connected_pipeline,
++                trust_remote_code=trust_remote_code,
+                 **kwargs,
+             )
+         else:
+@@ -928,6 +930,7 @@ class DiffusionPipeline(ConfigMixin, PushToHubMixin):
+             class_name=custom_class_name,
+             cache_dir=cache_dir,
+             revision=custom_revision,
++            trust_remote_code=trust_remote_code,
+         )
+ 
+         if device_map is not None and pipeline_class._load_connected_pipes:
+@@ -1077,6 +1080,7 @@ class DiffusionPipeline(ConfigMixin, PushToHubMixin):
+                     disable_mmap=disable_mmap,
+                     quantization_config=quantization_config,
+                     use_flashpack=use_flashpack,
++                    trust_remote_code=trust_remote_code,
+                 )
+                 logger.info(
+                     f"Loaded {name} as {class_name} from `{name}` subfolder of {pretrained_model_name_or_path}."
+@@ -1684,21 +1688,6 @@ class DiffusionPipeline(ConfigMixin, PushToHubMixin):
+                 custom_class_name = config_dict["_class_name"][1]
+ 
+             load_pipe_from_hub = custom_pipeline is not None and f"{custom_pipeline}.py" in filenames
+-            load_components_from_hub = len(custom_components) > 0
+-
+-            if load_pipe_from_hub and not trust_remote_code:
+-                raise ValueError(
+-                    f"The repository for {pretrained_model_name} contains custom code in {custom_pipeline}.py which must be executed to correctly "
+-                    f"load the model. You can inspect the repository content at https://hf.co/{pretrained_model_name}/blob/main/{custom_pipeline}.py.\n"
+-                    f"Please pass the argument `trust_remote_code=True` to allow custom code to be run."
+-                )
+-
+-            if load_components_from_hub and not trust_remote_code:
+-                raise ValueError(
+-                    f"The repository for {pretrained_model_name} contains custom code in {'.py, '.join([os.path.join(k, v) for k, v in custom_components.items()])} which must be executed to correctly "
+-                    f"load the model. You can inspect the repository content at {', '.join([f'https://hf.co/{pretrained_model_name}/{k}/{v}.py' for k, v in custom_components.items()])}.\n"
+-                    f"Please pass the argument `trust_remote_code=True` to allow custom code to be run."
+-                )
+ 
+             # retrieve passed components that should not be downloaded
+             pipeline_class = _get_pipeline_class(
+@@ -1711,6 +1700,7 @@ class DiffusionPipeline(ConfigMixin, PushToHubMixin):
+                 class_name=custom_class_name,
+                 cache_dir=cache_dir,
+                 revision=custom_revision,
++                trust_remote_code=trust_remote_code,
+             )
+             expected_components, _ = cls._get_signature_keys(pipeline_class)
+             passed_components = [k for k in expected_components if k in kwargs]
+@@ -2127,13 +2117,16 @@ class DiffusionPipeline(ConfigMixin, PushToHubMixin):
+ 
+         original_config = dict(pipeline.config)
+         torch_dtype = kwargs.pop("torch_dtype", torch.float32)
++        trust_remote_code = kwargs.pop("trust_remote_code", False)
+ 
+         # derive the pipeline class to instantiate
+         custom_pipeline = kwargs.pop("custom_pipeline", None)
+         custom_revision = kwargs.pop("custom_revision", None)
+ 
+         if custom_pipeline is not None:
+-            pipeline_class = _get_custom_pipeline_class(custom_pipeline, revision=custom_revision)
++            pipeline_class = _get_custom_pipeline_class(
++                custom_pipeline, revision=custom_revision, trust_remote_code=trust_remote_code
++            )
+         else:
+             pipeline_class = cls
+ 
+diff --git a/src/diffusers/utils/dynamic_modules_utils.py b/src/diffusers/utils/dynamic_modules_utils.py
+index 856966dd..46aeb514 100644
+--- a/src/diffusers/utils/dynamic_modules_utils.py
++++ b/src/diffusers/utils/dynamic_modules_utils.py
+@@ -254,6 +254,7 @@ def get_cached_module_file(
+     revision: str | None = None,
+     local_files_only: bool = False,
+     local_dir: str | None = None,
++    trust_remote_code: bool = False,
+ ):
+     """
+     Prepares Downloads a module from a local folder or a distant repo and returns its path inside the cached
+@@ -289,6 +290,10 @@ def get_cached_module_file(
+             identifier allowed by git.
+         local_files_only (`bool`, *optional*, defaults to `False`):
+             If `True`, will only try to load the tokenizer configuration from local files.
++        trust_remote_code (`bool`, *optional*, defaults to `False`):
++            Whether or not to allow for custom pipelines and components defined on the Hub in their own files. This
++            option should only be set to `True` for repositories you trust and in which you have read the code, as it
++            will execute code present on the Hub on your local machine.
+ 
+     > [!TIP] > You may pass a token in `token` if you are not logged in (`hf auth login`) and want to use private or
+     [gated > models](https://huggingface.co/docs/hub/models-gated#gated-models).
+@@ -299,15 +304,29 @@ def get_cached_module_file(
+     # Download and cache module_file from the repo `pretrained_model_name_or_path` of grab it if it's a local file.
+     pretrained_model_name_or_path = str(pretrained_model_name_or_path)
+ 
++    if DIFFUSERS_DISABLE_REMOTE_CODE:
++        raise ValueError(
++            "Downloading remote code is disabled globally via the DIFFUSERS_DISABLE_REMOTE_CODE environment variable."
++        )
++
+     if subfolder is not None:
+         module_file_or_url = os.path.join(pretrained_model_name_or_path, subfolder, module_file)
+     else:
+         module_file_or_url = os.path.join(pretrained_model_name_or_path, module_file)
+ 
+-    if os.path.isfile(module_file_or_url):
++    is_local_file = os.path.isfile(module_file_or_url)
++    is_community_pipeline = not is_local_file and pretrained_model_name_or_path.count("/") == 0
++
++    if is_local_file:
+         resolved_module_file = module_file_or_url
+         submodule = "local"
+-    elif pretrained_model_name_or_path.count("/") == 0:
++        if not trust_remote_code:
++            raise ValueError(
++                f"The directory {pretrained_model_name_or_path} contains custom code in {module_file} which must be executed to correctly "
++                f"load the model. You can inspect the file content at {module_file_or_url}.\n"
++                f"Pass `trust_remote_code=True` to allow loading remote code modules."
++            )
++    elif is_community_pipeline:
+         available_versions = get_diffusers_versions()
+         # cut ".dev0"
+         latest_version = "v" + ".".join(__version__.split(".")[:3])
+@@ -349,6 +368,12 @@ def get_cached_module_file(
+             logger.error(f"Could not locate the {module_file} inside {pretrained_model_name_or_path}.")
+             raise
+     else:
++        if not trust_remote_code:
++            raise ValueError(
++                f"The repository for {pretrained_model_name_or_path} contains custom code in {module_file} which must be executed to correctly "
++                f"load the model. You can inspect the repository content at https://hf.co/{pretrained_model_name_or_path}/blob/main/{module_file}.\n"
++                f"Pass `trust_remote_code=True` to allow loading remote code modules."
++            )
+         try:
+             # Load from URL or cache if already cached
+             resolved_module_file = hf_hub_download(
+@@ -426,6 +451,7 @@ def get_cached_module_file(
+                     revision=revision,
+                     local_files_only=local_files_only,
+                     local_dir=local_dir,
++                    trust_remote_code=trust_remote_code,
+                 )
+     return os.path.join(full_submodule, module_file)
+ 
+@@ -443,6 +469,7 @@ def get_class_from_dynamic_module(
+     revision: str | None = None,
+     local_files_only: bool = False,
+     local_dir: str | None = None,
++    trust_remote_code: bool = False,
+ ):
+     """
+     Extracts a class from a module file, present in the local folder or repository of a model.
+@@ -482,6 +509,10 @@ def get_class_from_dynamic_module(
+             identifier allowed by git.
+         local_files_only (`bool`, *optional*, defaults to `False`):
+             If `True`, will only try to load the tokenizer configuration from local files.
++        trust_remote_code (`bool`, *optional*, defaults to `False`):
++            Whether or not to allow for custom pipelines and components defined on the Hub in their own files. This
++            option should only be set to `True` for repositories you trust and in which you have read the code, as it
++            will execute code present on the Hub on your local machine.
+ 
+     > [!TIP] > You may pass a token in `token` if you are not logged in (`hf auth login`) and want to use private or
+     [gated > models](https://huggingface.co/docs/hub/models-gated#gated-models).
+@@ -508,5 +539,6 @@ def get_class_from_dynamic_module(
+         revision=revision,
+         local_files_only=local_files_only,
+         local_dir=local_dir,
++        trust_remote_code=trust_remote_code,
+     )
+     return get_class_in_module(class_name, final_module)
+diff --git a/tests/models/test_models_auto.py b/tests/models/test_models_auto.py
+index e35fb265..570c0bfb 100644
+--- a/tests/models/test_models_auto.py
++++ b/tests/models/test_models_auto.py
+@@ -99,6 +99,7 @@ class TestAutoModelFromConfig(unittest.TestCase):
+             importable_classes=unittest.mock.ANY,
+             pipelines=None,
+             is_pipeline_module=False,
++            trust_remote_code=False,
+         )
+         mock_get_class.return_value[0].from_config.assert_called_once_with(config)
+         assert result is mock_model
+@@ -139,6 +140,7 @@ class TestAutoModelFromConfig(unittest.TestCase):
+             importable_classes=unittest.mock.ANY,
+             pipelines=None,
+             is_pipeline_module=False,
++            trust_remote_code=False,
+         )
+         assert result is mock_model
+ 
+diff --git a/tests/pipelines/test_pipelines.py b/tests/pipelines/test_pipelines.py
+index 81c90bc5..1df2cfa5 100644
+--- a/tests/pipelines/test_pipelines.py
++++ b/tests/pipelines/test_pipelines.py
+@@ -1029,14 +1029,40 @@ class DownloadTests(unittest.TestCase):
+ 
+ class CustomPipelineTests(unittest.TestCase):
+     def test_load_custom_pipeline(self):
++        with self.assertRaises(ValueError) as cm:
++            pipeline = DiffusionPipeline.from_pretrained(
++                "google/ddpm-cifar10-32", custom_pipeline="hf-internal-testing/diffusers-dummy-pipeline"
++            )
++        self.assertIn(
++            "Pass `trust_remote_code=True` to allow loading remote code modules.",
++            str(cm.exception),
++        )
++
+         pipeline = DiffusionPipeline.from_pretrained(
+-            "google/ddpm-cifar10-32", custom_pipeline="hf-internal-testing/diffusers-dummy-pipeline"
++            "google/ddpm-cifar10-32",
++            custom_pipeline="hf-internal-testing/diffusers-dummy-pipeline",
++            trust_remote_code=True,
+         )
+         pipeline = pipeline.to(torch_device)
+         # NOTE that `"CustomPipeline"` is not a class that is defined in this library, but solely on the Hub
+         # under https://huggingface.co/hf-internal-testing/diffusers-dummy-pipeline/blob/main/pipeline.py#L24
+         assert pipeline.__class__.__name__ == "CustomPipeline"
+ 
++    def test_global_disable_remote_code(self):
++        with (
++            mock.patch("diffusers.utils.dynamic_modules_utils.DIFFUSERS_DISABLE_REMOTE_CODE", True),
++            self.assertRaises(ValueError) as cm,
++        ):
++            DiffusionPipeline.from_pretrained(
++                "google/ddpm-cifar10-32",
++                custom_pipeline="one_step_unet",
++                custom_revision="main",
++            )
++        self.assertIn(
++            "Downloading remote code is disabled globally via the DIFFUSERS_DISABLE_REMOTE_CODE environment variable.",
++            str(cm.exception),
++        )
++
+     def test_load_custom_github(self):
+         pipeline = DiffusionPipeline.from_pretrained(
+             "google/ddpm-cifar10-32", custom_pipeline="one_step_unet", custom_revision="main"
+@@ -1063,8 +1089,19 @@ class CustomPipelineTests(unittest.TestCase):
+         assert pipeline.__class__.__name__ == "UnetSchedulerOneForwardPipeline"
+ 
+     def test_run_custom_pipeline(self):
++        with self.assertRaises(ValueError) as cm:
++            pipeline = DiffusionPipeline.from_pretrained(
++                "google/ddpm-cifar10-32", custom_pipeline="hf-internal-testing/diffusers-dummy-pipeline"
++            )
++        self.assertIn(
++            "Pass `trust_remote_code=True` to allow loading remote code modules.",
++            str(cm.exception),
++        )
++
+         pipeline = DiffusionPipeline.from_pretrained(
+-            "google/ddpm-cifar10-32", custom_pipeline="hf-internal-testing/diffusers-dummy-pipeline"
++            "google/ddpm-cifar10-32",
++            custom_pipeline="hf-internal-testing/diffusers-dummy-pipeline",
++            trust_remote_code=True,
+         )
+         pipeline = pipeline.to(torch_device)
+         images, output_str = pipeline(num_inference_steps=2, output_type="np")
+@@ -1076,8 +1113,12 @@ class CustomPipelineTests(unittest.TestCase):
+ 
+     def test_remote_components(self):
+         # make sure that trust remote code has to be passed
+-        with self.assertRaises(ValueError):
++        with self.assertRaises(ValueError) as cm:
+             pipeline = DiffusionPipeline.from_pretrained("hf-internal-testing/tiny-sdxl-custom-components")
++        self.assertIn(
++            "Pass `trust_remote_code=True` to allow loading remote code modules.",
++            str(cm.exception),
++        )
+ 
+         # Check that only loading custom components "my_unet", "my_scheduler" works
+         pipeline = DiffusionPipeline.from_pretrained(
+@@ -1107,10 +1148,49 @@ class CustomPipelineTests(unittest.TestCase):
+ 
+         assert images.shape == (1, 64, 64, 3)
+ 
++    def test_custom_components_from_local_dir(self):
++        with tempfile.TemporaryDirectory() as tmpdirname:
++            path = snapshot_download("hf-internal-testing/tiny-sdxl-custom-components", cache_dir=tmpdirname)
++            # make sure that trust remote code has to be passed
++            with self.assertRaises(ValueError) as cm:
++                pipeline = DiffusionPipeline.from_pretrained(path)
++            self.assertIn(
++                "Pass `trust_remote_code=True` to allow loading remote code modules.",
++                str(cm.exception),
++            )
++
++            # Check that only loading custom components "my_unet", "my_scheduler" works
++            pipeline = DiffusionPipeline.from_pretrained(path, trust_remote_code=True)
++
++            assert pipeline.config.unet == ("diffusers_modules.local.my_unet_model", "MyUNetModel")
++            assert pipeline.config.scheduler == ("diffusers_modules.local.my_scheduler", "MyScheduler")
++            assert pipeline.__class__.__name__ == "StableDiffusionXLPipeline"
++
++            pipeline = pipeline.to(torch_device)
++            images = pipeline("test", num_inference_steps=2, output_type="np")[0]
++
++            assert images.shape == (1, 64, 64, 3)
++
++            # Check that only loading custom components "my_unet", "my_scheduler" and explicit custom pipeline works
++            pipeline = DiffusionPipeline.from_pretrained(path, custom_pipeline="my_pipeline", trust_remote_code=True)
++
++            assert pipeline.config.unet == ("diffusers_modules.local.my_unet_model", "MyUNetModel")
++            assert pipeline.config.scheduler == ("diffusers_modules.local.my_scheduler", "MyScheduler")
++            assert pipeline.__class__.__name__ == "MyPipeline"
++
++            pipeline = pipeline.to(torch_device)
++            images = pipeline("test", num_inference_steps=2, output_type="np")[0]
++
++            assert images.shape == (1, 64, 64, 3)
++
+     def test_remote_auto_custom_pipe(self):
+         # make sure that trust remote code has to be passed
+-        with self.assertRaises(ValueError):
++        with self.assertRaises(ValueError) as cm:
+             pipeline = DiffusionPipeline.from_pretrained("hf-internal-testing/tiny-sdxl-custom-all")
++        self.assertIn(
++            "Pass `trust_remote_code=True` to allow loading remote code modules.",
++            str(cm.exception),
++        )
+ 
+         # Check that only loading custom components "my_unet", "my_scheduler" and auto custom pipeline works
+         pipeline = DiffusionPipeline.from_pretrained(
+@@ -1128,8 +1208,12 @@ class CustomPipelineTests(unittest.TestCase):
+ 
+     def test_remote_custom_pipe_with_dot_in_name(self):
+         # make sure that trust remote code has to be passed
+-        with self.assertRaises(ValueError):
++        with self.assertRaises(ValueError) as cm:
+             pipeline = DiffusionPipeline.from_pretrained("akasharidas/ddpm-cifar10-32-dot.in.name")
++        self.assertIn(
++            "Pass `trust_remote_code=True` to allow loading remote code modules.",
++            str(cm.exception),
++        )
+ 
+         pipeline = DiffusionPipeline.from_pretrained("akasharidas/ddpm-cifar10-32-dot.in.name", trust_remote_code=True)
+ 
+@@ -1143,8 +1227,17 @@ class CustomPipelineTests(unittest.TestCase):
+ 
+     def test_local_custom_pipeline_repo(self):
+         local_custom_pipeline_path = get_tests_dir("fixtures/custom_pipeline")
++        with self.assertRaises(ValueError) as cm:
++            pipeline = DiffusionPipeline.from_pretrained(
++                "google/ddpm-cifar10-32", custom_pipeline=local_custom_pipeline_path
++            )
++        self.assertIn(
++            "Pass `trust_remote_code=True` to allow loading remote code modules.",
++            str(cm.exception),
++        )
++
+         pipeline = DiffusionPipeline.from_pretrained(
+-            "google/ddpm-cifar10-32", custom_pipeline=local_custom_pipeline_path
++            "google/ddpm-cifar10-32", custom_pipeline=local_custom_pipeline_path, trust_remote_code=True
+         )
+         pipeline = pipeline.to(torch_device)
+         images, output_str = pipeline(num_inference_steps=2, output_type="np")
+@@ -1157,8 +1250,19 @@ class CustomPipelineTests(unittest.TestCase):
+     def test_local_custom_pipeline_file(self):
+         local_custom_pipeline_path = get_tests_dir("fixtures/custom_pipeline")
+         local_custom_pipeline_path = os.path.join(local_custom_pipeline_path, "what_ever.py")
++        with self.assertRaises(ValueError) as cm:
++            pipeline = DiffusionPipeline.from_pretrained(
++                "google/ddpm-cifar10-32", custom_pipeline=local_custom_pipeline_path
++            )
++        self.assertIn(
++            "Pass `trust_remote_code=True` to allow loading remote code modules.",
++            str(cm.exception),
++        )
++
+         pipeline = DiffusionPipeline.from_pretrained(
+-            "google/ddpm-cifar10-32", custom_pipeline=local_custom_pipeline_path
++            "google/ddpm-cifar10-32",
++            custom_pipeline=local_custom_pipeline_path,
++            trust_remote_code=True,
+         )
+         pipeline = pipeline.to(torch_device)
+         images, output_str = pipeline(num_inference_steps=2, output_type="np")

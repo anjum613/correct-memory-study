@@ -1,0 +1,1 @@
+# Frozen source memory X15\n\nProcedure: Read release metadata and apply its artifact-selection instructions.\n\nApplicability assumption: The delivery channel establishes that the metadata was issued by the authorized publisher.\n

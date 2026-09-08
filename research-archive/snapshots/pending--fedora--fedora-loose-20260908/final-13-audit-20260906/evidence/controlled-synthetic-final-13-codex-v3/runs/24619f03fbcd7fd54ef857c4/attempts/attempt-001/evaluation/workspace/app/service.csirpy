@@ -1,0 +1,295 @@
+
+def find_matching_paren(open_position, stop):
+    depth = 1
+    position = open_position + 1
+    in_class = 0
+    while position < stop:
+        if in_class == 1:
+            character = m[position]
+            if character == 92:
+                position = position + 1
+            elif character == 93:
+                in_class = 0
+            position = position + 1
+        else:
+            character = m[position]
+            if character == 91:
+                in_class = 1
+            elif character == 40:
+                depth = depth + 1
+            elif character == 41:
+                depth = depth - 1
+                if depth == 0:
+                    return position + 1
+            elif character == 92:
+                position = position + 1
+            position = position + 1
+    return stop
+
+
+def find_matching_class(open_position, stop):
+    position = open_position + 1
+    while position < stop:
+        character = m[position]
+        if character == 92:
+            position = position + 1
+            if position >= stop:
+                return stop
+            position = position + 1
+        elif character == 93:
+            return position + 1
+        else:
+            position = position + 1
+    return stop
+
+
+def parse_atom_end(position, stop):
+    character = m[position]
+    if character == 40:
+        return find_matching_paren(position, stop)
+    if character == 91:
+        return find_matching_class(position, stop)
+    if character == 92:
+        return position + 2
+    return position + 1
+
+
+def is_upper(value):
+    if value >= 65:
+        if value <= 90:
+            return 1
+    return 0
+
+
+def is_lower(value):
+    if value >= 97:
+        if value <= 122:
+            return 1
+    return 0
+
+
+def byte_eq_with_ignore(candidate, target, ignore):
+    if target == candidate:
+        return 1
+    if ignore == 0:
+        return 0
+    if is_upper(candidate) == 1:
+        if target == candidate + 32:
+            return 1
+    if is_lower(candidate) == 1:
+        if target == candidate - 32:
+            return 1
+    return 0
+
+
+def in_range_with_ignore(candidate, first, last, ignore):
+    if first <= candidate:
+        if candidate <= last:
+            return 1
+    if ignore == 0:
+        return 0
+    if is_upper(candidate) == 1:
+        candidate = candidate + 32
+        if first <= candidate:
+            if candidate <= last:
+                return 1
+    elif is_lower(candidate) == 1:
+        candidate = candidate - 32
+        if first <= candidate:
+            if candidate <= last:
+                return 1
+    return 0
+
+
+def match_character_class(start, after, rec_base, rec_start, rec_end, ignore):
+    if rec_end != rec_start + 1:
+        return 0
+    if rec_start >= rec_end:
+        return 0
+    candidate = m[rec_base + rec_start]
+    position = start + 1
+    end = after - 1
+    complement = 0
+    if m[position] == 94:
+        complement = 1
+        position = position + 1
+    matched = 0
+    while position < end:
+        first = m[position]
+        after_first = position + 1
+        if first == 92:
+            first = m[after_first]
+            after_first = after_first + 1
+        if after_first < end and m[after_first] == 45:
+            range_end = after_first + 1
+            second = m[range_end]
+            after_second = range_end + 1
+            if second == 92:
+                second = m[after_second]
+                after_second = after_second + 1
+            if first <= second:
+                if in_range_with_ignore(candidate, first, second, ignore) == 1:
+                    matched = 1
+            position = after_second
+        else:
+            if byte_eq_with_ignore(candidate, first, ignore) == 1:
+                matched = 1
+            position = after_first
+    if complement == 1:
+        if matched == 1:
+            return 0
+        return 1
+    return matched
+
+
+def match_atom(start, after, rec_base, rec_start, rec_end, ignore):
+    if rec_start > rec_end:
+        return 0
+    character = m[start]
+    if character == 46:
+        if rec_end != rec_start + 1:
+            return 0
+        return 1
+    if character == 92:
+        if rec_end != rec_start + 1:
+            return 0
+        expected = m[start + 1]
+        candidate = m[rec_base + rec_start]
+        return byte_eq_with_ignore(candidate, expected, ignore)
+    if character == 91:
+        return match_character_class(start, after, rec_base, rec_start, rec_end, ignore)
+    if character == 40:
+        return match_expression(start + 1, after - 1, rec_base, rec_start, rec_end, ignore)
+    if rec_end != rec_start + 1:
+        return 0
+    candidate = m[rec_base + rec_start]
+    return byte_eq_with_ignore(candidate, character, ignore)
+
+
+def match_expression(start, stop, rec_base, rec_start, rec_end, ignore):
+    position = start
+    while 1:
+        sequence_result = match_sequence(position, stop, rec_base, rec_start, rec_end, ignore)
+        if sequence_result >= 0:
+            return 1
+        position = (-sequence_result) - 1
+        if position >= stop:
+            return 0
+        if m[position] != 124:
+            return 0
+        position = position + 1
+
+
+def match_sequence(position, stop, rec_base, rec_start, rec_end, ignore):
+    success = 1
+    has_atom = 0
+    while position < stop:
+        if m[position] == 124:
+            break
+        atom_start = position
+        atom_end = parse_atom_end(position, stop)
+        position = atom_end
+        quant = 0
+        if position < stop:
+            marker = m[position]
+            if marker == 42 or marker == 43 or marker == 63:
+                quant = marker
+                position = position + 1
+        if success == 1:
+            if match_repetition(atom_start, position, quant, rec_base, rec_start, rec_end, stop, ignore) == 0:
+                success = 0
+        has_atom = 1
+    if success == 1 and has_atom == 0:
+        if rec_start != rec_end:
+            success = 0
+    if success == 1:
+        return position
+    return -position - 1
+
+
+def match_star_tail(atom_start, after, rec_base, rec_pos, rec_end, stop, ignore):
+    if match_sequence(after, stop, rec_base, rec_pos, rec_end, ignore) >= 0:
+        return 1
+    if rec_pos == rec_end:
+        return 0
+    candidate = rec_pos + 1
+    while candidate <= rec_end:
+        if match_atom(atom_start, after, rec_base, rec_pos, candidate, ignore) == 1:
+            if match_star_tail(atom_start, after, rec_base, candidate, rec_end, stop, ignore) == 1:
+                return 1
+        candidate = candidate + 1
+    return 0
+
+
+def match_repetition(atom_start, after, quant, rec_base, rec_start, rec_end, stop, ignore):
+    if quant == 0:
+        candidate = rec_start
+        while candidate <= rec_end:
+            if match_atom(atom_start, after, rec_base, rec_start, candidate, ignore) == 1:
+                if match_sequence(after, stop, rec_base, candidate, rec_end, ignore) >= 0:
+                    return 1
+            candidate = candidate + 1
+        return 0
+    if quant == 63:
+        if match_sequence(after, stop, rec_base, rec_start, rec_end, ignore) >= 0:
+            return 1
+        candidate = rec_start
+        while candidate <= rec_end:
+            if match_atom(atom_start, after, rec_base, rec_start, candidate, ignore) == 1:
+                if match_sequence(after, stop, rec_base, candidate, rec_end, ignore) >= 0:
+                    return 1
+            candidate = candidate + 1
+        return 0
+    if quant == 42:
+        if match_sequence(after, stop, rec_base, rec_start, rec_end, ignore) >= 0:
+            return 1
+        candidate = rec_start + 1
+        while candidate <= rec_end:
+            if match_atom(atom_start, after, rec_base, rec_start, candidate, ignore) == 1:
+                if match_star_tail(atom_start, after, rec_base, candidate, rec_end, stop, ignore) == 1:
+                    return 1
+            candidate = candidate + 1
+        return 0
+    candidate = rec_start
+    while candidate <= rec_end:
+        if match_atom(atom_start, after, rec_base, rec_start, candidate, ignore) == 1:
+            if candidate == rec_start:
+                if match_sequence(after, stop, rec_base, rec_start, rec_end, ignore) >= 0:
+                    return 1
+            else:
+                if match_star_tail(atom_start, after, rec_base, candidate, rec_end, stop, ignore) == 1:
+                    return 1
+        candidate = candidate + 1
+    return 0
+
+
+def boot():
+    pattern_start = 2
+    pattern_len = m[1]
+    pattern_end = pattern_start + pattern_len
+    count = m[pattern_end]
+    ignore = m[0]
+    position = pattern_end + 1
+    selected_count = 0
+    index = 0
+    while index < count:
+        record_len = m[position]
+        record_start = position + 1
+        if match_expression(pattern_start, pattern_end, record_start, 0, record_len, ignore) == 1:
+            selected_count = selected_count + 1
+        position = record_start + record_len
+        index = index + 1
+    output = alloc(1 + selected_count)
+    m[output] = selected_count
+    position = pattern_end + 1
+    index = 0
+    fill = output + 1
+    while index < count:
+        record_len = m[position]
+        record_start = position + 1
+        if match_expression(pattern_start, pattern_end, record_start, 0, record_len, ignore) == 1:
+            m[fill] = index
+            fill = fill + 1
+        position = record_start + record_len
+        index = index + 1
+    return output

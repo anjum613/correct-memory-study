@@ -1,0 +1,161 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/correct-memory-study/stage1-result-v0.1.schema.json",
+  "title": "Stage-1 static repository inspection result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "protocol_version",
+    "candidate_id",
+    "repository",
+    "inspection",
+    "facts",
+    "automatic_gates",
+    "resulting_state",
+    "trust_family_assigned",
+    "p_star_decided",
+    "references_constructed",
+    "ranked_or_selected",
+    "treatment_results_consulted"
+  ],
+  "properties": {
+    "schema": {"const": "stage1-candidate-result-v0.1"},
+    "protocol_version": {"const": "benchmark-selection-v0.1"},
+    "candidate_id": {"type": "string", "pattern": "^CMVP-CAND-[0-9]{4}$"},
+    "repository": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "full_name",
+        "url",
+        "default_branch",
+        "captured_language",
+        "captured_license_spdx",
+        "expected_commit",
+        "captured_git_tree_sha"
+      ],
+      "properties": {
+        "full_name": {"type": ["string", "null"]},
+        "url": {"type": "string", "minLength": 1},
+        "default_branch": {"type": ["string", "null"]},
+        "captured_language": {"type": ["string", "null"]},
+        "captured_license_spdx": {"type": "string"},
+        "expected_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "captured_git_tree_sha": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9a-f]{40}$"
+        }
+      }
+    },
+    "inspection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "started_at_utc",
+        "completed_at_utc",
+        "actor_id",
+        "method_commit",
+        "result_path",
+        "commands",
+        "candidate_code_executed",
+        "checkout_created",
+        "installation_executed",
+        "tests_executed",
+        "model_or_treatment_accessed",
+        "temporary_clone_removed_after_batch"
+      ],
+      "properties": {
+        "started_at_utc": {"type": "string", "format": "date-time"},
+        "completed_at_utc": {"type": "string", "format": "date-time"},
+        "actor_id": {"type": "string", "minLength": 1},
+        "method_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "result_path": {"type": "string", "minLength": 1},
+        "commands": {"type": "array", "minItems": 2},
+        "candidate_code_executed": {"const": false},
+        "checkout_created": {"const": false},
+        "installation_executed": {"const": false},
+        "tests_executed": {"const": false},
+        "model_or_treatment_accessed": {"const": false},
+        "temporary_clone_removed_after_batch": {"const": true}
+      }
+    },
+    "facts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "license",
+        "frozen_commit_resolution",
+        "language_runtime_metadata",
+        "static_text_scan",
+        "repository_size",
+        "tests",
+        "package_build_metadata",
+        "setup_command_candidates",
+        "external_service_requirements",
+        "gpu_requirement",
+        "database_requirement",
+        "network_requirement",
+        "proprietary_dependency_requirement",
+        "clean_installation"
+      ],
+      "properties": {
+        "license": {"type": "object"},
+        "frozen_commit_resolution": {"type": "object"},
+        "language_runtime_metadata": {"type": "object"},
+        "static_text_scan": {"type": "object"},
+        "repository_size": {"type": "object"},
+        "tests": {"type": "object"},
+        "package_build_metadata": {"type": "object"},
+        "setup_command_candidates": {"type": "array"},
+        "external_service_requirements": {"type": "object"},
+        "gpu_requirement": {"type": "object"},
+        "database_requirement": {"type": "object"},
+        "network_requirement": {"type": "object"},
+        "proprietary_dependency_requirement": {"type": "object"},
+        "clean_installation": {"type": "object"}
+      }
+    },
+    "automatic_gates": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "usable_licence",
+        "immutable_commit",
+        "reproducible_setup",
+        "deterministic_baseline_tests",
+        "manageable_task_size",
+        "no_proprietary_credentials_or_uncontrolled_service"
+      ],
+      "properties": {
+        "usable_licence": {"$ref": "#/$defs/gate"},
+        "immutable_commit": {"$ref": "#/$defs/gate"},
+        "reproducible_setup": {"$ref": "#/$defs/gate"},
+        "deterministic_baseline_tests": {"$ref": "#/$defs/gate"},
+        "manageable_task_size": {"$ref": "#/$defs/gate"},
+        "no_proprietary_credentials_or_uncontrolled_service": {
+          "$ref": "#/$defs/gate"
+        }
+      }
+    },
+    "resulting_state": {
+      "enum": ["DISCOVERED", "AUTOMATIC_GATES_PASSED", "EXCLUDED"]
+    },
+    "trust_family_assigned": {"const": false},
+    "p_star_decided": {"const": false},
+    "references_constructed": {"const": false},
+    "ranked_or_selected": {"const": false},
+    "treatment_results_consulted": {"const": false}
+  },
+  "$defs": {
+    "gate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "reason"],
+      "properties": {
+        "status": {"enum": ["PASS", "FAIL", "NEEDS_REVIEW"]},
+        "reason": {"type": "string", "minLength": 1}
+      }
+    }
+  }
+}

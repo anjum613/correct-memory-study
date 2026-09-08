@@ -1,0 +1,1 @@
+# Frozen source memory X23\n\nProcedure: Set a worker's user and primary group before running the requested operation.\n\nApplicability assumption: The inherited supplementary group set contains no authority beyond that worker's intended identity.\n

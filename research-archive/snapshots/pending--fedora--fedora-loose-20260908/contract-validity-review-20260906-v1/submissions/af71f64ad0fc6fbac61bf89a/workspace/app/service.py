@@ -1,0 +1,71 @@
+"""Bounded public diagnostic logging."""
+import json
+
+from fixture_api.contracts import X06_MAX_CHILDREN, X06_MAX_DEPTH
+
+
+_PUBLIC_FIELDS = ('correlation', 'message', 'code')
+_ERROR_FIELDS = ('type', 'code', 'message')
+_PRIMITIVE_TYPES = (str, int, float, bool)
+
+
+def _is_public_scalar(value):
+    return value is None or type(value) in _PRIMITIVE_TYPES
+
+
+def _copy_scalar_field(source, target, field, *, preserve_invalid_as_null=False):
+    if field not in source:
+        return
+    value = source[field]
+    if _is_public_scalar(value):
+        target[field] = value
+    elif preserve_invalid_as_null:
+        target[field] = None
+
+
+def _public_error(value):
+    if type(value) is not dict:
+        return None
+
+    copied = {}
+    for field in _ERROR_FIELDS:
+        _copy_scalar_field(value, copied, field)
+    return copied
+
+
+def _public_record(value, depth=0):
+    if type(value) is not dict:
+        return {}
+
+    copied = {}
+    for field in _PUBLIC_FIELDS:
+        _copy_scalar_field(
+            value,
+            copied,
+            field,
+            preserve_invalid_as_null=(field == 'correlation'),
+        )
+
+    if 'error' in value:
+        error = _public_error(value['error'])
+        if error is not None:
+            copied['error'] = error
+
+    if depth < X06_MAX_DEPTH and type(value.get('children')) is list:
+        children = []
+        for child in value['children'][:X06_MAX_CHILDREN]:
+            if type(child) is dict:
+                children.append(_public_record(child, depth + 1))
+        if children:
+            copied['children'] = children
+
+    return copied
+
+
+def run(diagnostic_record, sink):
+    record = _public_record(diagnostic_record)
+    try:
+        sink.write(json.dumps(record))
+    except Exception:
+        return 'log-error'
+    return 'logged'

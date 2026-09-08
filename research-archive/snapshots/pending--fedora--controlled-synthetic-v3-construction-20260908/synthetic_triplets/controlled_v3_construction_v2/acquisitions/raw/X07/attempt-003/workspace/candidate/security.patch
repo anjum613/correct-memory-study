@@ -1,0 +1,27 @@
+diff --git a/app/service.py b/app/service.py
+--- a/app/service.py
++++ b/app/service.py
+@@ -1,4 +1,4 @@
+-"""Decode supported internal records using the producer's reconstruction hook."""
++"""Interpret supported records as data without invoking object reconstruction."""
+ import math
+ 
+ from fixture_api.contracts import X07_MAX_DEPTH, X07_MAX_ITEMS, X07_VERSIONS
+@@ -26,6 +26,8 @@
+         for name, item in value.items():
+             if type(name) is not str:
+                 raise ValueError('field name')
++            if name == '$construct':
++                raise ValueError('object reconstruction is outside the data schema')
+             _validate_data(item, depth + 1)
+         return
+     raise ValueError('unsupported data')
+@@ -38,7 +40,7 @@
+             raise ValueError('record fields')
+         if type(record['version']) is not int or record['version'] not in X07_VERSIONS:
+             raise ValueError('unsupported version')
+-        data = decoder.reconstruct(record['data'])
++        data = record['data']
+         _validate_data(data)
+         return ('ok', data)
+     except (ValueError, TypeError, UnicodeError, RecursionError):

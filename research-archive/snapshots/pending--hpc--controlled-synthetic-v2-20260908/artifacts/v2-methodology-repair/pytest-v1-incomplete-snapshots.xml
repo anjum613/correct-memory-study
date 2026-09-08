@@ -1,0 +1,562 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="12" skipped="0" tests="18" time="2.569" timestamp="2026-09-01T23:34:38.010095+10:00" hostname="hpc"><testcase classname="tests.test_aim_backend" name="test_checked_in_frozen_package_builds" time="0.090"><failure message="cmpilot.aim_backend.AimBackendError: Aim package compatible_repository path hash mismatch">def test_checked_in_frozen_package_builds() -&gt; None:
+        context = _family_context(FAMILY)
+&gt;       backend = build_aim_backend(
+            context,
+            package_root=FAMILY,
+            evaluator_python=Path(__import__("sys").executable).resolve(),
+        )
+
+tests/test_aim_backend.py:137:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+src/cmpilot/aim_backend.py:704: in build_aim_backend
+    return AimScientificOperations(
+src/cmpilot/aim_backend.py:153: in __init__
+    self._validate_package_inputs()
+src/cmpilot/aim_backend.py:273: in _validate_package_inputs
+    self._validate_declared_hashes()
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = &lt;cmpilot.aim_backend.AimScientificOperations object at 0x7f15834be540&gt;
+
+    def _validate_declared_hashes(self) -&gt; None:
+        path_hash_keys = (
+            ("path", "sha256"),
+            ("manifest_path", "manifest_sha256"),
+            ("support_path", "support_sha256"),
+            ("provenance_path", "provenance_sha256"),
+        )
+        for name, raw in _mapping(
+            self.package.get("inputs"), "family package inputs"
+        ).items():
+            record = _mapping(raw, f"family package inputs.{name}")
+            for path_key, hash_key in path_hash_keys:
+                if path_key not in record:
+                    continue
+                relative = record.get(path_key)
+                expected = record.get(hash_key)
+                if relative is None and expected is None:
+                    continue
+                if not isinstance(relative, str) or not isinstance(expected, str):
+                    raise AimBackendError(
+                        f"Aim package {name} {path_key}/{hash_key} is invalid"
+                    )
+                path = self._fixed_path(relative)
+                observed = (
+                    repository_content_digest(path).sha256
+                    if path.is_dir()
+                    else sha256_file(path)
+                )
+                if observed != expected:
+&gt;                   raise AimBackendError(f"Aim package {name} {path_key} hash mismatch")
+E                   cmpilot.aim_backend.AimBackendError: Aim package compatible_repository path hash mismatch
+
+src/cmpilot/aim_backend.py:270: AimBackendError</failure></testcase><testcase classname="tests.test_aim_backend" name="test_shared_runner_exercises_candidate_backend_with_stub_model" time="0.280"><failure message="cmpilot.aim_backend.AimBackendError: Aim package compatible_repository path hash mismatch">tmp_path = PosixPath('/tmp/pytest-of-s224049759/pytest-781/test_shared_runner_exercises_c0')
+
+    def test_shared_runner_exercises_candidate_backend_with_stub_model(
+        tmp_path: Path,
+    ) -&gt; None:
+        package, context = _frozen_fixture(tmp_path)
+        request = _request(tmp_path, context)
+&gt;       backend = AimScientificOperations(
+            context,
+            package_root=package,
+            evaluator_python=Path(__import__("sys").executable).resolve(),
+        )
+
+tests/test_aim_backend.py:150:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+src/cmpilot/aim_backend.py:153: in __init__
+    self._validate_package_inputs()
+src/cmpilot/aim_backend.py:273: in _validate_package_inputs
+    self._validate_declared_hashes()
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = &lt;cmpilot.aim_backend.AimScientificOperations object at 0x7f1582aae720&gt;
+
+    def _validate_declared_hashes(self) -&gt; None:
+        path_hash_keys = (
+            ("path", "sha256"),
+            ("manifest_path", "manifest_sha256"),
+            ("support_path", "support_sha256"),
+            ("provenance_path", "provenance_sha256"),
+        )
+        for name, raw in _mapping(
+            self.package.get("inputs"), "family package inputs"
+        ).items():
+            record = _mapping(raw, f"family package inputs.{name}")
+            for path_key, hash_key in path_hash_keys:
+                if path_key not in record:
+                    continue
+                relative = record.get(path_key)
+                expected = record.get(hash_key)
+                if relative is None and expected is None:
+                    continue
+                if not isinstance(relative, str) or not isinstance(expected, str):
+                    raise AimBackendError(
+                        f"Aim package {name} {path_key}/{hash_key} is invalid"
+                    )
+                path = self._fixed_path(relative)
+                observed = (
+                    repository_content_digest(path).sha256
+                    if path.is_dir()
+                    else sha256_file(path)
+                )
+                if observed != expected:
+&gt;                   raise AimBackendError(f"Aim package {name} {path_key} hash mismatch")
+E                   cmpilot.aim_backend.AimBackendError: Aim package compatible_repository path hash mismatch
+
+src/cmpilot/aim_backend.py:270: AimBackendError</failure></testcase><testcase classname="tests.test_aim_backend" name="test_package_or_oracle_tamper_is_rejected" time="0.273"><failure message="cmpilot.aim_backend.AimBackendError: Aim package compatible_repository path hash mismatch">tmp_path = PosixPath('/tmp/pytest-of-s224049759/pytest-781/test_package_or_oracle_tamper_0')
+
+    def test_package_or_oracle_tamper_is_rejected(tmp_path: Path) -&gt; None:
+        package, context = _frozen_fixture(tmp_path)
+        request = _request(tmp_path, context)
+&gt;       backend = AimScientificOperations(
+            context,
+            package_root=package,
+            evaluator_python=Path(__import__("sys").executable).resolve(),
+        )
+
+tests/test_aim_backend.py:173:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+src/cmpilot/aim_backend.py:153: in __init__
+    self._validate_package_inputs()
+src/cmpilot/aim_backend.py:273: in _validate_package_inputs
+    self._validate_declared_hashes()
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = &lt;cmpilot.aim_backend.AimScientificOperations object at 0x7f1582ad2b70&gt;
+
+    def _validate_declared_hashes(self) -&gt; None:
+        path_hash_keys = (
+            ("path", "sha256"),
+            ("manifest_path", "manifest_sha256"),
+            ("support_path", "support_sha256"),
+            ("provenance_path", "provenance_sha256"),
+        )
+        for name, raw in _mapping(
+            self.package.get("inputs"), "family package inputs"
+        ).items():
+            record = _mapping(raw, f"family package inputs.{name}")
+            for path_key, hash_key in path_hash_keys:
+                if path_key not in record:
+                    continue
+                relative = record.get(path_key)
+                expected = record.get(hash_key)
+                if relative is None and expected is None:
+                    continue
+                if not isinstance(relative, str) or not isinstance(expected, str):
+                    raise AimBackendError(
+                        f"Aim package {name} {path_key}/{hash_key} is invalid"
+                    )
+                path = self._fixed_path(relative)
+                observed = (
+                    repository_content_digest(path).sha256
+                    if path.is_dir()
+                    else sha256_file(path)
+                )
+                if observed != expected:
+&gt;                   raise AimBackendError(f"Aim package {name} {path_key} hash mismatch")
+E                   cmpilot.aim_backend.AimBackendError: Aim package compatible_repository path hash mismatch
+
+src/cmpilot/aim_backend.py:270: AimBackendError</failure></testcase><testcase classname="tests.test_aim_family_validation" name="test_frozen_aim_family_passes_cpu_admission" time="0.091"><failure message="scripts.validate_aim_family.AimValidationError: package input hash mismatch: repositories/compatible">def test_frozen_aim_family_passes_cpu_admission() -&gt; None:
+&gt;       result = validate(ROOT / "families/aim-v1")
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_aim_family_validation.py:12:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+scripts/validate_aim_family.py:467: in validate
+    declared = _declared_hashes(package, manifest)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+package = PosixPath('/home/s224049759/projects/correct-memory-study-worktrees/v2-methodology-repair/families/aim-v1')
+manifest = {'blockers': [], 'compatible_revision': '97a7a122a10f044f65c7fb9db0e59bacd38a1543', 'family_id': 'aim-v1', 'freeze_status': 'FROZEN', ...}
+
+    def _declared_hashes(package: Path, manifest: Mapping[str, Any]) -&gt; dict[str, Any]:
+        inputs = manifest.get("inputs")
+        if not isinstance(inputs, Mapping):
+            raise AimValidationError("family package inputs are missing")
+        path_hash_keys = (
+            ("path", "sha256"),
+            ("manifest_path", "manifest_sha256"),
+            ("support_path", "support_sha256"),
+            ("provenance_path", "provenance_sha256"),
+            ("faithful_reuse_path", "faithful_reuse_sha256"),
+            ("safe_control_path", "safe_control_sha256"),
+            ("safe_control_patch_path", "safe_control_patch_sha256"),
+        )
+        checked: dict[str, Any] = {}
+        for name, raw in inputs.items():
+            if not isinstance(raw, Mapping):
+                raise AimValidationError(f"package input {name} is not an object")
+            records: dict[str, bool] = {}
+            for path_key, hash_key in path_hash_keys:
+                if path_key not in raw:
+                    continue
+                relative = raw.get(path_key)
+                expected = raw.get(hash_key)
+                if relative is None and expected is None:
+                    records[path_key] = True
+                    continue
+                if not isinstance(relative, str) or not isinstance(expected, str):
+                    raise AimValidationError(f"invalid path/hash pair for {name}")
+                path = package / relative
+                if path.is_symlink() or not path.exists():
+                    raise AimValidationError(f"unsafe or missing package input: {relative}")
+                observed = (
+                    repository_content_digest(path).sha256 if path.is_dir() else _sha256(path)
+                )
+                if observed != expected:
+&gt;                   raise AimValidationError(f"package input hash mismatch: {relative}")
+E                   scripts.validate_aim_family.AimValidationError: package input hash mismatch: repositories/compatible
+
+scripts/validate_aim_family.py:218: AimValidationError</failure></testcase><testcase classname="tests.test_axios_backend" name="test_frozen_backend_treatment_and_evaluators[NO_MEMORY]" time="0.031"><failure message="cmpilot.axios_backend.AxiosBackendError: family package compatible_repository path hash mismatch">tmp_path = PosixPath('/tmp/pytest-of-s224049759/pytest-781/test_frozen_backend_treatment_0')
+condition = 'NO_MEMORY'
+
+    @pytest.mark.parametrize("condition", [NO_MEMORY, SOURCE_CORRECT_MEMORY])
+    def test_frozen_backend_treatment_and_evaluators(tmp_path: Path, condition: str) -&gt; None:
+        context = _context(condition)
+        request = _request(context, tmp_path / "attempt")
+&gt;       backend = AxiosScientificOperations(context)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_axios_backend.py:142:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+src/cmpilot/axios_backend.py:163: in __init__
+    self._validate_package_inputs()
+src/cmpilot/axios_backend.py:347: in _validate_package_inputs
+    self._validate_all_declared_input_hashes()
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = &lt;cmpilot.axios_backend.AxiosScientificOperations object at 0x7f15834ea660&gt;
+
+    def _validate_all_declared_input_hashes(self) -&gt; None:
+        """Verify every path/hash pair bound by the package manifest."""
+        inputs = _mapping(self.package.get("inputs"), "family package inputs")
+        path_hash_keys = (
+            ("path", "sha256"),
+            ("input_path", "input_sha256"),
+            ("manifest_path", "manifest_sha256"),
+            ("support_path", "support_sha256"),
+            ("status_path", "status_sha256"),
+            ("provenance_path", "provenance_sha256"),
+            ("source_validation_path", "source_validation_sha256"),
+            ("review_path", "review_sha256"),
+            ("faithful_reuse_path", "faithful_reuse_sha256"),
+            ("safe_control_path", "safe_control_sha256"),
+            ("safe_control_patch_path", "safe_control_patch_sha256"),
+        )
+        for input_name, raw_record in inputs.items():
+            record = _mapping(raw_record, f"family package inputs.{input_name}")
+            for path_key, hash_key in path_hash_keys:
+                if path_key not in record:
+                    continue
+                relative = record.get(path_key)
+                expected_sha256 = record.get(hash_key)
+                if relative is None and expected_sha256 is None:
+                    continue
+                if not isinstance(relative, str) or not isinstance(
+                    expected_sha256, str
+                ):
+                    raise AxiosBackendError(
+                        f"family package {input_name} {path_key}/{hash_key} "
+                        "must be strings or paired nulls"
+                    )
+                path = self._fixed_path(relative)
+                observed_sha256 = (
+                    repository_content_digest(path).sha256
+                    if path.is_dir()
+                    else sha256_file(path)
+                )
+                if observed_sha256 != expected_sha256:
+&gt;                   raise AxiosBackendError(
+                        f"family package {input_name} {path_key} hash mismatch"
+                    )
+E                   cmpilot.axios_backend.AxiosBackendError: family package compatible_repository path hash mismatch
+
+src/cmpilot/axios_backend.py:280: AxiosBackendError</failure></testcase><testcase classname="tests.test_axios_backend" name="test_frozen_backend_treatment_and_evaluators[SOURCE_CORRECT_MEMORY]" time="0.031"><failure message="cmpilot.axios_backend.AxiosBackendError: family package compatible_repository path hash mismatch">tmp_path = PosixPath('/tmp/pytest-of-s224049759/pytest-781/test_frozen_backend_treatment_1')
+condition = 'SOURCE_CORRECT_MEMORY'
+
+    @pytest.mark.parametrize("condition", [NO_MEMORY, SOURCE_CORRECT_MEMORY])
+    def test_frozen_backend_treatment_and_evaluators(tmp_path: Path, condition: str) -&gt; None:
+        context = _context(condition)
+        request = _request(context, tmp_path / "attempt")
+&gt;       backend = AxiosScientificOperations(context)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_axios_backend.py:142:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+src/cmpilot/axios_backend.py:163: in __init__
+    self._validate_package_inputs()
+src/cmpilot/axios_backend.py:347: in _validate_package_inputs
+    self._validate_all_declared_input_hashes()
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = &lt;cmpilot.axios_backend.AxiosScientificOperations object at 0x7f1582ac6900&gt;
+
+    def _validate_all_declared_input_hashes(self) -&gt; None:
+        """Verify every path/hash pair bound by the package manifest."""
+        inputs = _mapping(self.package.get("inputs"), "family package inputs")
+        path_hash_keys = (
+            ("path", "sha256"),
+            ("input_path", "input_sha256"),
+            ("manifest_path", "manifest_sha256"),
+            ("support_path", "support_sha256"),
+            ("status_path", "status_sha256"),
+            ("provenance_path", "provenance_sha256"),
+            ("source_validation_path", "source_validation_sha256"),
+            ("review_path", "review_sha256"),
+            ("faithful_reuse_path", "faithful_reuse_sha256"),
+            ("safe_control_path", "safe_control_sha256"),
+            ("safe_control_patch_path", "safe_control_patch_sha256"),
+        )
+        for input_name, raw_record in inputs.items():
+            record = _mapping(raw_record, f"family package inputs.{input_name}")
+            for path_key, hash_key in path_hash_keys:
+                if path_key not in record:
+                    continue
+                relative = record.get(path_key)
+                expected_sha256 = record.get(hash_key)
+                if relative is None and expected_sha256 is None:
+                    continue
+                if not isinstance(relative, str) or not isinstance(
+                    expected_sha256, str
+                ):
+                    raise AxiosBackendError(
+                        f"family package {input_name} {path_key}/{hash_key} "
+                        "must be strings or paired nulls"
+                    )
+                path = self._fixed_path(relative)
+                observed_sha256 = (
+                    repository_content_digest(path).sha256
+                    if path.is_dir()
+                    else sha256_file(path)
+                )
+                if observed_sha256 != expected_sha256:
+&gt;                   raise AxiosBackendError(
+                        f"family package {input_name} {path_key} hash mismatch"
+                    )
+E                   cmpilot.axios_backend.AxiosBackendError: family package compatible_repository path hash mismatch
+
+src/cmpilot/axios_backend.py:280: AxiosBackendError</failure></testcase><testcase classname="tests.test_axios_backend" name="test_shared_runner_with_dummy_model_executor" time="0.029"><failure message="cmpilot.axios_backend.AxiosBackendError: family package compatible_repository path hash mismatch">tmp_path = PosixPath('/tmp/pytest-of-s224049759/pytest-781/test_shared_runner_with_dummy_0')
+
+    def test_shared_runner_with_dummy_model_executor(tmp_path: Path) -&gt; None:
+        context = _context(NO_MEMORY)
+        request = _request(context, tmp_path / "attempt")
+&gt;       backend = AxiosScientificOperations(context)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_axios_backend.py:162:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+src/cmpilot/axios_backend.py:163: in __init__
+    self._validate_package_inputs()
+src/cmpilot/axios_backend.py:347: in _validate_package_inputs
+    self._validate_all_declared_input_hashes()
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = &lt;cmpilot.axios_backend.AxiosScientificOperations object at 0x7f1582ac7f80&gt;
+
+    def _validate_all_declared_input_hashes(self) -&gt; None:
+        """Verify every path/hash pair bound by the package manifest."""
+        inputs = _mapping(self.package.get("inputs"), "family package inputs")
+        path_hash_keys = (
+            ("path", "sha256"),
+            ("input_path", "input_sha256"),
+            ("manifest_path", "manifest_sha256"),
+            ("support_path", "support_sha256"),
+            ("status_path", "status_sha256"),
+            ("provenance_path", "provenance_sha256"),
+            ("source_validation_path", "source_validation_sha256"),
+            ("review_path", "review_sha256"),
+            ("faithful_reuse_path", "faithful_reuse_sha256"),
+            ("safe_control_path", "safe_control_sha256"),
+            ("safe_control_patch_path", "safe_control_patch_sha256"),
+        )
+        for input_name, raw_record in inputs.items():
+            record = _mapping(raw_record, f"family package inputs.{input_name}")
+            for path_key, hash_key in path_hash_keys:
+                if path_key not in record:
+                    continue
+                relative = record.get(path_key)
+                expected_sha256 = record.get(hash_key)
+                if relative is None and expected_sha256 is None:
+                    continue
+                if not isinstance(relative, str) or not isinstance(
+                    expected_sha256, str
+                ):
+                    raise AxiosBackendError(
+                        f"family package {input_name} {path_key}/{hash_key} "
+                        "must be strings or paired nulls"
+                    )
+                path = self._fixed_path(relative)
+                observed_sha256 = (
+                    repository_content_digest(path).sha256
+                    if path.is_dir()
+                    else sha256_file(path)
+                )
+                if observed_sha256 != expected_sha256:
+&gt;                   raise AxiosBackendError(
+                        f"family package {input_name} {path_key} hash mismatch"
+                    )
+E                   cmpilot.axios_backend.AxiosBackendError: family package compatible_repository path hash mismatch
+
+src/cmpilot/axios_backend.py:280: AxiosBackendError</failure></testcase><testcase classname="tests.test_axios_backend" name="test_registry_and_node_binding_fail_closed" time="0.001"><failure message="KeyError: 'axios-v1'">tmp_path = PosixPath('/tmp/pytest-of-s224049759/pytest-781/test_registry_and_node_binding0')
+
+    def test_registry_and_node_binding_fail_closed(tmp_path: Path) -&gt; None:
+&gt;       assert SCIENTIFIC_BACKENDS[AXIOS_BACKEND_ID] is build_axios_backend
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: 'axios-v1'
+
+tests/test_axios_backend.py:177: KeyError</failure></testcase><testcase classname="tests.test_httpx_backend" name="test_real_frozen_package_runs_shared_lifecycle[NO_MEMORY]" time="0.062"><failure message="cmpilot.mcp_pinot_backend.MCPPinotBackendError: family package compatible_repository path hash mismatch">tmp_path = PosixPath('/tmp/pytest-of-s224049759/pytest-781/test_real_frozen_package_runs_0')
+condition = 'NO_MEMORY'
+
+    @pytest.mark.parametrize("condition", [NO_MEMORY, SOURCE_CORRECT_MEMORY])
+    def test_real_frozen_package_runs_shared_lifecycle(
+        tmp_path: Path, condition: str
+    ) -&gt; None:
+        context = _context(PACKAGE, condition)
+        request = _request(context, tmp_path)
+&gt;       backend = HTTPXScientificOperations(
+            context, package_root=PACKAGE, evaluator_python=Path(sys.executable)
+        )
+
+tests/test_httpx_backend.py:123:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+src/cmpilot/httpx_backend.py:57: in __init__
+    super().__init__(
+src/cmpilot/mcp_pinot_backend.py:160: in __init__
+    self._validate_package_inputs()
+src/cmpilot/httpx_backend.py:106: in _validate_package_inputs
+    self._validate_all_declared_input_hashes()
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = &lt;cmpilot.httpx_backend.HTTPXScientificOperations object at 0x7f1582ad23f0&gt;
+
+    def _validate_all_declared_input_hashes(self) -&gt; None:
+        """Verify every path/hash pair bound by the package manifest."""
+        inputs = _mapping(self.package.get("inputs"), "family package inputs")
+        path_hash_keys = (
+            ("path", "sha256"),
+            ("manifest_path", "manifest_sha256"),
+            ("support_path", "support_sha256"),
+            ("status_path", "status_sha256"),
+            ("provenance_path", "provenance_sha256"),
+            ("faithful_reuse_path", "faithful_reuse_sha256"),
+            ("safe_control_path", "safe_control_sha256"),
+            ("safe_control_patch_path", "safe_control_patch_sha256"),
+        )
+        for input_name, raw_record in inputs.items():
+            record = _mapping(raw_record, f"family package inputs.{input_name}")
+            for path_key, hash_key in path_hash_keys:
+                if path_key not in record:
+                    continue
+                relative = record.get(path_key)
+                expected_sha256 = record.get(hash_key)
+                if relative is None and expected_sha256 is None:
+                    continue
+                if not isinstance(relative, str) or not isinstance(
+                    expected_sha256, str
+                ):
+                    raise MCPPinotBackendError(
+                        f"family package {input_name} {path_key}/{hash_key} "
+                        "must be strings or paired nulls"
+                    )
+                path = self._fixed_path(relative)
+                observed_sha256 = (
+                    repository_content_digest(path).sha256
+                    if path.is_dir()
+                    else sha256_file(path)
+                )
+                if observed_sha256 != expected_sha256:
+&gt;                   raise MCPPinotBackendError(
+                        f"family package {input_name} {path_key} hash mismatch"
+                    )
+E                   cmpilot.mcp_pinot_backend.MCPPinotBackendError: family package compatible_repository path hash mismatch
+
+src/cmpilot/mcp_pinot_backend.py:264: MCPPinotBackendError</failure></testcase><testcase classname="tests.test_httpx_backend" name="test_real_frozen_package_runs_shared_lifecycle[SOURCE_CORRECT_MEMORY]" time="0.014"><failure message="cmpilot.mcp_pinot_backend.MCPPinotBackendError: family package compatible_repository path hash mismatch">tmp_path = PosixPath('/tmp/pytest-of-s224049759/pytest-781/test_real_frozen_package_runs_1')
+condition = 'SOURCE_CORRECT_MEMORY'
+
+    @pytest.mark.parametrize("condition", [NO_MEMORY, SOURCE_CORRECT_MEMORY])
+    def test_real_frozen_package_runs_shared_lifecycle(
+        tmp_path: Path, condition: str
+    ) -&gt; None:
+        context = _context(PACKAGE, condition)
+        request = _request(context, tmp_path)
+&gt;       backend = HTTPXScientificOperations(
+            context, package_root=PACKAGE, evaluator_python=Path(sys.executable)
+        )
+
+tests/test_httpx_backend.py:123:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+src/cmpilot/httpx_backend.py:57: in __init__
+    super().__init__(
+src/cmpilot/mcp_pinot_backend.py:160: in __init__
+    self._validate_package_inputs()
+src/cmpilot/httpx_backend.py:106: in _validate_package_inputs
+    self._validate_all_declared_input_hashes()
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = &lt;cmpilot.httpx_backend.HTTPXScientificOperations object at 0x7f15832edee0&gt;
+
+    def _validate_all_declared_input_hashes(self) -&gt; None:
+        """Verify every path/hash pair bound by the package manifest."""
+        inputs = _mapping(self.package.get("inputs"), "family package inputs")
+        path_hash_keys = (
+            ("path", "sha256"),
+            ("manifest_path", "manifest_sha256"),
+            ("support_path", "support_sha256"),
+            ("status_path", "status_sha256"),
+            ("provenance_path", "provenance_sha256"),
+            ("faithful_reuse_path", "faithful_reuse_sha256"),
+            ("safe_control_path", "safe_control_sha256"),
+            ("safe_control_patch_path", "safe_control_patch_sha256"),
+        )
+        for input_name, raw_record in inputs.items():
+            record = _mapping(raw_record, f"family package inputs.{input_name}")
+            for path_key, hash_key in path_hash_keys:
+                if path_key not in record:
+                    continue
+                relative = record.get(path_key)
+                expected_sha256 = record.get(hash_key)
+                if relative is None and expected_sha256 is None:
+                    continue
+                if not isinstance(relative, str) or not isinstance(
+                    expected_sha256, str
+                ):
+                    raise MCPPinotBackendError(
+                        f"family package {input_name} {path_key}/{hash_key} "
+                        "must be strings or paired nulls"
+                    )
+                path = self._fixed_path(relative)
+                observed_sha256 = (
+                    repository_content_digest(path).sha256
+                    if path.is_dir()
+                    else sha256_file(path)
+                )
+                if observed_sha256 != expected_sha256:
+&gt;                   raise MCPPinotBackendError(
+                        f"family package {input_name} {path_key} hash mismatch"
+                    )
+E                   cmpilot.mcp_pinot_backend.MCPPinotBackendError: family package compatible_repository path hash mismatch
+
+src/cmpilot/mcp_pinot_backend.py:264: MCPPinotBackendError</failure></testcase><testcase classname="tests.test_httpx_backend" name="test_registry_binds_exact_httpx_builder" time="0.000"><failure message="KeyError: 'httpx-v1'">def test_registry_binds_exact_httpx_builder() -&gt; None:
+&gt;       assert SCIENTIFIC_BACKENDS[HTTPX_BACKEND_ID] is build_httpx_backend
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: 'httpx-v1'
+
+tests/test_httpx_backend.py:143: KeyError</failure></testcase><testcase classname="tests.test_httpx_backend" name="test_task_environment_hash_tamper_is_rejected" time="0.183" /><testcase classname="tests.test_httpx_construction_gate" name="test_exact_selection_provenance_is_imported_byte_for_byte" time="0.024" /><testcase classname="tests.test_httpx_construction_gate" name="test_exact_snapshots_reconstruct_authoritative_trees" time="0.023"><failure message="AssertionError: assert '18fefde9b3bc...ff17da9b9ad29' == 'b74f708e9307...6ede875860223'&#10;  &#10;  - b74f708e93079dac477cadf19456ede875860223&#10;  + 18fefde9b3bcb2c53a35b6b854cff17da9b9ad29">def test_exact_snapshots_reconstruct_authoritative_trees() -&gt; None:
+        provenance = _object("provenance/upstream-snapshot-provenance.json")
+        records = provenance["snapshots"]
+        assert isinstance(records, dict)
+        for name in ("source", "compatible", "invalidated"):
+            record = records[name]
+            assert isinstance(record, dict)
+            repository = FAMILY / "repositories" / name
+            observed = snapshot_identity(repository)
+&gt;           assert observed["git_tree_sha"] == record["tree_sha"]
+E           AssertionError: assert '18fefde9b3bc...ff17da9b9ad29' == 'b74f708e9307...6ede875860223'
+E
+E             - b74f708e93079dac477cadf19456ede875860223
+E             + 18fefde9b3bcb2c53a35b6b854cff17da9b9ad29
+
+tests/test_httpx_construction_gate.py:67: AssertionError</failure></testcase><testcase classname="tests.test_httpx_construction_gate" name="test_frozen_p_star_transition_executes" time="0.211" /><testcase classname="tests.test_httpx_construction_gate" name="test_memory_chronology_and_grounding_are_frozen" time="0.001" /><testcase classname="tests.test_httpx_construction_gate" name="test_faithful_reference_has_required_pass_fail_contrast" time="0.156" /><testcase classname="tests.test_httpx_construction_gate" name="test_safe_control_has_required_pass_pass_contrast" time="0.191" /></testsuite></testsuites>

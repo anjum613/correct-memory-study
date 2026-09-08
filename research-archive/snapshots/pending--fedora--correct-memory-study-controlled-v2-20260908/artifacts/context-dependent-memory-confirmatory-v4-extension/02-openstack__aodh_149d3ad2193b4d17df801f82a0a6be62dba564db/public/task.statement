@@ -1,0 +1,38 @@
+# Missing Alarm API Endpoints and Trust Management
+
+## Problem Summary
+
+The Aodh alarm API is currently missing critical functionality that prevents basic alarm management operations and trust-based action authentication. The alarm controller classes lack essential CRUD endpoints and trust management methods, rendering the alarm service non-functional for core use cases.
+
+## Missing Functionality
+
+### Alarm Model Trust Management
+The `Alarm` class is missing methods for managing Keystone trust-based authentication for alarm actions:
+- Trust URL detection and validation
+- Trust ID extraction from existing alarm actions  
+- Trust creation and management for alarm actions
+- Trust cleanup when alarms are deleted or updated
+
+### Individual Alarm Operations (AlarmController)
+The `AlarmController` class lacks the following HTTP endpoint handlers:
+- **GET** `/alarms/{alarm_id}` - Retrieve a specific alarm by ID
+- **PUT** `/alarms/{alarm_id}` - Update an existing alarm with validation and trust management
+- **DELETE** `/alarms/{alarm_id}` - Delete an alarm and clean up associated trusts
+
+### Alarm Collection Operations (AlarmsController)  
+The `AlarmsController` class is missing:
+- **POST** `/alarms` - Create new alarms with proper ownership, quota validation, and trust setup
+- **GET** `/alarms` - List alarms with filtering, sorting, and pagination support
+
+## Expected Behavior
+
+The implementation should provide a complete REST API for alarm management that:
+
+1. **Supports full CRUD operations** on alarms with proper RBAC enforcement
+2. **Manages Keystone trusts** for alarm actions that use trust-based authentication schemes
+3. **Handles alarm ownership** and quota enforcement during creation
+4. **Provides proper error handling** and validation for all operations
+5. **Maintains audit trails** through change recording and notifications
+6. **Supports filtering and pagination** for alarm collection queries
+
+The API should integrate seamlessly with the existing alarm storage backend, notification system, and RBAC enforcement mechanisms while maintaining compatibility with the established URL routing and response formats.

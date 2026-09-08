@@ -1,0 +1,25 @@
+{
+  "schema": "v2-prospective-stage-b-task-review-v1",
+  "position": 5,
+  "task_intent": "Support LDAP StartTLS authorization when authorization searches use the configured system account.",
+  "intent_source": "INTRO commit message, LdapRealm change, and tightened existing StartTLS integration test",
+  "evaluator_plan": "Run a fixed external Bolt login/authorization scenario against an LDAP server requiring confidentiality, with StartTLS and system-account authorization enabled, and assert a valid reader can authenticate and authorize.",
+  "evidence_artifacts": [
+    "git:26ff65ccf13111c42942d8652e9e616e91e1fd08",
+    "diff-sha256:1515370a1eb9f5c239186007266a759623b738ab2a8c2a5713a641e5aa4cf0a3",
+    "blob-sha256:57b01dd6e80b302b324acfeee493e28cc3ba04796c4b74b4b1c5ef3f2218dcf9"
+  ],
+  "answers": {
+    "T1": {"answer": "YES", "evidence": ["INTRO subject precisely states StartTLS support for authorization using system account"]},
+    "T2": {"answer": "YES", "evidence": ["LdapAuthenticationIT requires confidentiality for shouldBeAbleToLoginAndAuthorizeReaderWithLdapOnlyUsingStartTls"]},
+    "T3": {"answer": "YES", "evidence": ["1b74de13 obtains the authorization system context without StartTLS even when StartTLS is configured"]},
+    "T4": {"answer": "YES", "evidence": ["26ff65cc adds getSystemLdapContextUsingStartTls and selects it for system-account authorization"]},
+    "T5": {"answer": "YES", "evidence": ["46de5d01 adds an authentication-triggering lookup but retains StartTLS system-account authorization"]},
+    "T6": {"answer": "YES", "evidence": ["The Bolt/LDAP scenario observes login and authorization behavior rather than code identity"]},
+    "T7": {"answer": "YES", "evidence": ["The valid-password success scenario does not require the later wrong-password rejection fix"]},
+    "T8": {"answer": "YES", "evidence": ["Task and environment are directly stated by INTRO and its modified historical integration test"]},
+    "H1": {"answer": "YES", "evidence": ["26ff65cc generalizes getLdapContextUsingStartTls and reuses it for both user authentication and system context; 46de5d01 later forces lookup to verify credentials"]}
+  },
+  "decision": "PASS_STATIC_IDENTIFIABLE_PENDING_EXECUTION",
+  "rejection_reason": null
+}

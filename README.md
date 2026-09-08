@@ -1,3 +1,9 @@
+# Research collection
+
+The July–September research from Fedora, the Deakin HPC, and the workstation is collected on `main` under [research-archive](research-archive/README.md). This includes separately preserved experiment versions and links to encrypted recovery material. See the [archive report](research-archive/REPORT.md) for scope, original dates, and recovery instructions.
+
+---
+
 # correct-memory-study
 Controlled procedural-memory transfer experiments for coding agents
 

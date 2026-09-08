@@ -1,0 +1,1 @@
+# Frozen source memory X05\n\nProcedure: Persist an allocator position and assign the next nonce for each encryption operation.\n\nApplicability assumption: Exactly one allocator issues nonces for the fixed encryption key.\n

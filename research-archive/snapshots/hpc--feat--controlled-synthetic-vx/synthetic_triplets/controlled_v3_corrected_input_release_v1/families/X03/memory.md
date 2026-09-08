@@ -1,0 +1,1 @@
+# Frozen source memory X03\n\nProcedure: Register and resolve user handles with a raw string uniqueness test and exact lookup.\n\nApplicability assumption: Raw string equality coincides with the identity-equivalence policy for all admitted handles.\n

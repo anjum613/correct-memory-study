@@ -1,0 +1,134 @@
+{
+  "categories": [
+    "allowed_repository_work",
+    "prohibited_environment_mutation",
+    "prohibited_network_access",
+    "prohibited_system_mutation",
+    "prohibited_execution_indirection",
+    "prohibited_protected_path_write",
+    "prohibited_harness_path_access",
+    "prohibited_interactive_editor"
+  ],
+  "complete_action_rejected_on_any_violation": true,
+  "default": "allow_repository_work",
+  "event": "ACTION_POLICY_VIOLATION",
+  "policy_version": "calculator-capability-policy-v4",
+  "repeated_violation_termination": "REPEATED_POLICY_VIOLATION",
+  "rules": {
+    "execution_indirection": [
+      "shell-command-substitution",
+      "dynamic-executable-name",
+      "opaque-command-execution",
+      "opaque-interpreter-program",
+      "unsupported-shell-control-operator"
+    ],
+    "inaccessible_paths": [
+      "repository-boundary-escape",
+      "external-oracle-access",
+      "harness-path-access"
+    ],
+    "interactive_editors": {
+      "absolute_paths_and_wrappers_inspected": true,
+      "ed_and_ex_included": "line-oriented interactive editors can block in the non-interactive agent shell and bypass auditable edit mechanisms",
+      "executables": [
+        "ed",
+        "emacs",
+        "emacsclient",
+        "ex",
+        "nano",
+        "nvim",
+        "pico",
+        "vi",
+        "view",
+        "vim"
+      ],
+      "reason": "INTERACTIVE_EDITOR_PROHIBITED"
+    },
+    "network_access": [
+      "direct-network-client",
+      "remote-git-operation",
+      "remote-rsync-operation"
+    ],
+    "package_management": [
+      "bundle-package-management",
+      "cargo-package-management",
+      "conda-family-package-management",
+      "gem-package-management",
+      "go-package-management",
+      "npm-package-management",
+      "pipenv-package-management",
+      "pnpm-package-management",
+      "poetry-package-management",
+      "python-pip-package-management",
+      "python-pipx-package-management",
+      "uv-pip-package-management",
+      "yarn-package-management"
+    ],
+    "protected_path_writes": [
+      "write-redirection-target",
+      "tee-output-target",
+      "cp-destination",
+      "mv-destination",
+      "mv-protected-source",
+      "rm-target",
+      "unlink-target",
+      "touch-target",
+      "truncate-target",
+      "chmod-target",
+      "chown-target",
+      "sed-in-place-target",
+      "perl-in-place-target",
+      "ln-destination",
+      "ln-protected-source",
+      "dd-output-target",
+      "patch-protected-target",
+      "rsync-destination",
+      "mkdir-target",
+      "rmdir-target"
+    ],
+    "system_mutation": [
+      "system-package-management"
+    ]
+  },
+  "shell_analysis": {
+    "limitation": "shlex is not a complete Bash parser",
+    "literal_shell_c_payloads_recursively_inspected": true,
+    "opaque_constructs_fail_closed": true,
+    "quoted_cat_heredoc_writes_checked_against_task_policy": true,
+    "tokenizer": "python-shlex"
+  },
+  "task_file_policy": {
+    "agent_visible_policy_text": "Task file policy: controlled-synthetic-final-13-task-policy-v1.\nOnly app/service.csirpy may be modified. All other repository files are read-only.\nUse ordinary shell inspection and noninteractive editing commands for the list_files/read_file/edit_service operations named in AGENTS.md.\nRun the complete frozen public suite with `run_public_tests` (also available as `pytest`).\nDo not access hidden tests, harness files, network services, or parent paths.\nUse only dependencies already installed; do not install packages.\nInteractive terminal editors are unavailable.\n",
+    "chmod_is_defense_in_depth_only": true,
+    "hidden_external_oracle_paths": [
+      "sealed-evaluator"
+    ],
+    "inaccessible_harness_paths": [
+      ".git",
+      ".cmpilot",
+      "harness",
+      "run-metadata",
+      "model-cache",
+      "project-source"
+    ],
+    "readable_protected_paths": [
+      "AGENTS.md",
+      "app/__init__.py",
+      "fixture_api/__init__.py",
+      "fixture_api/contracts.py",
+      "fixture_api/interface.md",
+      "fixture_api/public_harness.py",
+      "fixture_api/x02_inputs.py",
+      "fixture_api/x02_lowering.py",
+      "fixture_api/x02_machine.py",
+      "public_tests.py"
+    ],
+    "recommended_scientific_boundary": "container or filesystem mounts exposing only designated task paths as writable",
+    "schema": "cmpilot-task-file-policy-v1",
+    "version": "controlled-synthetic-final-13-task-policy-v1",
+    "writable_paths": [
+      "app/service.csirpy"
+    ],
+    "writable_paths_are_explicit": true
+  }
+}

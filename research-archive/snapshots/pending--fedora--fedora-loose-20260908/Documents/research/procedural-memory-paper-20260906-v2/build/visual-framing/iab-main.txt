@@ -1,0 +1,474 @@
+              Correct Memory, Changed Assumptions:
+           Procedural Transfer Across Trust Boundaries in
+                          Coding Agents
+
+
+                                                  Anonymous Author(s)
+                                                      Affiliation
+                                                       Address
+                                                        email
+
+
+
+                                                         Abstract
+ 1             A procedure can be correct where it was learned yet incomplete where it is reused.
+ 2             We study coding agents supplied with procedural memory in target tasks that
+ 3             change a security relevant source assumption. Thirteen synthetic families cross
+ 4             four memory conditions and two repetitions in six model and agent configurations,
+ 5             yielding 624 recorded runs and 595 technically valid outcomes. The primary
+ 6             endpoint is functional completion that fails a focal security witness. The effect
+ 7             of correct memory ranges from −11.5 to +13.6 percentage points across con-
+ 8             figurations, with positive, zero, and negative estimates. Lower endpoint values
+ 9             sometimes accompany lower functionality. A generic applicability reminder re-
+10             duces the endpoint in all three Codex configurations, a configuration specific
+11             direction that survives every assignment of unresolved outcomes in the recorded
+12             cohort; the MiniSWE configurations do not share that pattern. In a prespecified
+13             52-run sample, two model-assisted coding passes agree on 22 implementations
+14             with a target protection but on only seven with explicit assumption recognition in
+15             the visible trace before editing. Matched transcripts and patches show unchecked
+16             reuse, successful adaptation, and distinct mechanisms behind the same measured
+17             failure. Correct procedural memory is therefore neither uniformly beneficial nor
+18             uniformly harmful when its source assumptions change, and outcome evaluation
+19             must observe functionality and the focal property separately.
+
+
+20   1    Introduction
+21   Procedural memory lets an agent reuse a successful method without deriving it again. Yet success is
+22   conditional. A record may have been complete before reaching a parser; a cache may have belonged
+23   to one request; a diagnostic object may have contained only public fields. If the target changes these
+24   assumptions, a memory can accurately describe the source task while providing an incomplete guide
+25   to the new one.
+26   Family F08 makes the problem concrete. In the source context, a status value is a decimal integer,
+27   so interpolating it into HTML cannot introduce markup. The target task changes that value to caller
+28   controlled text. Direct reuse still renders a status message, but fails the focal injection witness; a
+29   correct adaptation escapes the text before interpolation. The memory remains accurate about its
+30   source, while its applicability changes at the target boundary.
+31   We ask: when a coding agent receives a source procedure in a target context where its assumptions
+32   no longer hold, how does that memory change functional completion and focal security failures?
+33   A second question asks whether a generic applicability reminder changes this behavior. We supply
+34   a frozen correct memory, a matched irrelevant memory, correct memory with the reminder, or no
+
+     Submitted to NeurIPS 2026 Workshop: Interpreting Agent Behavior. Do not distribute.
+              A source-valid procedure is supplied after its applicability assumption changes
+
+
+
+                                                                           Four conditions
+                                                                            N no memory         Observe both
+           Source context       Procedure valid        Target task
+                                                                         C correct memory      functionality F
+         explicit assumption under that assumption assumption changes
+                                                                        I irrelevant memory    focal witness S
+                                                                        B correct + boundary
+
+
+
+
+     Figure 1: The controlled intervention. A procedure is valid under an explicit source assumption. The
+     target changes that assumption, then varies only the supplied memory condition. Functionality and
+     the family specific focal witness are observed separately.
+
+
+35   memory (Figure 1). The target task and changed assumption remain fixed. The original hypothesis
+36   predicted that correct memory would increase functional completions that violate the target’s focal
+37   property. The estimates instead have positive, zero, and negative signs across the six configurations,
+38   which is inconsistent with a simple universal harmful transfer account in this cohort.
+39   The study contributes (1) a controlled benchmark of thirteen security relevant applicability shifts;
+40   (2) a six configuration experiment that separates functionality from focal witness failure; and (3)
+41   implementation and visible trace evidence that distinguishes unchecked reuse, target appropriate
+42   protection, and non-completion. The shifts span caller controlled paths, deferred resource lifetimes,
+43   cross user caches, origin changes, repeated control fields, concurrency invariants, and approximate
+44   authorization evidence. Together, the results show heterogeneous effects of correct memory and a
+45   configuration specific response to a generic applicability reminder.
+46   All targets contain a context shift, and memories are supplied directly. The intervention therefore
+47   estimates the effect of supplied memory in those targets; it does not identify the effect of context shift
+48   or evaluate a retrieval system. Comparisons are made within each model and agent configuration.
+
+
+49   2    Related work
+
+50   Memory and applicability. Voyager stores reusable executable skills, while ExpeL extracts natural
+51   language lessons from experience without updating model parameters [Wang et al., 2023, Zhao
+52   et al., 2023]. These systems motivate procedural reuse, but successful transfer is conditional on
+53   what the memory preserves. Kim et al. [2026] study four memory representations across six coding
+54   benchmarks and find that abstract insights transfer more reliably than concrete traces. Our experiment
+55   fixes a procedure valid at the source and changes its relevance to a target security contract; the
+56   endpoint distinguishes task non-completion from a functional security violation.
+57   Boundary-Aware Skill Memory (BASM) is the closest applicability aware method [Lin et al., 2026].
+58   It augments skills with applicability conditions, risk cues, avoidance rules, and recovery notes, and
+59   combines retrieval, conditioned execution, and local repair. It also investigates wrong tool preference
+60   using attention and intervention analyses. Our B arm is a single generic reminder attached to a
+61   supplied memory. It neither implements BASM nor tests its structured mechanism. Prior work asks
+62   whether skills transfer or how to make them aware of applicability boundaries. We hold a source
+63   valid procedure fixed, change the target assumption, and separately observe functionality and a focal
+64   security property. We do not claim novelty for the general observation that a relevant skill can become
+65   inapplicable.
+
+66   Skill induced regressions. SWE-Skills-Bench measures the marginal utility of supplied skills in
+67   repository software tasks and reports limited average gains and failures of context compatibility [Han
+68   et al., 2026]. Dong et al. [2026] use differential analysis of paired runs to examine functional failures
+69   and efficiency regressions induced by loaded skills. Their results make clear that procedural guidance
+70   can constrain implementation in unhelpful ways. Our focal distinction is between failing to implement
+
+
+                                                          2
+                    Configuration    Agent / tools          Sampling selection   Recorded / valid
+                    GPT-5.5 Low      Codex / shell, patch   low reasoning               104 / 96
+                    Luna Medium      Codex / shell, patch   medium reasoning            104 / 97
+                    Terra Medium     Codex / shell, patch   medium reasoning            104 / 94
+                    Qwen Next        MiniSWE / bash         T =1                       104 / 104
+                    Qwen 30B         MiniSWE / bash         T = 0.7                    104 / 102
+                    Devstral         MiniSWE / bash         T = 0.15                   104 / 102
+      Table 1: Executed design: thirteen families, four conditions, and two repetitions per configuration.
+      Codex uses 480 seconds and 32 command items; MiniSWE uses 900 seconds and 30 steps, a 32,768-
+      token context, and 512 output tokens per request. Appendix B records exact requested IDs, revisions,
+      settings, and tool details.
+
+
+71    a feature and implementing it while violating a separately evaluated focal property. Our behavioral
+72    analysis separates visible statements, implementation changes, and measured outcomes.
+
+73    Security and the execution interface. SecureVibeBench reconstructs vulnerability introducing
+74    scenarios in 105 C/C++ tasks from 41 OSS-Fuzz projects and combines functionality and security
+75    evaluation [Chen et al., 2026]. We cite its ACL 2026 version, which supersedes the earlier arXiv
+76    report. Its repository realism addresses a different objective from our synthetic memory intervention.
+77    Experience driven self evolution can also trade safety against task utility in web and embodied
+78    settings [Zhao et al., 2026]; our measured behavior is the generated implementation rather than
+79    refusal of a harmful request. Finally, SWE-agent demonstrates that the agent computer interface
+80    affects software engineering performance [Yang et al., 2024]. This matters directly here: different
+81    tool surfaces and execution budgets are part of each evaluated configuration, and interface related
+82    non-completion changes the meaning of a focal witness pass.
+
+83    3   Task construction and experimental design
+84    Source validity and changed assumptions. Each family pairs a source setting where a procedure
+85    is valid with a target feature request that changes a relevant assumption. The final suite contains
+86    six F-series and seven X-series synthetic families, covering parsing, lifetimes, paths, rendering,
+87    identity, confidentiality, and state consistency. Existing baseline code is visible in every condition. N
+88    removes supplied memory, not the task’s implementation. Appendix A gives the family contracts and
+89    construction records.
+
+90    Reference controls. The saved preflight checks three target states in each family: the incomplete
+91    baseline must fail functionality and pass the focal witness; an unadapted functional reference must
+92    pass functionality and fail the witness; and a repaired reference must pass both. Thus avoiding the
+93    requested feature is insufficient for success. The final manifest fixes the synthetic artifacts and source
+94    procedures. Constructors and evaluated agents are separate roles; constructors do not receive sealed
+95    witnesses or evaluated agent outcomes. The controls establish these three states, while validation of
+96    alternative implementations requires examining what the observer actually measures.
+
+97    Configurations and execution. The six configurations each complete their 104-run schedule, pro-
+98    ducing 624 recorded runs: 595 technically valid and 29 invalid. Codex and MiniSWE have different
+99    native interfaces, instruction envelopes, and budgets. Requested aliases are preserved; backend
+100   identities are not inferred. Executed manifests record run order. A seventh planned configuration
+101   is excluded because quota exhaustion left its cohort unfinished; this retrospective scope decision is
+102   documented, and none of its outcomes or examples are used (Appendix C).
+
+103   Memory conditions. The conditions are no memory (N), correct source memory (C), matched
+104   irrelevant memory (I), and correct source memory with a generic applicability boundary (B). C, I,
+105   and B each contain a 4,096 byte envelope including neutral padding; N has none. Bytes, not tokens,
+106   are equalized. The B reminder asks whether the source assumption still holds and supplies no target
+107   repair. C−N is the frozen primary contrast and estimates the effect of supplying the correct source
+108   memory as a whole, including any generic effect of added context. I−N and C−I help diagnose that
+
+
+                                                            3
+109   contribution but do not perfectly isolate semantic memory content. B−C tests the generic boundary
+110   reminder.
+
+111   Outcomes and scoring. For a technically valid run, F denotes functionality pass and S focal
+112   security witness pass. The primary endpoint is
+                                                  U = F ∧ ¬S.                                              (1)
+113   All four joint outcomes are reported. In particular, ¬F ∧ S is a functional failure, while F ∧ S means
+114   functionality and focal witness pass. Technical invalids retain missing F/S/U values in the primary
+115   table. Termination labels do not override evaluations.
+116   A versioned validity review changed four Devstral focal witness labels because the X05 and X28
+117   observers had inspected optional internal ledgers rather than required return values and effects. The
+118   correction is narrowly scoped, preserves the original scores, changes no functionality or validity
+119   label, and leaves the qualitative C−N conclusion unchanged. Appendix C gives the full scoring
+120   history. X06 retains its executed confidentiality scope: rejecting the mixed record can pass without
+121   demonstrating retention of useful public fields.
+
+122   Primary analysis. A family is eligible for a contrast when both repetitions in both compared
+123   conditions are valid with observed F and S. We average repetitions within family and condition, then
+124   average paired differences equally over eligible families. Tables report the eligible count. Exploratory
+125   95% percentile intervals use 20,000 paired family bootstrap resamples. Exact sign flip and family
+126   omission diagnostics appear in Appendix E. These are comparisons within configurations, not a
+127   ranking of model security.
+
+128   Measurement availability and bounds. A separate review distinguishes interruption, timeout,
+129   candidate execution exception, and evaluator incompatibility. Completed outcome components are
+130   retained, while unresolved components remain unknown. Appendix D reports treatment specific
+131   counts and bounds over every assignment of the unresolved outcomes consistent with the completed
+132   observations.
+
+133   4   Results
+134   Joint outcomes separate adaptation from non-completion. Figure 2 retains all recorded runs and
+135   separates the four possible functionality and focal witness outcomes. For Qwen 30B, C−N lowers
+136   U by 11.5 percentage points, but functional runs fall from 24 to 20 out of 26 and functionality and
+137   focal witness passes fall from eight to seven. The lower endpoint therefore does not represent an
+138   improvement that preserves functionality. Qwen Next and Luna also have substantial ¬F ∧ S mass;
+139   saved traces link part of Luna’s non-completion to a mismatch between named and available tools.
+140   These are functional failures, not evidence of protection.
+
+141   Correct memory has heterogeneous effects. Figure 3 shows the corrected within-configuration
+142   comparisons. C−N changes U by +9.1, +13.6, and +4.2 percentage points in the GPT-5.5, Luna,
+143   and Terra Codex configurations. The MiniSWE estimates are 0.0, −11.5, and −4.2 points for Qwen
+144   Next, Qwen 30B, and Devstral. Every C−N bootstrap interval includes zero. The positive, zero, and
+145   negative estimates do not support a universal directional account in the evaluated cohort.
+
+146   The applicability reminder shows a configuration specific pattern. B−C lowers U by 30.0,
+147   13.6, and 22.7 points in the three Codex configurations. Functionality is unchanged for GPT-5.5 and
+148   Terra and rises by 4.5 points for Luna. The MiniSWE estimates are 0.0, +4.2, and 0.0 points. Since
+149   the harnesses differ in tools, interfaces, instructions, and budgets, this is a pattern among complete
+150   configurations rather than a model level effect. Bounds that preserve completed outcome components
+151   remain entirely negative for all three Codex configurations under every admissible assignment of
+152   unresolved recorded outcomes. Appendix D gives the bounds and treatment specific missingness;
+153   Appendix E gives sign flip and family omission diagnostics.
+
+154   Family variation sharpens the aggregate result. In F04, all six Codex B runs pass functionality
+155   and the focal witness, compared with six functional focal witness failures under N; all six MiniSWE
+
+
+                                                         4
+                  GPT-5.5 Low / Codex                    Luna Medium / Codex                  Terra Medium / Codex
+
+          N            16                 9                   11         10      2 2                 16              8   2
+
+          C           13             11         2         7         12           6                 14            9       2
+
+          I           15             8         3              11         8      5    2               15              9   2
+
+          B                 21                3 2          10           9       5    2                18             4   4
+
+
+                  Qwen Next / MiniSWE                    Qwen 30B / MiniSWE                    Devstral / MiniSWE
+
+          N       6         11            9               8              16                    8            15           2
+
+          C       5         11            10              7         13          3 3             10              14
+
+          I       4         13            8               8              15                     11              13
+
+          B       4        11         11                   9             14                     10              14       2
+
+              0                 13              26   0              13               26   0                13            26
+                      Recorded runs                            Recorded runs                       Recorded runs
+
+                                      F pass, S pass                    F fail, S pass          Invalid
+                                      F pass, S fail (U)                F fail, S fail
+
+
+      Figure 2: Joint outcomes by condition within each configuration. Each bar contains 26 recorded runs.
+      Blue denotes functionality and focal witness pass; red is U . Gold and purple are functional failures.
+      Gray denotes technical invalidity and contributes no primary F/S/U score. Single run segments are
+      unlabeled. The top row uses Codex; the bottom row uses MiniSWE.
+
+
+156   B runs remain functional focal witness failures. Omitting the bounded X06 confidentiality family
+157   changes GPT-5.5 C−N from +9.1 to 0.0 points, while all three Codex B−C estimates remain negative.
+158   I−N ranges from −8.3 to +7.7 points. The irrelevant condition diagnoses the presence of a memory
+159   envelope, but its content is semantically active and it is not an inert placebo.
+
+
+160   5       Exploratory behavioral analysis
+
+161   Sampling and coding. We froze a four-dimension codebook and sampled one run from every family
+162   and condition cell, giving 52 runs. Configuration assignments were shuffled and balanced to eight or
+163   nine runs each; a repetition was selected at random. Selection used design labels, without outcomes or
+164   trace availability, and no run was replaced. All 52 selected traces and implementations were available.
+165   Two isolated LLM sessions independently read every packet, with final scores and model labels
+166   withheld. Both sessions record the OpenAI model alias gpt-6-astra, xhigh reasoning, and Codex
+167   CLI 0.153.4; no backend revision is exposed. Each packet contained the task, a source procedure for
+168   comparison, the initial implementation, chronological visible statements and tool interactions, and
+169   the final implementation and patch. Tool interfaces and public feedback remained visible.
+170   The dimensions distinguish explicit assumption recognition in the visible trace before editing (A),
+171   retention of a recognizable source procedure without its target check (P), a concrete target protection
+172   (T), and stopping without a meaningful implementation (Z). Each decision includes event or imple-
+173   mentation line anchors. Labels are yes, no, uncertain, and unavailable. The passes could not inspect
+174   each other’s output; disagreements were retained without outcome based adjudication.
+
+175   Visible statements and implemented protection are distinct observations. Both passes identify
+176   explicit assumption recognition before editing in 7 runs, procedure retention without the check in
+177   20, concrete protection in 22, and no meaningful implementation in 7 (Table 2). All seven runs
+178   with agreed explicit assumption recognition also have agreed protection. Fifteen further runs have
+
+
+                                                                    5
+                                   Correct memory vs. no memory (C−N)           Boundary reminder vs. correct memory (B−C)
+                  GPT-5.5 Low                                      +9.1 n=11                                          -30.0 n=10
+
+
+       Codex     Luna Medium                                       +13.6 n=11                                         -13.6 n=11
+
+
+                 Terra Medium                                      +4.2 n=12                                          -22.7 n=11
+
+
+                   Qwen Next                                       +0.0 n=13                                          +0.0 n=13
+       MiniSWE
+
+
+
+
+                    Qwen 30B                                       -11.5 n=13                                         +4.2 n=12
+
+
+                      Devstral                                      -4.2 n=12                                         +0.0 n=12
+
+                                 −60   −40    −20      0      20       40        −60   −40     −20      0        20       40
+                                       Change in U (percentage points)                  Change in U (percentage points)
+
+
+      Figure 3: Corrected changes in U for the primary C−N contrast and the B−C reminder contrast.
+      Points are equally weighted means of within-family differences; bars are exploratory 95% paired
+      family bootstrap intervals. Labels give the point estimate and eligible family count n. Positive values
+      mean more functional completions that fail the focal witness. Exact family sets and all I−N results
+      are in Appendix E.
+
+                 Observable dimension                                      Pass A: Y   Pass B: Y     Both Y      Agreement
+                 A: Explicit assumption recognition before editing                8            7             7          49/52
+                 P: Source procedure without the target check                    20           22            20          50/52
+                 T: Target protection present                                    22           23            22          49/52
+                 Z: No meaningful implementation                                  7            7             7          52/52
+      Table 2: Two model-assisted coding passes over the same 52 sampled runs. “Both Y” requires two
+      positive labels; agreement includes uncertain and unavailable labels. Counts describe the sample, not
+      behavioral prevalence across all 624 runs. Full label distributions and all eight disagreements are
+      preserved in Appendix F.
+
+
+
+179   agreed protection without that agreed visible statement. The visible trace therefore does not provide a
+180   complete account of when protections enter the implementation. These codes do not identify whether
+181   memory influenced an edit, particularly in conditions where no source memory was delivered.
+182   The sampled Luna F08/B/r2 run (P027) illustrates the timing distinction: its patch escapes the label,
+183   but the visible explanation follows the edit. The saved outcome passes both checks. In Devstral
+184   X20/C/r1 (P015), the agent states the changed assumption before editing: it distinguishes newly
+185   repeatable tags from a control field that remains singular, then rejects duplicate controls and uses
+186   one interpretation for authorization and dispatch. Both checks pass. Terra X28/B/r1 (P043) states
+187   that a positive prefilter result is insufficient and adds an authoritative check. Functionality evaluation
+188   completes successfully, but the error path interrupts focal witness measurement. This links a plausible
+189   main path repair to missing measurement without assigning the unobserved result.
+
+190   Matched cases retain harmful transfer and counterexamples. Appendix F gives the matched
+191   transcript, patch, and outcome panels. In F01/C/r2, the agent describes storing the declared number of
+192   bytes and adds slicing without a completeness check; functionality passes and the witness fails. The
+193   other C repetition adds that check and passes both. In X11, C/r1 creates with inherited permissions
+194   and restricts access later, whereas B/r1 restricts access at creation. Both are functional; only B passes
+195   the creation observation. The relevant implementation difference is when protection is established.
+196   F08 reverses the harmful direction. C/r1 explicitly notes that the target value is no longer guaranteed
+197   numeric and escapes the label. N/r1 extends direct interpolation. C passes both checks and N fails
+198   the witness despite functional completion; both C repetitions adapt successfully. Correct memory
+199   can therefore make its own source assumption useful for detecting what changed. These are selected
+200   explanatory comparisons, not family level effect estimates.
+
+
+                                                                       6
+      Claim                   Evidence                                      Alternative explanation retained
+      Effects of correct      C−N is positive, zero, and negative across    Local harms can coexist with aggregate
+      memory are hetero-      configurations                                cancellation.
+      geneous
+      The reminder pat-       Codex contrasts and bounds agree in direc-    Interfaces and instructions may shape the
+      tern is configuration   tion; MiniSWE does not                        response.
+      specific
+      Visible statements      Fifteen sampled runs have agreed protec-      The codes do not identify memory use or a
+      and implemented         tion without agreed prior assumption recog-   causal pathway.
+      protection        are   nition
+      distinct
+      A pass needs an ob-     X05/X28 corrections and separate X06 out-     Confidentiality can hold because delivery
+      servation contract      put requirements                              was rejected.
+                          Table 3: Claim, evidence, and remaining alternative explanation.
+
+
+201   One failure can have different implementation mechanisms. All twenty-four Codex F02 runs
+202   complete functionally and fail the focal witness. Their patches reopen or reread the slot at callback
+203   invocation; the unadapted reference instead captures a record whose lease has ended. Both can
+204   lose the original value, through different mechanisms. Qwen Next F02/B/r2 stores a precomputed
+205   formatted value and passes both checks. Neither a witness failure nor structural similarity alone
+206   proves copying of the supplied memory.
+
+207   6    Measurement implications and discussion
+208   Observe required behavior rather than implementation bookkeeping. The X05 and X28
+209   corrections arose because alternative implementations could return a contract relevant result without
+210   populating an optional internal ledger. Applying the contract based rule to all 144 saved submissions
+211   in the three reviewed families changed four focal witness labels. This gives a practical rule for agent
+212   benchmarks: evaluate required outputs and externally visible effects, and use internal traces only
+213   as supporting evidence. X06 shows the complementary problem. Its executed witness establishes
+214   confidentiality for one mixed record, but does not establish delivery of useful public fields. Prospective
+215   X06 and F08 output rules are recorded in Appendix G and do not alter the historical results.
+
+216   Limitations. The controlled synthetic tasks provide explicit source assumptions and independently
+217   testable functionality and focal properties, but thirteen families with two repetitions do not establish
+218   external validity for repository scale software engineering. The families cover a constrained set
+219   of trust shifts rather than the full range of changes that can alter a procedure’s applicability. The
+220   52-run behavioral analysis is exploratory and based on two model-assisted coding passes, with eight
+221   disagreements and no human validation. The experiment isolates supplied procedural memory under
+222   controlled target conditions; retrieval quality, naturally occurring repository histories, longer term
+223   memory dynamics, and model specific mechanisms require external validation.
+
+224   7    Conclusion
+225   Correct memory produced positive, zero, and negative changes in functional focal witness failures
+226   across the six configurations. Lower endpoint values sometimes reflected lost functionality, while
+227   matched traces showed both unchecked reuse and successful target adaptation. A generic boundary
+228   reminder reduced the endpoint in all three Codex configurations, including under the missing outcome
+229   bounds, but the MiniSWE configurations did not share that pattern. Correct procedural memory
+230   therefore cannot be treated as uniformly beneficial or harmful when applicability assumptions
+231   change. Evaluating transfer requires observing both task completion and the property that the original
+232   procedure implicitly relied on.
+
+
+
+
+                                                             7
+233   References
+234   Junkai Chen, Huihui Huang, Yunbo Lyu, Junwen An, Jieke Shi, Chengran Yang, Ting Zhang, Haoye
+235     Tian, Yikun Li, Zhenhao Li, Xin Zhou, Xing Hu, and David Lo. SecureVibeBench: Benchmarking
+236     secure vibe coding of AI agents via reconstructing vulnerability-introducing scenarios. In Maria
+237     Liakata, Viviane P. Moreira, Jiajun Zhang, and David Jurgens, editors, Proceedings of the 64th
+238     Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers), pages
+239     24144–24168, San Diego, California, United States, July 2026. Association for Computational
+240     Linguistics. ISBN 979-8-89176-390-6. doi: 10.18653/v1/2026.acl-long.1107. URL https:
+241     //aclanthology.org/2026.acl-long.1107/.
+242   Gen Dong, Yanjie Gao, Liqun Li, Tianyin Xu, Yu Hua, and Fan Yang. Agent Skills Can Be
+243     Harmful: An Empirical Study of Skill-Induced Failures in LLM Agents, 2026. URL https:
+244    //arxiv.org/abs/2608.11888.
+245   Tingxu Han, Yi Zhang, Wei Song, Chunrong Fang, Zhenyu Chen, Youcheng Sun, and Lijie Hu.
+246     SWE-Skills-Bench: Do Agent Skills Actually Help in Real-World Software Engineering?, 2026.
+247     URL https://arxiv.org/abs/2603.15401.
+248   Kangsan Kim, Minki Kang, Taeil Kim, Yanlai Yang, Mengye Ren, and Sung Ju Hwang. Memory
+249     Transfer Learning: How Memories are Transferred Across Domains in Coding Agents, 2026. URL
+250     https://arxiv.org/abs/2604.14004.
+251   Zihan Lin, Zhenyu Chen, Jiawen Wei, Xiaohan Wang, Jie Cao, Jiajun Chai, Wei Lin, Guojun Yin,
+252     and Ran He. When Not to Imitate: Boundary-Aware Skill Memory for Reliable Tool-Use LLM
+253     Agents, 2026. URL https://arxiv.org/abs/2608.22339.
+254   Guanzhi Wang, Yuqi Xie, Yunfan Jiang, Ajay Mandlekar, Chaowei Xiao, Yuke Zhu, Linxi Fan, and
+255    Anima Anandkumar. Voyager: An Open-Ended Embodied Agent with Large Language Models,
+256     2023. URL https://arxiv.org/abs/2305.16291.
+257   John Yang, Carlos E. Jimenez, Alexander Wettig, Kilian Lieret, Shunyu Yao, Karthik Narasimhan,
+258     and Ofir Press. SWE-agent: Agent-Computer Interfaces Enable Automated Software Engineering,
+259     2024. URL https://arxiv.org/abs/2405.15793.
+260   Andrew Zhao, Daniel Huang, Quentin Xu, Matthieu Lin, Yong-Jin Liu, and Gao Huang. ExpeL:
+261     LLM Agents Are Experiential Learners, 2023. URL https://arxiv.org/abs/2308.10144.
+262   Weixiang Zhao, Yichen Zhang, Yingshuo Wang, Yang Deng, Yanyan Zhao, Xuda Zhi, Yongbo
+263    Huang, Hao He, Wanxiang Che, Bing Qin, and Ting Liu. On safety risks in experience-driven
+264    self-evolving agents. In Maria Liakata, Viviane P. Moreira, Jiajun Zhang, and David Jurgens,
+265    editors, Findings of the Association for Computational Linguistics: ACL 2026, pages 42145–42169,
+266    San Diego, California, United States, July 2026. Association for Computational Linguistics. ISBN
+267    979-8-89176-395-1. doi: 10.18653/v1/2026.findings-acl.2091. URL https://aclanthology.
+268    org/2026.findings-acl.2091/.
+
+
+269   Declaration of LLM Usage
+270   Within experimental artifact construction, LLM assistance was limited to proposing synthetic family
+271   components. Admission criteria, target contracts, reference roles, and focal witnesses were frozen
+272   separately under the saved construction protocol. The coding agents evaluated in the experiment
+273   are themselves LLM based. Two isolated LLM sessions, recorded as gpt-6-astra with xhigh
+274   reasoning in Codex CLI 0.153.4, produced the exploratory codes for the 52-run behavioral sample;
+275   no backend revision was exposed. LLM assistance was also used for evidence organization, analysis
+276   code preparation, and manuscript preparation. The authors remain responsible for the study design,
+277   reported claims, and final text. No new evaluated agent runs or saved candidate executions were
+278   performed during manuscript preparation.
+
+
+
+
+                                                      8
+

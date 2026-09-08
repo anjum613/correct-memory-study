@@ -1,0 +1,141 @@
+diff --git a/master/buildbot/test/unit/test_www_auth.py b/master/buildbot/test/unit/test_www_auth.py
+index 50a04dd66..8204dbbbe 100644
+--- a/master/buildbot/test/unit/test_www_auth.py
++++ b/master/buildbot/test/unit/test_www_auth.py
+@@ -221,6 +221,23 @@ class PreAuthenticatedLoginResource(www.WwwTestMixin, AuthResourceMixin,
+         self.setUpAuthResource()
+         self.rsrc = auth.PreAuthenticatedLoginResource(self.master, 'him')
+ 
++    @defer.inlineCallbacks
++    def test_render(self):
++        self.auth.maybeAutoLogin = mock.Mock()
++
++        def updateUserInfo(request):
++            session = request.getSession()
++            session.user_info['email'] = session.user_info['username'] + "@org"
++            session.updateSession(request)
++
++        self.auth.updateUserInfo = mock.Mock(side_effect=updateUserInfo)
++
++        res = yield self.render_resource(self.rsrc, b'/auth/login')
++        self.assertEqual(res, {'redirected': b'h:/a/b/#/'})
++        self.assertFalse(self.auth.maybeAutoLogin.called)
++        self.auth.updateUserInfo.assert_called_with(mock.ANY)
++        self.assertEqual(self.master.session.user_info,
++                         {'email': 'him@org', 'username': 'him'})
+ 
+ 
+ class LogoutResource(www.WwwTestMixin, AuthResourceMixin, unittest.TestCase):
+@@ -229,3 +246,17 @@ class LogoutResource(www.WwwTestMixin, AuthResourceMixin, unittest.TestCase):
+         self.setUpAuthResource()
+         self.rsrc = auth.LogoutResource(self.master)
+ 
++    @defer.inlineCallbacks
++    def test_render(self):
++        self.master.session.expire = mock.Mock()
++        res = yield self.render_resource(self.rsrc, b'/auth/logout')
++        self.assertEqual(res, {'redirected': b'h:/a/b/#/'})
++        self.master.session.expire.assert_called_with()
++
++    @defer.inlineCallbacks
++    def test_render_with_crlf(self):
++        self.master.session.expire = mock.Mock()
++        res = yield self.render_resource(self.rsrc, b'/auth/logout?redirect=%0d%0abla')
++        # everything after a %0d shall be stripped
++        self.assertEqual(res, {'redirected': b'h:/a/b/#'})
++        self.master.session.expire.assert_called_with()
+diff --git a/master/buildbot/test/unit/test_www_avatar.py b/master/buildbot/test/unit/test_www_avatar.py
+index 077e24270..bbdd1b847 100644
+--- a/master/buildbot/test/unit/test_www_avatar.py
++++ b/master/buildbot/test/unit/test_www_avatar.py
+@@ -34,6 +34,16 @@ class AvatarResource(www.WwwTestMixin, unittest.TestCase):
+         self.assertEqual(
+             res, dict(redirected=avatar.AvatarResource.defaultAvatarUrl))
+ 
++    @defer.inlineCallbacks
++    def test_gravatar(self):
++        master = self.make_master(
++            url='http://a/b/', auth=auth.NoAuth(), avatar_methods=[avatar.AvatarGravatar()])
++        rsrc = avatar.AvatarResource(master)
++        rsrc.reconfigResource(master.config)
++
++        res = yield self.render_resource(rsrc, b'/?email=foo')
++        self.assertEqual(res, dict(redirected=b'//www.gravatar.com/avatar/acbd18db4cc2f85ce'
++                                   b'def654fccc4a4d8?d=retro&s=32'))
+ 
+     @defer.inlineCallbacks
+     def test_custom(self):
+@@ -52,3 +62,19 @@ class AvatarResource(www.WwwTestMixin, unittest.TestCase):
+         res = yield self.render_resource(rsrc, b'/?email=foo')
+         self.assertEqual(res, b"foo32http://a/b/img/nobody.png")
+ 
++    @defer.inlineCallbacks
++    def test_custom_not_found(self):
++        # use gravatar if the custom avatar fail to return a response
++        class CustomAvatar(avatar.AvatarBase):
++
++            def getUserAvatar(self, email, size, defaultAvatarUrl):
++                return defer.succeed(None)
++
++        master = self.make_master(url=b'http://a/b/', auth=auth.NoAuth(),
++                                  avatar_methods=[CustomAvatar(), avatar.AvatarGravatar()])
++        rsrc = avatar.AvatarResource(master)
++        rsrc.reconfigResource(master.config)
++
++        res = yield self.render_resource(rsrc, b'/?email=foo')
++        self.assertEqual(res, dict(redirected=b'//www.gravatar.com/avatar/acbd18db4cc2f85ce'
++                         b'def654fccc4a4d8?d=retro&s=32'))
+diff --git a/master/buildbot/test/unit/test_www_oauth.py b/master/buildbot/test/unit/test_www_oauth.py
+index fe3baf1ae..551f22179 100644
+--- a/master/buildbot/test/unit/test_www_oauth.py
++++ b/master/buildbot/test/unit/test_www_oauth.py
+@@ -410,6 +410,35 @@ class OAuth2Auth(www.WwwTestMixin, ConfigErrorsMixin, unittest.TestCase):
+                           "groups": ["hello", "grp"],
+                           'full_name': 'foo bar'}, res)
+ 
++    @defer.inlineCallbacks
++    def test_loginResource(self):
++        class fakeAuth(object):
++            homeUri = "://me"
++            getLoginURL = mock.Mock(side_effect=lambda x: defer.succeed("://"))
++            verifyCode = mock.Mock(
++                side_effect=lambda code: defer.succeed({"username": "bar"}))
++            acceptToken = mock.Mock(
++                side_effect=lambda token: defer.succeed({"username": "bar"}))
++            userInfoProvider = None
++
++        rsrc = self.githubAuth.getLoginResource()
++        rsrc.auth = fakeAuth()
++        res = yield self.render_resource(rsrc, b'/')
++        rsrc.auth.getLoginURL.assert_called_once_with(None)
++        rsrc.auth.verifyCode.assert_not_called()
++        self.assertEqual(res, {'redirected': b'://'})
++        rsrc.auth.getLoginURL.reset_mock()
++        rsrc.auth.verifyCode.reset_mock()
++        res = yield self.render_resource(rsrc, b'/?code=code!')
++        rsrc.auth.getLoginURL.assert_not_called()
++        rsrc.auth.verifyCode.assert_called_once_with(b"code!")
++        self.assertEqual(self.master.session.user_info, {'username': 'bar'})
++        self.assertEqual(res, {'redirected': b'://me'})
++        res = yield self.render_resource(rsrc, b'/?token=token!')
++        rsrc.auth.getLoginURL.assert_not_called()
++        rsrc.auth.acceptToken.assert_called_once_with(b"token!")
++        self.assertEqual(self.master.session.user_info, {'username': 'bar'})
++        self.assertEqual(res, {'redirected': b'://me'})
+ 
+     def test_getConfig(self):
+         self.assertEqual(self.githubAuth.getConfigDict(), {'fa_icon': 'fa-github', 'autologin': False,
+diff --git a/master/buildbot/test/unit/test_www_resource.py b/master/buildbot/test/unit/test_www_resource.py
+index 524fb36c8..be9b191f6 100644
+--- a/master/buildbot/test/unit/test_www_resource.py
++++ b/master/buildbot/test/unit/test_www_resource.py
+@@ -45,3 +45,9 @@ class RedirectResource(www.WwwTestMixin, unittest.TestCase):
+         rsrc = resource.RedirectResource(master, b'foo')
+         self.render_resource(rsrc, b'/')
+         self.assertEqual(self.request.redirected_to, b'h:/a/b/foo')
++
++    def test_redirect_cr_lf(self):
++        master = self.make_master(url=b'h:/a/b/')
++        rsrc = resource.RedirectResource(master, b'foo\r\nbar')
++        self.render_resource(rsrc, b'/')
++        self.assertEqual(self.request.redirected_to, b'h:/a/b/foo')

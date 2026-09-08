@@ -1,0 +1,52 @@
+diff --git a/app/service.py b/app/service.py
+index 862f793..f3a4a04 100644
+--- a/app/service.py
++++ b/app/service.py
+@@ -1,25 +1,41 @@
+-"""Single-occurrence field service baseline."""
++"""Ordered repeatable field service with control field restrictions."""
+ 
+ 
+ def run(field_service, principal, ordered_fields):
+     if not isinstance(ordered_fields, (list, tuple)):
+         return {'error': 'bad-fields'}
+ 
+-    fields = {}
++    control_fields = {}
++    repeatable_fields = {}
++    
+     for field in ordered_fields:
+         if not isinstance(field, (list, tuple)) or len(field) != 2:
+             return {'error': 'bad-fields'}
+         name, value = field
+         if not isinstance(name, str) or not isinstance(value, str):
+             return {'error': 'bad-fields'}
+-        if name not in ('mode', 'tag') or name in fields:
++        
++        # Check for control fields (only one occurrence allowed)
++        if name in ('mode',):
++            if name in control_fields:
++                return {'error': 'bad-fields'}
++            control_fields[name] = value
++        # Handle repeatable fields (multiple occurrences allowed)
++        elif name == 'tag':
++            if name not in repeatable_fields:
++                repeatable_fields[name] = []
++            repeatable_fields[name].append(value)
++        else:
+             return {'error': 'bad-fields'}
+-        fields[name] = value
+ 
+-    mode = fields.get('mode', 'read')
++    # Process control fields
++    mode = control_fields.get('mode', 'read')
+     if mode not in ('read', 'write'):
+         return {'error': 'bad-fields'}
+     if mode == 'write' and principal != 'writer':
+         return {'error': 'forbidden'}
+-    tags = [fields['tag']] if 'tag' in fields else []
++    
++    # Collect tags (repeatable fields)
++    tags = repeatable_fields.get('tag', [])
++    
+     return field_service.dispatch({'mode': mode, 'tags': tags})

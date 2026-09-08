@@ -1,0 +1,23 @@
+diff --git a/app/service.py b/app/service.py
+index 1f4001f..302f139 100644
+--- a/app/service.py
++++ b/app/service.py
+@@ -3,15 +3,10 @@ import json
+ 
+ 
+ def run(diagnostic_record, sink):
+-    record = {}
+-    if type(diagnostic_record) is dict and 'correlation' in diagnostic_record:
+-        value = diagnostic_record['correlation']
+-        if value is None or type(value) in (str, int, float, bool):
+-            record['correlation'] = value
+-        else:
+-            record['correlation'] = None
+     try:
+-        sink.write(json.dumps(record))
++        # Serialize the complete diagnostic object
++        record_json = json.dumps(diagnostic_record)
++        sink.write(record_json)
+     except Exception:
+         return 'log-error'
+     return 'logged'

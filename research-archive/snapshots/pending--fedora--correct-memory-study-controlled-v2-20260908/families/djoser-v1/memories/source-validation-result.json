@@ -1,0 +1,64 @@
+{
+  "commands": [
+    {
+      "argv": [
+        "/opt/miniconda3/bin/python3.12",
+        "-c",
+        "\nimport ast, json, pathlib\nroot = pathlib.Path(\".\")\nfiles = sorted(root.rglob(\"*.py\"))\nfor path in files:\n    ast.parse(path.read_text(encoding=\"utf-8\"), filename=path.as_posix())\nconf_path = root / \"djoser/conf.py\"\nconf_tree = ast.parse(conf_path.read_text(encoding=\"utf-8\"), filename=conf_path.as_posix())\nassignment = next(node for node in conf_tree.body if isinstance(node, ast.Assign) and any(isinstance(target, ast.Name) and target.id == \"default_settings\" for target in node.targets))\nassert isinstance(assignment.value, ast.Dict)\ndefaults = {key.value: value for key, value in zip(assignment.value.keys, assignment.value.values) if isinstance(key, ast.Constant) and isinstance(key.value, str)}\nassert ast.unparse(defaults[\"LOGIN_FIELD\"]) == \"User.USERNAME_FIELD\"\nserializers_call = defaults[\"SERIALIZERS\"]\nassert isinstance(serializers_call, ast.Call) and serializers_call.args and isinstance(serializers_call.args[0], ast.Dict)\nserializer_defaults = {key.value: value.value for key, value in zip(serializers_call.args[0].keys, serializers_call.args[0].values) if isinstance(key, ast.Constant) and isinstance(key.value, str) and isinstance(value, ast.Constant)}\nassert serializer_defaults[\"token_create\"] == \"djoser.serializers.TokenCreateSerializer\"\nserializer_path = root / \"djoser/serializers.py\"\nserializer_tree = ast.parse(serializer_path.read_text(encoding=\"utf-8\"), filename=serializer_path.as_posix())\ntoken_class = next(node for node in serializer_tree.body if isinstance(node, ast.ClassDef) and node.name == \"TokenCreateSerializer\")\nexpressions = {ast.unparse(node) for node in ast.walk(token_class)}\nassert \"self.fields[settings.LOGIN_FIELD]\" in expressions\nauthenticate_calls = [node for node in ast.walk(token_class) if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == \"authenticate\"]\nassert any(any(keyword.arg == \"username\" and ast.unparse(keyword.value) == \"attrs.get(settings.LOGIN_FIELD)\" for keyword in call.keywords) for call in authenticate_calls)\nsettings_text = (root / \"docs/source/settings.rst\").read_text(encoding=\"utf-8\")\nassert \"LOGIN_FIELD\\n-----------\" in settings_text\nassert \"User.USERNAME_FIELD\" in settings_text\nprint(json.dumps({\"configured_token_create_serializer\": serializer_defaults[\"token_create\"], \"login_field_default\": ast.unparse(defaults[\"LOGIN_FIELD\"]), \"login_field_documented\": True, \"python_files_parsed\": len(files), \"token_create_login_field_input\": True, \"token_create_login_field_authentication\": True}, sort_keys=True))\n"
+      ],
+      "cwd": "families/djoser-v1/repositories/source",
+      "exit_code": 0,
+      "kind": "SOURCE_ONLY_STATIC_LOGIN_FIELD_AND_TOKEN_CREATE_VALIDATION",
+      "stderr": "",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout": "{\"configured_token_create_serializer\": \"djoser.serializers.TokenCreateSerializer\", \"login_field_default\": \"User.USERNAME_FIELD\", \"login_field_documented\": true, \"python_files_parsed\": 51, \"token_create_login_field_authentication\": true, \"token_create_login_field_input\": true}\n",
+      "stdout_sha256": "2ab6f293092d2fe2a6073b1a5f4354ac2a0934d8774436ea83188b6b16d550cd"
+    }
+  ],
+  "environment": {
+    "LANG": "C.UTF-8",
+    "LC_ALL": "C.UTF-8",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTHONHASHSEED": "0",
+    "PYTHONNOUSERSITE": "1",
+    "python": "/opt/miniconda3/bin/python3.12",
+    "python_version": "3.12.8"
+  },
+  "schema": "cmpilot-source-visible-validation-v1",
+  "source_repository_sha256": "e4793d060d372b6da51d097079975f8c75fe1841ae1c3e525a5ca128e86698ec",
+  "source_revision": "9e2248e65cbe2155b2ad5b334ead73db2322125b",
+  "summary": {
+    "failed": 0,
+    "passed": 1,
+    "skipped": 1,
+    "status": "PASS"
+  },
+  "unavailable_commands": [
+    {
+      "argv": [
+        "/home/s224049759/projects/correct-memory-study-worktrees/track-b-six-family-correction-v01/.venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "-p",
+        "no:cacheprovider",
+        "testproject/testapp/tests/test_token_create.py",
+        "testproject/testapp/tests/test_settings.py",
+        "testproject/testapp/tests/test_set_username.py"
+      ],
+      "cwd": "families/djoser-v1/repositories/source",
+      "environment_attempts_path": "families/djoser-v1/memories/source-validation-environment-attempts.json",
+      "environment_attempts_sha256": "07240888a0b3639ca26e1096d91d460ad707243255b7ff0665551dc76bb30329",
+      "exit_code": 2,
+      "missing_source_dependencies": [
+        "django"
+      ],
+      "preserved_output_path": "families/djoser-v1/memories/source-test-unavailable-output.txt",
+      "preserved_output_sha256": "a6eea77ab45fd7f27d4ff27d93844d596b817b47d9123df12d2c8bde679fcb6b",
+      "reason": "The relevant source-visible tests could not be collected because the available prepared interpreter lacks Django, S declares Python only through 3.7, and no unmodified S-compatible Python 3.7 environment was available. No source compatibility overlay was introduced.",
+      "status": "TECHNICALLY_UNAVAILABLE_NOT_SCIENTIFIC_FAILURE",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "3c5a0b83a2836c3e4d147c9dd48564320b1c499e49d9d729c442323d9ca15732"
+    }
+  ]
+}
