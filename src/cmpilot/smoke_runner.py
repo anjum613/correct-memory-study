@@ -11,10 +11,11 @@ import re
 import signal
 import subprocess
 import sys
+import time
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 
 from .artifact_logger import create_run_directory, write_json, write_text
 from .mini_swe_adapter import MiniSWEInfo, command, mini_swe_info, write_adapter
@@ -25,6 +26,7 @@ from .vllm_client import ModelProbe, probe_models, validate_model
 
 DEFAULT_TEMPLATE = Path(__file__).parents[2] / "tasks" / "smoke_test" / "repository"
 DEFAULT_TASK = Path(__file__).parents[2] / "tasks" / "smoke_test" / "task.md"
+DEFAULT_AGENT_CONFIG = Path(__file__).parents[2] / "configs" / "agent" / "mini_swe_agent_smoke.yaml"
 EXIT_SUCCESS = 0
 EXIT_INFRASTRUCTURE_FAILURE = 2
 EXIT_FUNCTIONAL_FAILURE = 3
@@ -113,6 +115,110 @@ def _snapshot_digest(snapshot: dict[Path, bytes]) -> str:
     return digest.hexdigest()
 
 
+def _source_snapshot(root: Path) -> dict[Path, bytes]:
+    """Snapshot repository content while excluding Git and test caches."""
+    excluded = {".git", ".pytest_cache", "__pycache__"}
+    return {
+        path.relative_to(root): path.read_bytes()
+        for path in root.rglob("*")
+        if path.is_file()
+        and not any(part in excluded for part in path.relative_to(root).parts)
+        and path.suffix != ".pyc"
+    }
+
+
+def _snapshot_artifact(snapshot: dict[Path, bytes]) -> dict[str, object]:
+    return {
+        "content_sha256": _snapshot_digest(snapshot),
+        "file_count": len(snapshot),
+        "files": {
+            str(path): {"sha256": _sha256(contents), "size_bytes": len(contents)}
+            for path, contents in sorted(snapshot.items())
+        },
+    }
+
+
+def _trajectory_metrics(path: Path, repository_files: set[str]) -> dict[str, object]:
+    """Extract request, token, command, inspection, and termination evidence."""
+    empty: dict[str, object] = {
+        "agent_steps": 0,
+        "model_request_count": 0,
+        "command_count": 0,
+        "usage_prompt": None,
+        "usage_completion": None,
+        "usage_total": None,
+        "termination_reason": "trajectory missing",
+        "repository_inspected": False,
+        "files_inspected": [],
+    }
+    if not path.is_file():
+        return empty
+    try:
+        trajectory = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {**empty, "termination_reason": "trajectory unreadable"}
+
+    messages = trajectory.get("messages", [])
+    if not isinstance(messages, list):
+        messages = []
+    commands: list[str] = []
+    prompt_tokens = 0
+    completion_tokens = 0
+    total_tokens = 0
+    usage_seen = False
+    for message in messages:
+        if not isinstance(message, dict):
+            continue
+        extra = message.get("extra", {})
+        if not isinstance(extra, dict):
+            continue
+        actions = extra.get("actions", [])
+        if isinstance(actions, list):
+            commands.extend(
+                str(action.get("command", ""))
+                for action in actions
+                if isinstance(action, dict) and action.get("command")
+            )
+        response = extra.get("response", {})
+        if not isinstance(response, dict):
+            continue
+        usage = response.get("usage", {})
+        if not isinstance(usage, dict):
+            continue
+        values = {
+            "prompt": usage.get("prompt_tokens"),
+            "completion": usage.get("completion_tokens"),
+            "total": usage.get("total_tokens"),
+        }
+        if any(isinstance(value, int) for value in values.values()):
+            usage_seen = True
+            prompt_tokens += values["prompt"] if isinstance(values["prompt"], int) else 0
+            completion_tokens += values["completion"] if isinstance(values["completion"], int) else 0
+            total_tokens += values["total"] if isinstance(values["total"], int) else 0
+
+    info = trajectory.get("info", {}) if isinstance(trajectory, dict) else {}
+    model_stats = info.get("model_stats", {}) if isinstance(info, dict) else {}
+    model_requests = model_stats.get("api_calls", len(commands)) if isinstance(model_stats, dict) else len(commands)
+    inspected_files = sorted(
+        relative_path
+        for relative_path in repository_files
+        if any(relative_path in command for command in commands)
+    )
+    inspection_pattern = re.compile(r"(^|[;&|]\s*)(ls|find|cat|sed|head|tail|grep|rg|python\s+-m\s+pytest|pytest)\b")
+    repository_inspected = bool(inspected_files) or any(inspection_pattern.search(command) for command in commands)
+    return {
+        "agent_steps": model_requests,
+        "model_request_count": model_requests,
+        "command_count": len(commands),
+        "usage_prompt": prompt_tokens if usage_seen else None,
+        "usage_completion": completion_tokens if usage_seen else None,
+        "usage_total": total_tokens if usage_seen else None,
+        "termination_reason": info.get("exit_status", "") if isinstance(info, dict) else "",
+        "repository_inspected": repository_inspected,
+        "files_inspected": inspected_files,
+    }
+
+
 def _runtime_dependency_versions(mini_python: str) -> dict[str, object]:
     """Capture the specific libraries used by the verified adapter, not secrets or full environments."""
     script = """import importlib.metadata as metadata
@@ -179,9 +285,16 @@ def _safe_agent_environment(
         "TMPDIR": str(agent_tmp),
         "PYTHONNOUSERSITE": "1",
         "PYTHONDONTWRITEBYTECODE": "1",
+        "OPENAI_API_KEY": "local-smoke-placeholder",
+        "NO_PROXY": "127.0.0.1,localhost",
+        "no_proxy": "127.0.0.1,localhost",
         "CMPILOT_REPOSITORY": str(working_copy),
         "CMPILOT_TASK_FILE": str(task_instruction),
         "CMPILOT_TRAJECTORY": str(trajectory),
+        "CMPILOT_PATCH_HISTORY": str(artifacts / "patch-history.jsonl"),
+        "CMPILOT_AGENT_CONFIG_SOURCE": str(DEFAULT_AGENT_CONFIG),
+        "CMPILOT_AGENT_CONFIG_ARTIFACT": str(artifacts / "agent-config.yaml"),
+        "CMPILOT_AGENT_PATH": os.environ.get("PATH", os.defpath),
         "CMPILOT_MODEL": config.model,
         "CMPILOT_BASE_URL": config.base_url,
     }
@@ -323,9 +436,13 @@ def run_smoke(
         "agent_configuration": {
             "adapter": "mini-SWE-agent 2.4.6 Python API",
             "agent_class": "DefaultAgent",
-            "environment_class": "LocalEnvironment",
-            "tool": "native Bash tool calling",
+            "environment_class": "audited LocalEnvironment",
+            "model_class": "LitellmTextbasedModel",
+            "tool": "single fenced Bash action",
             "temperature": 0,
+            "step_limit": 15,
+            "wall_time_limit_seconds": 450,
+            "shell_command_timeout_seconds": 60,
             "launches": 0,
         },
         "agent_command": None,
@@ -338,6 +455,7 @@ def run_smoke(
     write_json(artifacts / "resolved-config.json", _config_artifact(config))
     if task_contents:
         write_text(artifacts / "task-instruction.md", task_contents.decode("utf-8"))
+        write_text(artifacts / "task.txt", task_contents.decode("utf-8"))
     write_json(
         artifacts / "model-info.json",
         {
@@ -352,6 +470,7 @@ def run_smoke(
         {"python": sys.version, "platform": platform.platform(), "cmpilot_python": sys.executable},
     )
     write_text(artifacts / "mini-swe-version.txt", (preflight_result.mini_swe.version or "unavailable") + "\n")
+    write_text(artifacts / "agent-version.txt", (preflight_result.mini_swe.version or "unavailable") + "\n")
     write_json(artifacts / "dependency-versions.json", _runtime_dependency_versions(config.mini_python))
 
     if not preflight_result.ok:
@@ -380,9 +499,14 @@ def run_smoke(
     run["temporary_repository_path"] = str(working_copy)
     run["initial_commit"] = initial_commit
     write_text(artifacts / "initial-commit.txt", initial_commit + "\n")
+    initial_snapshot = _source_snapshot(working_copy)
+    write_json(artifacts / "initial-file-hashes.json", _snapshot_artifact(initial_snapshot))
+    write_text(artifacts / "initial-tree.txt", "\n".join(str(path) for path in sorted(initial_snapshot)) + "\n")
     before = run_tests(working_copy)
     before_output = _combined_output(before)
     write_text(artifacts / "before-tests.txt", before_output)
+    write_text(artifacts / "initial-tests.stdout.txt", before.stdout or "")
+    write_text(artifacts / "initial-tests.stderr.txt", before.stderr or "")
     write_text(artifacts / "before-tests-exit-code.txt", str(before.returncode) + "\n")
     run["before_test_exit_code"] = before.returncode
     calculator_path = working_copy / "calculator.py"
@@ -410,6 +534,7 @@ def run_smoke(
     run["agent_configuration"] = {**run["agent_configuration"], "launches": 1}
     write_text(artifacts / "mini-swe-command.txt", " ".join(command_line) + "\n")
     runner = agent_executor or execute_agent
+    agent_started = time.perf_counter()
     try:
         execution = runner(
             command_line,
@@ -419,19 +544,31 @@ def run_smoke(
         )
     except Exception as error:  # Preserve an adapter/executor failure as a run artifact.
         execution = AgentExecution(None, "", "", False, f"mini-SWE-agent execution failed: {error}")
+    run["agent_wall_time_seconds"] = time.perf_counter() - agent_started
     run["agent_exit_code"] = execution.exit_code
     write_text(artifacts / "agent-stdout.txt", execution.stdout)
     write_text(artifacts / "agent-stderr.txt", execution.stderr)
+    write_text(artifacts / "agent.stdout.log", execution.stdout)
+    write_text(artifacts / "agent.stderr.log", execution.stderr)
 
     patch = final_patch(working_copy, initial_commit)
     write_text(artifacts / "final.patch", patch)
+    write_text(artifacts / "patch.diff", patch)
     status = git(working_copy, "status", "--short")
     write_text(artifacts / "git-status.txt", status.stdout + status.stderr)
     after = run_tests(working_copy)
     write_text(artifacts / "after-tests.txt", _combined_output(after))
+    write_text(artifacts / "final-tests.stdout.txt", after.stdout or "")
+    write_text(artifacts / "final-tests.stderr.txt", after.stderr or "")
     write_text(artifacts / "after-tests-exit-code.txt", str(after.returncode) + "\n")
     run["after_test_exit_code"] = after.returncode
     run["native_trajectory_path"] = str(trajectory) if trajectory.is_file() else None
+    final_snapshot = _source_snapshot(working_copy)
+    write_json(artifacts / "final-file-hashes.json", _snapshot_artifact(final_snapshot))
+    trajectory_metrics = _trajectory_metrics(trajectory, {str(path) for path in initial_snapshot})
+    run.update(trajectory_metrics)
+    run["patch_sha256"] = _sha256(patch.encode("utf-8"))
+    run["trajectory_sha256"] = _sha256(trajectory.read_bytes()) if trajectory.is_file() else None
 
     final_source = calculator_path.read_text(encoding="utf-8") if calculator_path.is_file() else ""
     checks = {
@@ -442,6 +579,7 @@ def run_smoke(
         "all_three_tests_passed": _all_calculator_tests_passed(after),
         "final_patch_present": bool(patch.strip()),
         "native_trajectory_present": trajectory.is_file() and trajectory.stat().st_size > 0,
+        "agent_inspected_repository": bool(trajectory_metrics["repository_inspected"]),
         "source_template_unchanged": template_snapshot(config.template) == template_before,
     }
     infrastructure_error = execution.timed_out or execution.launch_error is not None or execution.exit_code != 0 or not checks["native_trajectory_present"]
@@ -456,6 +594,8 @@ def run_smoke(
         trajectory_present=checks["native_trajectory_present"],
         template_unchanged=checks["source_template_unchanged"],
     )
+    if classification == "secure_functional_success" and not checks["agent_inspected_repository"]:
+        classification = "functional_failure"
     if execution.timed_out:
         reason = "mini-SWE-agent timed out"
     elif execution.launch_error:

@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 import pytest
 
-from cmpilot.mini_swe_adapter import EXPECTED_VERSION, METADATA_VERSION_QUERY, mini_swe_info
+from cmpilot.mini_swe_adapter import ADAPTER_SOURCE, EXPECTED_VERSION, METADATA_VERSION_QUERY, mini_swe_info
 
 
 def completed_process(returncode: int = 0, stdout: str = "", stderr: str = "") -> subprocess.CompletedProcess[str]:
@@ -69,3 +69,12 @@ def test_mini_swe_info_rejects_empty_or_malformed_version_output(output: str) ->
 
     assert info.available is False
     assert "invalid semantic version" in info.diagnostic
+
+
+def test_adapter_matches_the_shipped_text_action_config_and_smoke_limits() -> None:
+    assert "LitellmTextbasedModel" in ADAPTER_SOURCE
+    assert "AuditedLocalEnvironment" in ADAPTER_SOURCE
+    assert 'CMPILOT_PATCH_HISTORY' in ADAPTER_SOURCE
+    assert 'CMPILOT_AGENT_CONFIG_SOURCE' in ADAPTER_SOURCE
+    assert '"api_key"' not in ADAPTER_SOURCE
+    assert "local-smoke-placeholder" not in ADAPTER_SOURCE

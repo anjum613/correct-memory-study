@@ -16,6 +16,8 @@ from cmpilot.smoke_runner import (
     execute_agent,
     resolve_config,
     run_smoke,
+    _source_snapshot,
+    _trajectory_metrics,
 )
 from cmpilot.vllm_client import ModelProbe
 
@@ -45,7 +47,12 @@ def passing_preflight() -> PreflightResult:
 def fake_successful_agent(_command, _cwd, environment, _timeout) -> AgentExecution:
     repository = Path(environment["CMPILOT_REPOSITORY"])
     (repository / "calculator.py").write_text("def add(a, b):\n    return a + b\n", encoding="utf-8")
-    Path(environment["CMPILOT_TRAJECTORY"]).write_text('{"messages": []}\n', encoding="utf-8")
+    Path(environment["CMPILOT_TRAJECTORY"]).write_text(
+        '{"info":{"model_stats":{"api_calls":1},"exit_status":"Submitted"},'
+        '"messages":[{"role":"assistant","extra":{"actions":[{"command":"cat calculator.py"}],'
+        '"response":{"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}}}]}\n',
+        encoding="utf-8",
+    )
     return AgentExecution(exit_code=0, stdout="fake agent completed\n", stderr="", timed_out=False)
 
 
@@ -203,3 +210,35 @@ def test_resolve_config_uses_environment_values_when_cli_is_absent(tmp_path: Pat
     assert config.model == "environment-model"
     assert config.mini_python == "/environment/python"
     assert config.runs_root == tmp_path / "runs"
+
+
+def test_source_snapshot_excludes_git_and_test_caches(tmp_path: Path) -> None:
+    (tmp_path / "calculator.py").write_text("def add(a, b): return a + b\n", encoding="utf-8")
+    (tmp_path / ".git").mkdir()
+    (tmp_path / ".git" / "index").write_bytes(b"git")
+    (tmp_path / "__pycache__").mkdir()
+    (tmp_path / "__pycache__" / "calculator.pyc").write_bytes(b"cache")
+
+    snapshot = _source_snapshot(tmp_path)
+
+    assert set(snapshot) == {Path("calculator.py")}
+
+
+def test_trajectory_metrics_records_usage_and_repository_inspection(tmp_path: Path) -> None:
+    trajectory = tmp_path / "trajectory.json"
+    trajectory.write_text(
+        '{"info":{"model_stats":{"api_calls":2},"exit_status":"Submitted"},'
+        '"messages":[{"role":"assistant","extra":{"actions":[{"command":"sed -n 1,80p calculator.py"}],'
+        '"response":{"usage":{"prompt_tokens":40,"completion_tokens":12,"total_tokens":52}}}}]}',
+        encoding="utf-8",
+    )
+
+    metrics = _trajectory_metrics(trajectory, {"calculator.py", "test_calculator.py"})
+
+    assert metrics["agent_steps"] == 2
+    assert metrics["model_request_count"] == 2
+    assert metrics["command_count"] == 1
+    assert metrics["usage_total"] == 52
+    assert metrics["termination_reason"] == "Submitted"
+    assert metrics["repository_inspected"] is True
+    assert metrics["files_inspected"] == ["calculator.py"]
