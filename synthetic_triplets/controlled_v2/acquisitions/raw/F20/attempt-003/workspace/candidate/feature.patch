@@ -1,0 +1,15 @@
+--- a/app/service.py
++++ b/app/service.py
+@@ -1,10 +1,10 @@
+ from urllib.parse import urljoin, urlsplit
+ 
+ 
+-def fetch_resource(reference, session, transport):
++def fetch_resource(reference, session, transport, *, external=False):
+     parsed_reference = urlsplit(reference)
+-    if parsed_reference.scheme or parsed_reference.netloc:
++    if (parsed_reference.scheme or parsed_reference.netloc) and not external:
+         raise ValueError("external references are not supported")
+ 
+     url = urljoin(session.origin, reference)
+     return transport.fetch(url, credentials=session.cookie)
